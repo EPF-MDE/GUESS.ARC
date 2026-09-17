@@ -29,6 +29,11 @@ import requests
 API = "https://onepiece.fandom.com/api.php"
 UA = "OnePieceTagPrediction/0.1 (projet academique; contact: morotti.maxime@gmail.com)"
 BATCH = 50  # limite MediaWiki pour un utilisateur anonyme
+# Un chapitre "incomplet" est parfois un faux positif (réponse API tronquée,
+# gros espace entre le titre de section et son texte, etc.) : on retélécharge
+# la page seule avant de l'archiver comme réellement incomplète.
+MAX_RETRIES = 2
+RETRY_DELAY = 1.5
 
 BRONZE = Path("data/bronze")
 SILVER = Path("data/silver")
@@ -68,9 +73,11 @@ def fetch_batch(session: requests.Session, titles: list[str]) -> list[dict]:
 # Parsing du wikitexte
 # --------------------------------------------------------------------------
 
-# S'arrête à la prochaine section de n'importe quel niveau : ===Chapter Notes===
-# est suivi de ===Characters===, qu'il ne faut pas avaler.
-SECTION_RE = r"==+\s*{}\s*==+(.*?)(?=\n==|\Z)"
+# S'arrête à la prochaine section de même niveau (==...==) seulement : un
+# sous-titre interne (===Grand Line-New World===, ===Day 1===, etc., ex.
+# chapitre 590) ne doit pas couper le texte, il doit être avalé comme du
+# contenu de la section jusqu'à la vraie section suivante (ex. Quick Reference).
+SECTION_RE = r"==+\s*{}\s*==+(.*?)(?=\n==[^=]|\Z)"
 CHAR_LINE_RE = re.compile(r"^\*\s*\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]\s*(.*)$", re.M)
 GROUP_RE = re.compile(r"^;\s*\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]", re.M)
 ARC_RE = re.compile(r"\{\{\s*([A-Za-z0-9 '’\-]+ Arc)\s*\}\}")
@@ -127,6 +134,9 @@ def parse_characters(char_section: str) -> list[dict]:
 def strip_markup(text: str) -> str:
     """Wikitexte -> texte lisible, en gardant les noms des liens."""
     text = LINK_RE.sub(r"\1", text)
+    # Sous-titres internes (===Grand Line-New World===) -> texte brut, gardé
+    # comme ligne de titre plutôt que jeté ou laissé en wikitexte.
+    text = re.sub(r"^=+\s*(.*?)\s*=+$", r"\1", text, flags=re.M)
     text = re.sub(r"\{\{[^}]*\}\}", "", text)
     text = re.sub(r"'''?", "", text)
     text = re.sub(r"<ref[^>]*>.*?</ref>", "", text, flags=re.S)
@@ -279,13 +289,32 @@ def run(max_chapter: int, incremental: bool, delay: float) -> None:
                 continue
 
             wikitext = rev["slots"]["main"]["content"]
+            ts = rev["timestamp"]
+            ch = parse_chapter(num, wikitext, revid, ts)
+
+            retry = 0
+            while not ch.complete and retry < MAX_RETRIES:
+                retry += 1
+                print(
+                    f"\n  ! Chapter {num} incomplet "
+                    f"({len(ch.long_summary)} car.), tentative {retry}/{MAX_RETRIES}"
+                )
+                time.sleep(RETRY_DELAY)
+                retry_pages = fetch_batch(session, [f"Chapter {num}"])
+                if not retry_pages or retry_pages[0].get("missing"):
+                    continue
+                retry_rev = retry_pages[0]["revisions"][0]
+                wikitext = retry_rev["slots"]["main"]["content"]
+                revid = retry_rev["revid"]
+                ts = retry_rev["timestamp"]
+                ch = parse_chapter(num, wikitext, revid, ts)
+
             archive[num] = {
                 "number": num,
                 "revid": revid,
-                "timestamp": rev["timestamp"],
+                "timestamp": ts,
                 "wikitext": wikitext,
             }
-            ch = parse_chapter(num, wikitext, revid, rev["timestamp"])
             write_markdown(ch)
             state[str(num)] = {"revid": revid, "complete": ch.complete}
             changed += 1
