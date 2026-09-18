@@ -159,20 +159,32 @@ def _is_valid_proper_noun(term: str) -> bool:
     return len(term) >= 3 and bool(words) and words[0] not in STOPWORDS_LEADING
 
 
-def _nearest_proper_noun(sentence: str, start: int, end: int) -> str | None:
-    """Cherche la séquence capitalisée la plus proche d'un déclencheur (avant, sinon après)."""
+def _nearest_proper_noun(
+    sentence: str, start: int, end: int, persons: PersonLookup | None = None
+) -> str | None:
+    """Cherche la séquence capitalisée la plus proche d'un déclencheur (avant, sinon après).
+
+    Ignore les séquences qui correspondent à un personnage connu (`persons`) :
+    le possesseur d'un objet ne doit pas être pris pour son nom, ex. "Zoro's
+    sword" ne doit pas donner l'objet "Zoro" (cf. faisabilite-etat-de-lart.md,
+    54% des labels "objet" étaient en réalité des noms de personnages).
+    """
+
+    def _valid(term: str) -> bool:
+        return _is_valid_proper_noun(term) and not (persons and persons.matches(term))
+
     before_matches = [
-        m for m in PROPER_NOUN_RE.finditer(sentence[:start]) if _is_valid_proper_noun(m.group(0))
+        m for m in PROPER_NOUN_RE.finditer(sentence[:start]) if _valid(m.group(0))
     ]
     if before_matches:
         return before_matches[-1].group(0).strip()
-    after_match = PROPER_NOUN_RE.search(sentence[end:])
-    if after_match and _is_valid_proper_noun(after_match.group(0)):
-        return after_match.group(0).strip()
+    for m in PROPER_NOUN_RE.finditer(sentence[end:]):
+        if _valid(m.group(0)):
+            return m.group(0).strip()
     return None
 
 
-def _find_object_candidates(sentence: str) -> list[Candidate]:
+def _find_object_candidates(sentence: str, persons: PersonLookup | None = None) -> list[Candidate]:
     """Détecte les objets par mots déclencheurs, indépendamment de spaCy."""
     low = sentence.lower()
     found = []
@@ -180,7 +192,7 @@ def _find_object_candidates(sentence: str) -> list[Candidate]:
         idx = low.find(trigger)
         if idx == -1:
             continue
-        raw_term = _nearest_proper_noun(sentence, idx, idx + len(trigger)) or trigger
+        raw_term = _nearest_proper_noun(sentence, idx, idx + len(trigger), persons=persons) or trigger
         found.append(Candidate("objet", raw_term, sentence))
     return found
 
@@ -271,7 +283,7 @@ def _extract_spacy(text: str, nlp, persons: PersonLookup | None = None) -> list[
                     person_names.append(ent.text)
                 else:
                     candidates.append(Candidate("lieu", ent.text, sentence))
-        candidates.extend(_find_object_candidates(sentence))
+        candidates.extend(_find_object_candidates(sentence, persons=persons))
         candidates.extend(_find_event_candidates(sentence, nlp_doc=sent))
         candidates.extend(_find_rel_candidates(sentence, person_names))
     return candidates
@@ -291,7 +303,7 @@ def _extract_regex(text: str, persons: PersonLookup | None = None) -> list[Candi
             candidates.append(Candidate(category, term, sentence))
             if category == "perso":
                 person_names.append(term)
-        candidates.extend(_find_object_candidates(sentence))
+        candidates.extend(_find_object_candidates(sentence, persons=persons))
         candidates.extend(_find_event_candidates(sentence, nlp_doc=None))
         candidates.extend(_find_rel_candidates(sentence, person_names))
     return candidates
