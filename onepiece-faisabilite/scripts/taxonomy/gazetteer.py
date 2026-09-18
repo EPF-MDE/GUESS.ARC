@@ -38,6 +38,25 @@ API = "https://onepiece.fandom.com/api.php"
 UA = "OnePieceTagPrediction/0.1 (projet academique; contact: morotti.maxime@gmail.com)"
 BATCH = 50  # limite MediaWiki pour un utilisateur anonyme (cf. onepiece_ingest.py)
 
+# spaCy inclut parfois un article ("the Gasu Gasu no Mi") ou un possessif
+# ("Dracule Mihawk's") dans le texte de l'entité qu'il extrait ; le titre wiki,
+# lui, n'a ni l'un ni l'autre ("Gasu Gasu no Mi", "Dracule Mihawk"). Une
+# requête sur la forme brute échoue alors silencieusement (page absente) et
+# le terme retombe dans le clustering par embedding en repli, avec le même
+# effet de chaînage qu'on cherche justement à éviter (ex. "Dracule Mihawk's"
+# et "Monkey D. Dragon's" finissaient chaînés ensemble). On retente donc,
+# pour ces formes, la résolution sur la variante sans article/possessif.
+_LEADING_ARTICLE_RE = re.compile(r"^(?:the|a|an)\s+", re.I)
+_TRAILING_POSSESSIVE_RE = re.compile(r"[’']s$")
+
+
+def _normalized_candidate(term: str) -> str | None:
+    """Variante d'un terme sans article en tête ni possessif en fin, à
+    retenter si la forme brute échoue. None si le terme n'a ni l'un ni l'autre.
+    """
+    normalized = _TRAILING_POSSESSIVE_RE.sub("", _LEADING_ARTICLE_RE.sub("", term)).strip()
+    return normalized if normalized and normalized != term else None
+
 
 @dataclass
 class Resolution:
@@ -180,7 +199,11 @@ class WikiGazetteer:
         requête.
         """
         unique = sorted({t for t in terms if t and t.strip() and "|" not in t})
-        to_query = [t for t in unique if t not in self.cache]
+        normalized_of = {t: _normalized_candidate(t) for t in unique}
+
+        query_targets = set(unique)
+        query_targets.update(n for n in normalized_of.values() if n)
+        to_query = sorted(t for t in query_targets if t not in self.cache)
 
         for start in range(0, len(to_query), BATCH):
             batch = to_query[start : start + BATCH]
@@ -195,6 +218,10 @@ class WikiGazetteer:
         result: dict[str, Resolution] = {}
         for t in unique:
             entry = self.cache.get(t, {"canonical": None, "categories": []})
+            if not entry.get("canonical") and normalized_of.get(t):
+                alt = self.cache.get(normalized_of[t])
+                if alt and alt.get("canonical"):
+                    entry = alt
             result[t] = Resolution(
                 canonical=entry.get("canonical"),
                 wiki_category=classify_categories(entry.get("categories", [])),
