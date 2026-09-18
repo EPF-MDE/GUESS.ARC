@@ -1,0 +1,5 @@
+# Character and Faction identity resolved via One Piece Wiki pages
+
+Both the Character-in-Chapter Record and Interaction participants need a stable identity per character/faction; the current data has none — 811 distinct free-text name strings appear across the 766 already-tagged chapters, including "Luffy", "Monkey D. Luffy", and "Fake Luffy" as unreconciled separate strings. We considered deriving canonical identity ourselves by clustering these name variants, and rejected it: the wiki has already done this disambiguation (e.g. "Fake Luffy" already has its own page, distinct from "Monkey D. Luffy"), so re-deriving it via clustering risks recreating the exact ambiguity this decision exists to remove.
+
+Canonical identity for both a Character and a Faction is therefore the entity's One Piece Wiki page (id, canonical name, known aliases, wiki URL — see `Character Registry` in `CONTEXT.md`). Actually populating the registry by resolving the 811 existing name variants to wiki pages is out of scope here and left to a separate follow-up issue; this decision only fixes the identity rule and the registry's shape.
