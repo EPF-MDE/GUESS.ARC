@@ -1,0 +1,5 @@
+# One taxonomy file per chapter, plus a separate Fights Index and Character Registry
+
+Konrad's POC stored all 766 tagged chapters as one JSON array in a single file (`chapters_tagged.json`). We replace this with one taxonomy file per chapter (mirroring the existing `data/silver/chapter_NNNN.md` convention), each holding that chapter's Chapter Record, Character-in-Chapter Records, and Interaction segments. This is a deliberate deviation from the existing precedent: a single growing file makes incremental updates (new chapters, re-tagging one chapter) show up as a diff to one massive blob, which is harder to review and to process incrementally than one small file per chapter.
+
+Per-chapter files alone are not enough for the two cross-chapter lookups the model needs: reconstructing a Fight from its per-chapter segments, and resolving a Character or Faction to its canonical identity. Rather than requiring every consumer to scan and join every chapter file, we materialize a separate `Fights Index` (keyed by Fight ID) and `Character Registry` (see ADR 0003) as their own stores, kept in sync as chapter files are added or changed.
