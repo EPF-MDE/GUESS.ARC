@@ -43,6 +43,22 @@ def validate_bronze_record(record, line_no):
     return errors
 
 
+def _unquote(value):
+    """Strip surrounding whitespace and, if present, a matching pair of double quotes."""
+    value = value.strip()
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+    return value
+
+
+def _front_matter_field_value(front_matter, field):
+    """Return the (unquoted, stripped) value of a top-level 'field: ...' line, or None if absent."""
+    match = re.search(rf"^{re.escape(field)}:[ \t]*(.*)$", front_matter, re.MULTILINE)
+    if match is None:
+        return None
+    return _unquote(match.group(1))
+
+
 def validate_silver_content(text, filename):
     """Return a list of human-readable errors for one silver chapter file."""
     errors = []
@@ -60,16 +76,17 @@ def validate_silver_content(text, filename):
     if not re.search(r"^chapter:\s*\d+\s*$", front_matter, re.MULTILINE):
         errors.append(prefix("front-matter missing numeric 'chapter:' field"))
 
-    if not re.search(r'^title:\s*\S', front_matter, re.MULTILINE):
-        errors.append(prefix("front-matter missing 'title:' field"))
-
-    if not re.search(r'^arc:\s*\S', front_matter, re.MULTILINE):
-        errors.append(prefix("front-matter missing 'arc:' field"))
+    for field in ("title", "arc"):
+        value = _front_matter_field_value(front_matter, field)
+        if not value:
+            errors.append(prefix(f"front-matter missing non-empty '{field}:' field"))
 
     if not re.search(r"^characters:\s*$", front_matter, re.MULTILINE):
         errors.append(prefix("front-matter missing 'characters:' list"))
-    elif not re.search(r"^\s*-\s*name:\s*\S", front_matter, re.MULTILINE):
-        errors.append(prefix("'characters:' list has no entries with a 'name'"))
+    else:
+        names = [_unquote(v) for v in re.findall(r"^\s*-\s*name:[ \t]*(.*)$", front_matter, re.MULTILINE)]
+        if not any(names):
+            errors.append(prefix("'characters:' list has no entries with a non-empty 'name'"))
 
     for section in ("Short Summary", "Long Summary", "Chapter Notes"):
         if not re.search(rf"^##\s*{re.escape(section)}\s*$", body, re.MULTILINE):

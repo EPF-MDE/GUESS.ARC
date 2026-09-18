@@ -55,9 +55,21 @@ class TestValidateSilverContent(unittest.TestCase):
         errors = validate_silver_content(content, "chapter_0004.md")
         self.assertTrue(any("'title:'" in e for e in errors))
 
+    def test_empty_title_placeholder_is_reported(self):
+        # onepiece_ingest.py writes `title: ""` when its parser fails to extract
+        # a title — this must be caught, not treated as a present value.
+        content = VALID_CONTENT.replace('title: "Romance Dawn"', 'title: ""')
+        errors = validate_silver_content(content, "chapter_0004b.md")
+        self.assertTrue(any("'title:'" in e for e in errors))
+
     def test_missing_arc_is_reported(self):
         content = VALID_CONTENT.replace('arc: "Romance Dawn Arc"\n', "")
         errors = validate_silver_content(content, "chapter_0005.md")
+        self.assertTrue(any("'arc:'" in e for e in errors))
+
+    def test_empty_arc_placeholder_is_reported(self):
+        content = VALID_CONTENT.replace('arc: "Romance Dawn Arc"', 'arc: ""')
+        errors = validate_silver_content(content, "chapter_0005b.md")
         self.assertTrue(any("'arc:'" in e for e in errors))
 
     def test_empty_characters_list_is_reported(self):
@@ -65,6 +77,11 @@ class TestValidateSilverContent(unittest.TestCase):
             '  - name: "Monkey D. Luffy"\n    faction: "Straw Hat Pirates"\n    on_panel: true\n', ""
         )
         errors = validate_silver_content(content, "chapter_0006.md")
+        self.assertTrue(any("'characters:'" in e for e in errors))
+
+    def test_character_with_empty_name_placeholder_is_reported(self):
+        content = VALID_CONTENT.replace('name: "Monkey D. Luffy"', 'name: ""')
+        errors = validate_silver_content(content, "chapter_0006b.md")
         self.assertTrue(any("'characters:'" in e for e in errors))
 
     def test_missing_section_is_reported(self):
