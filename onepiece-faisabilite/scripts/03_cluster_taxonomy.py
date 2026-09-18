@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 
 from taxonomy.console import ensure_utf8_stdout
-from taxonomy.gazetteer import WikiGazetteer
+from taxonomy.gazetteer import WikiGazetteer, fetch_technique_names, normalized_candidate
 
 ensure_utf8_stdout()
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -73,6 +73,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         default=BASE_DIR / "output" / "gazetteer_wiki_cache.json",
         help="Cache disque des résolutions wiki (terme -> nom canonique).",
+    )
+    parser.add_argument(
+        "--technique-cache",
+        type=Path,
+        default=BASE_DIR / "output" / "technique_names_cache.json",
+        help="Cache disque des noms de techniques minés dans les sous-pages de style de combat.",
     )
     parser.add_argument(
         "--no-gazetteer",
@@ -169,7 +175,9 @@ def _canonical_and_variants(
     return canonical, variants
 
 
-def _resolve_wiki(terms: list[dict], gazetteer: WikiGazetteer) -> tuple[list[str], list[str | None]]:
+def _resolve_wiki(
+    terms: list[dict], gazetteer: WikiGazetteer, known_techniques: dict[str, str]
+) -> tuple[list[str], list[str | None]]:
     """Résout chaque terme perso/lieu/objet vers son nom canonique wiki et,
     si les catégories de la page le permettent, son vrai type.
 
@@ -178,6 +186,11 @@ def _resolve_wiki(terms: list[dict], gazetteer: WikiGazetteer) -> tuple[list[str
     sinon le category_guess d'origine (event/rel compris, jamais interrogés).
     canonique_wiki vaut None pour tout terme sans page wiki -> repli embedding
     dans sa categorie_effective (= son category_guess d'origine, inchangée).
+
+    Un terme resté sans page (ex. "Rotisserie Strike", un coup de Sanji sans
+    page propre) est vérifié en dernier recours contre `known_techniques` :
+    s'il y figure, c'est une technique nommée -> "pouvoir", avec l'orthographe
+    du wiki comme canonique (regroupe les variantes de casse entre elles).
     """
     raw_terms = [t["term"] for t in terms if t["category"] in GAZETTEER_SOURCE_CATEGORIES]
     resolved = gazetteer.resolve_many(raw_terms)
@@ -187,8 +200,17 @@ def _resolve_wiki(terms: list[dict], gazetteer: WikiGazetteer) -> tuple[list[str
     for t in terms:
         r = resolved.get(t["term"]) if t["category"] in GAZETTEER_SOURCE_CATEGORIES else None
         if r is None or r.canonical is None:
-            effective_categories.append(t["category"])
-            canonicals.append(None)
+            technique = known_techniques.get(t["term"].strip().lower())
+            if technique is None:
+                normalized = normalized_candidate(t["term"])
+                if normalized:
+                    technique = known_techniques.get(normalized.strip().lower())
+            if technique is not None:
+                effective_categories.append("pouvoir")
+                canonicals.append(technique)
+            else:
+                effective_categories.append(t["category"])
+                canonicals.append(None)
         else:
             effective_categories.append(r.wiki_category or t["category"])
             canonicals.append(r.canonical)
@@ -289,7 +311,9 @@ def main() -> None:
     gazetteer = None if args.no_gazetteer else WikiGazetteer(args.gazetteer_cache)
 
     if gazetteer is not None:
-        effective_categories, canonicals = _resolve_wiki(terms, gazetteer)
+        known_techniques = fetch_technique_names(args.technique_cache)
+        print(f"[03_cluster_taxonomy] {len(known_techniques)} noms de techniques minés (sous-pages de style de combat).")
+        effective_categories, canonicals = _resolve_wiki(terms, gazetteer, known_techniques)
         n_reclassified = sum(
             1 for t, ec in zip(terms, effective_categories) if ec != t["category"]
         )
