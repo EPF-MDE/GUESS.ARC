@@ -22,6 +22,13 @@ On interroge donc `action=query&redirects=1&prop=categories` (même API que
 `onepiece_ingest.py`) pour résoudre chaque candidat vers son nom canonique et
 son vrai type avant de clusteriser : le clustering par embedding ne sert plus
 que de repli pour ce que le wiki ne couvre pas.
+
+Certaines attaques nommées (ex. "Rotisserie Strike", un coup de Sanji) n'ont
+même aucune page à elles : ni redirection ni catégorie ne peuvent alors les
+trouver. `fetch_technique_names` mine le contenu des sous-pages de style de
+combat du wiki (Category:Fighting Style Subpages, ex. "Black Leg
+Style/Diable Jambe"), où ces attaques sont listées en tableau, pour les
+rattraper malgré tout.
 """
 
 from __future__ import annotations
@@ -50,7 +57,7 @@ _LEADING_ARTICLE_RE = re.compile(r"^(?:the|a|an)\s+", re.I)
 _TRAILING_POSSESSIVE_RE = re.compile(r"[’']s$")
 
 
-def _normalized_candidate(term: str) -> str | None:
+def normalized_candidate(term: str) -> str | None:
     """Variante d'un terme sans article en tête ni possessif en fin, à
     retenter si la forme brute échoue. None si le terme n'a ni l'un ni l'autre.
     """
@@ -107,6 +114,81 @@ def classify_categories(categories: list[str]) -> str | None:
             if any(re.search(rf"\b{re.escape(kw)}\b", name) for kw in keywords):
                 return tag
     return None
+
+
+# Une attaque nommée (ex. "Rotisserie Strike", un coup de Sanji) n'a souvent
+# aucune page à elle : elle n'est listée que dans un tableau de sa sous-page
+# de style de combat ("Black Leg Style/Diable Jambe"), sous
+# Category:Fighting Style Subpages. Ni redirects=1 ni prop=categories ne
+# peuvent la trouver puisqu'elle n'est tout simplement pas une page. On mine
+# donc le contenu de ces sous-pages : chaque technique y est listée comme
+# {{Nihongo|'''Nom'''|kanji|romaji|...}} (ou {{Nihongo2|...}}, même syntaxe).
+_TECHNIQUE_SUBPAGES_CATEGORY = "Category:Fighting Style Subpages"
+_TECHNIQUE_NAME_RE = re.compile(r"\{\{Nihongo2?\|'''([^']+)'''")
+
+
+def fetch_technique_names(cache_path: Path, delay: float = 0.3) -> dict[str, str]:
+    """{nom en minuscules: nom tel qu'affiché sur le wiki} pour toute
+    technique listée dans une sous-page de style de combat.
+
+    Persisté sur disque comme le reste du gazetteer : régénéré seulement si
+    le cache est absent (les sous-pages listées changent rarement).
+    """
+    if cache_path.exists():
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+
+    session = requests.Session()
+    session.headers["User-Agent"] = UA
+
+    subpages: list[str] = []
+    cmcontinue = None
+    while True:
+        params = {
+            "action": "query",
+            "list": "categorymembers",
+            "cmtitle": _TECHNIQUE_SUBPAGES_CATEGORY,
+            "cmlimit": "max",
+            "format": "json",
+            "formatversion": "2",
+        }
+        if cmcontinue:
+            params["cmcontinue"] = cmcontinue
+        r = session.get(API, params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        subpages.extend(m["title"] for m in data["query"]["categorymembers"])
+        cmcontinue = data.get("continue", {}).get("cmcontinue")
+        if not cmcontinue:
+            break
+
+    names: dict[str, str] = {}
+    for start in range(0, len(subpages), BATCH):
+        batch = subpages[start : start + BATCH]
+        params = {
+            "action": "query",
+            "titles": "|".join(batch),
+            "prop": "revisions",
+            "rvprop": "content",
+            "rvslots": "main",
+            "format": "json",
+            "formatversion": "2",
+        }
+        r = session.get(API, params=params, timeout=30)
+        r.raise_for_status()
+        for page in r.json().get("query", {}).get("pages", []):
+            for rev in page.get("revisions", []):
+                content = rev["slots"]["main"]["content"]
+                for name in _TECHNIQUE_NAME_RE.findall(content):
+                    name = name.strip()
+                    names.setdefault(name.lower(), name)
+        if start + BATCH < len(subpages):
+            time.sleep(delay)
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps(names, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    return names
 
 
 class WikiGazetteer:
@@ -199,7 +281,7 @@ class WikiGazetteer:
         requête.
         """
         unique = sorted({t for t in terms if t and t.strip() and "|" not in t})
-        normalized_of = {t: _normalized_candidate(t) for t in unique}
+        normalized_of = {t: normalized_candidate(t) for t in unique}
 
         query_targets = set(unique)
         query_targets.update(n for n in normalized_of.values() if n)
