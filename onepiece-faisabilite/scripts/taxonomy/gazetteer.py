@@ -8,19 +8,28 @@ similarité cosinus de 0.79 alors qu'ils sont sans rapport, quand "the Grand
 Line"/"Laugh Tale" — fortement liés dans l'histoire — n'en ont que 0.21).
 Aucun réglage de seuil ne corrige cet effet de chaînage.
 
-Le wiki Fandom, lui, encode une vérité terrain gratuite et fiable : chaque
-alias/surnom d'un personnage, lieu ou objet est une page de redirection vers
-sa page canonique, maintenue par les contributeurs. On interroge donc
-`action=query&redirects=1` (même API que `onepiece_ingest.py`) pour résoudre
-chaque candidat vers son nom canonique wiki avant de clusteriser : le
-clustering par embedding ne sert plus que de repli pour ce que le wiki ne
-couvre pas.
+Le wiki Fandom, lui, encode une vérité terrain gratuite et fiable, sur deux
+plans :
+  - chaque alias/surnom d'un personnage, lieu ou objet est une page de
+    redirection vers sa page canonique (ex. "Zoro" -> "Roronoa Zoro") ;
+  - chaque page appartient à des catégories (ex. "Category:Fighting Styles",
+    "Category:Locations") qui disent son VRAI type, indépendamment de la
+    catégorie devinée par spaCy à l'extraction (ex. "Kaido" est étiqueté
+    "lieu" par en_core_web_sm alors que ses catégories wiki disent
+    "Category:Humans" -> un personnage).
+
+On interroge donc `action=query&redirects=1&prop=categories` (même API que
+`onepiece_ingest.py`) pour résoudre chaque candidat vers son nom canonique et
+son vrai type avant de clusteriser : le clustering par embedding ne sert plus
+que de repli pour ce que le wiki ne couvre pas.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -30,10 +39,63 @@ UA = "OnePieceTagPrediction/0.1 (projet academique; contact: morotti.maxime@gmai
 BATCH = 50  # limite MediaWiki pour un utilisateur anonyme (cf. onepiece_ingest.py)
 
 
-class WikiGazetteer:
-    """Résout une liste de termes vers leur nom canonique de page wiki.
+@dataclass
+class Resolution:
+    canonical: str | None  # nom de page wiki, ou None si absent du wiki
+    wiki_category: str | None  # type déduit des catégories wiki, ou None si indéterminé
 
-    Le cache est persisté sur disque (`cache_path`) : un terme déjà résolu
+
+# Mots-clés des catégories wiki (sans le préfixe "Category:") qui trahissent
+# le vrai type d'une page, testés par ordre de priorité : la première règle
+# dont un mot-clé apparaît (en mot entier) dans une des catégories l'emporte.
+# "pouvoir" est un type absent de la taxonomie d'origine (techniques, styles
+# de combat, Haki...) ; "groupe" aussi (équipages, organisations) : tous deux
+# n'existaient pas avant que le wiki permette de les distinguer de perso/lieu.
+_CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("pouvoir", ("Fighting Styles", "Rokushiki", "Named Techniques", "Named Attacks", "Techniques")),
+    (
+        "objet",
+        (
+            "Devil Fruits", "Paramecia", "Zoan", "Logia", "Weapons", "Swords", "Ships",
+            "Vessels", "Artifacts", "Treasures",
+        ),
+    ),
+    (
+        "lieu",
+        (
+            "Locations", "Islands", "Oceans", "Seas", "Territories", "Countries", "Towns",
+            "Cities", "Kingdoms", "Archipelagos", "Regions", "Villages",
+        ),
+    ),
+    ("groupe", ("Crews", "Groups")),
+    ("perso", ("Characters", "Humans", "Users", "Residents", "Combatants")),
+]
+
+
+def classify_categories(categories: list[str]) -> str | None:
+    """Déduit le vrai type d'un terme à partir des catégories wiki de sa page.
+
+    Une catégorie contenant le mot "Users" (ex. "Armament Haki Users",
+    "Mythical Zoan Devil Fruit Users") désigne toujours un PERSONNAGE qui
+    utilise X, jamais X lui-même : elle est donc ignorée pour les règles
+    autres que "perso", sans quoi un personnage utilisateur d'un fruit Zoan
+    serait classé "objet" à cause du seul mot "Zoan" (cas réel : Kaidou).
+    """
+    names = [c.removeprefix("Category:") for c in categories]
+    for tag, keywords in _CATEGORY_RULES:
+        pool = names if tag == "perso" else [n for n in names if "Users" not in n]
+        for name in pool:
+            if any(re.search(rf"\b{re.escape(kw)}\b", name) for kw in keywords):
+                return tag
+    return None
+
+
+class WikiGazetteer:
+    """Résout une liste de termes vers leur nom canonique de page wiki et leur type.
+
+    Le cache est persisté sur disque (`cache_path`), au niveau des données
+    brutes (canonique + catégories wiki), pas du type déduit : affiner
+    `classify_categories` n'invalide donc pas le cache. Un terme déjà résolu
     (ou confirmé absent du wiki) lors d'un run précédent n'est jamais
     réinterrogé, ce qui garde les runs suivants rapides et épargne l'API.
     """
@@ -41,9 +103,13 @@ class WikiGazetteer:
     def __init__(self, cache_path: Path, delay: float = 0.3):
         self.cache_path = cache_path
         self.delay = delay
-        self.cache: dict[str, str | None] = {}
+        self.cache: dict[str, dict] = {}
         if cache_path.exists():
-            self.cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            raw = json.loads(cache_path.read_text(encoding="utf-8"))
+            # Les entrées d'un ancien format de cache (terme -> str|null, avant
+            # l'ajout des catégories) n'ont pas les données nécessaires : on
+            # les laisse de côté, elles seront réinterrogées.
+            self.cache = {k: v for k, v in raw.items() if isinstance(v, dict)}
         self.session = requests.Session()
         self.session.headers["User-Agent"] = UA
 
@@ -54,11 +120,14 @@ class WikiGazetteer:
             encoding="utf-8",
         )
 
-    def _fetch_batch(self, titles: list[str]) -> dict[str, str | None]:
+    def _fetch_batch(self, titles: list[str]) -> dict[str, dict]:
         params = {
             "action": "query",
             "titles": "|".join(titles),
             "redirects": "1",
+            "prop": "categories",
+            "cllimit": "max",
+            "clshow": "!hidden",
             "format": "json",
             "formatversion": "2",
         }
@@ -72,7 +141,7 @@ class WikiGazetteer:
             except Exception as exc:  # noqa: BLE001
                 if attempt == 3:
                     print(f"[gazetteer] échec définitif sur ce lot ({exc!r}), laissé non résolu.")
-                    return {t: None for t in titles}
+                    return {t: {"canonical": None, "categories": []} for t in titles}
                 wait = 2 ** attempt
                 print(f"[gazetteer] retry dans {wait}s ({exc})")
                 time.sleep(wait)
@@ -89,15 +158,26 @@ class WikiGazetteer:
                 if resolved[t] == entry["from"]:
                     resolved[t] = entry["to"]
 
-        missing_titles = {p["title"] for p in data.get("pages", []) if p.get("missing")}
-        return {t: (None if resolved[t] in missing_titles else resolved[t]) for t in titles}
+        pages_by_title = {p["title"]: p for p in data.get("pages", [])}
+        out: dict[str, dict] = {}
+        for t in titles:
+            page = pages_by_title.get(resolved[t])
+            if page is None or page.get("missing"):
+                out[t] = {"canonical": None, "categories": []}
+            else:
+                cats = [c["title"] for c in page.get("categories", [])]
+                out[t] = {"canonical": resolved[t], "categories": cats}
+        return out
 
-    def resolve_many(self, terms: list[str]) -> dict[str, str | None]:
+    def resolve_many(self, terms: list[str]) -> dict[str, Resolution]:
         """Résout une liste de termes (avec cache). Ne réinterroge que les inconnus.
 
-        Retourne {terme: nom_canonique_wiki | None}. None = absent du wiki,
-        laissé au clustering par embedding en repli. Les termes contenant "|"
-        (séparateur de lot MediaWiki) sont ignorés sans requête.
+        Retourne {terme: Resolution}. `canonical` est None si le terme est
+        absent du wiki (laissé au clustering par embedding en repli).
+        `wiki_category` est None si les catégories de la page ne permettent
+        pas de trancher (le category_guess d'origine est alors conservé). Les
+        termes contenant "|" (séparateur de lot MediaWiki) sont ignorés sans
+        requête.
         """
         unique = sorted({t for t in terms if t and t.strip() and "|" not in t})
         to_query = [t for t in unique if t not in self.cache]
@@ -112,4 +192,11 @@ class WikiGazetteer:
         if to_query:
             self.save()
 
-        return {t: self.cache.get(t) for t in unique}
+        result: dict[str, Resolution] = {}
+        for t in unique:
+            entry = self.cache.get(t, {"canonical": None, "categories": []})
+            result[t] = Resolution(
+                canonical=entry.get("canonical"),
+                wiki_category=classify_categories(entry.get("categories", [])),
+            )
+        return result

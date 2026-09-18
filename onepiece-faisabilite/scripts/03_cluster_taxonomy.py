@@ -20,7 +20,10 @@ propre cluster plutôt que fusionné à tort.
 
 Pour perso/lieu/objet, une étape préalable interroge le wiki Fandom (mêmes
 redirections que `onepiece_ingest.py`) pour résoudre chaque candidat vers son
-nom canonique de page (ex. "Zoro" -> "Roronoa Zoro") : c'est une vérité
+nom canonique de page (ex. "Zoro" -> "Roronoa Zoro") ET vers son vrai type,
+déduit des catégories wiki de la page (ex. "Kaido", étiqueté "lieu" par
+spaCy, est reclassé "perso" car sa page porte "Category:Humans" ; "Haki",
+lui, devient "pouvoir", un type qui n'existait pas avant). C'est une vérité
 terrain gratuite et fiable, qui évite l'effet de chaînage de l'embedding sur
 les noms propres hors-vocabulaire. Seuls les candidats sans page wiki
 retombent dans le clustering par embedding décrit ci-dessus (voir
@@ -44,10 +47,10 @@ from taxonomy.gazetteer import WikiGazetteer
 ensure_utf8_stdout()
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Catégories où un candidat correspond à une page wiki (personnage, lieu,
-# objet). "event"/"rel" sont des tags de lexique déjà canoniques : la
-# résolution wiki ne les concerne pas.
-GAZETTEER_CATEGORIES = {"perso", "lieu", "objet"}
+# Catégories candidates à une résolution wiki (personnage, lieu, objet, avant
+# recatégorisation éventuelle). "event"/"rel" sont des tags de lexique déjà
+# canoniques : la résolution wiki ne les concerne pas.
+GAZETTEER_SOURCE_CATEGORIES = {"perso", "lieu", "objet"}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -166,20 +169,43 @@ def _canonical_and_variants(
     return canonical, variants
 
 
-def _gazetteer_clusters(
-    category_terms: list[dict], vectors: np.ndarray, gazetteer: WikiGazetteer
-) -> tuple[list[tuple[list[tuple[dict, np.ndarray]], str]], list[int]]:
-    """Regroupe les termes résolus par le wiki (page canonique commune).
+def _resolve_wiki(terms: list[dict], gazetteer: WikiGazetteer) -> tuple[list[str], list[str | None]]:
+    """Résout chaque terme perso/lieu/objet vers son nom canonique wiki et,
+    si les catégories de la page le permettent, son vrai type.
 
-    Retourne (clusters ancrés sur leur canonique wiki, indices des termes
-    sans page wiki -> à clusteriser par embedding en repli).
+    Retourne (categorie_effective, canonique_wiki) alignés terme à terme sur
+    `terms` : categorie_effective vaut le type déduit du wiki s'il existe,
+    sinon le category_guess d'origine (event/rel compris, jamais interrogés).
+    canonique_wiki vaut None pour tout terme sans page wiki -> repli embedding
+    dans sa categorie_effective (= son category_guess d'origine, inchangée).
     """
-    resolved = gazetteer.resolve_many([t["term"] for t in category_terms])
+    raw_terms = [t["term"] for t in terms if t["category"] in GAZETTEER_SOURCE_CATEGORIES]
+    resolved = gazetteer.resolve_many(raw_terms)
 
+    effective_categories: list[str] = []
+    canonicals: list[str | None] = []
+    for t in terms:
+        r = resolved.get(t["term"]) if t["category"] in GAZETTEER_SOURCE_CATEGORIES else None
+        if r is None or r.canonical is None:
+            effective_categories.append(t["category"])
+            canonicals.append(None)
+        else:
+            effective_categories.append(r.wiki_category or t["category"])
+            canonicals.append(r.canonical)
+    return effective_categories, canonicals
+
+
+def _bucket_by_canonical(
+    category_terms: list[dict], vectors: np.ndarray, canonicals: list[str | None]
+) -> tuple[list[tuple[list[tuple[dict, np.ndarray]], str]], list[int]]:
+    """Regroupe les termes qui partagent le même nom canonique wiki.
+
+    Retourne (clusters ancrés sur leur canonique wiki, indices locaux des
+    termes sans canonique -> à clusteriser par embedding en repli).
+    """
     buckets: dict[str, list[int]] = {}
     leftover_indices: list[int] = []
-    for i, term in enumerate(category_terms):
-        canonical = resolved.get(term["term"])
+    for i, canonical in enumerate(canonicals):
         if canonical:
             buckets.setdefault(canonical, []).append(i)
         else:
@@ -262,25 +288,38 @@ def main() -> None:
 
     gazetteer = None if args.no_gazetteer else WikiGazetteer(args.gazetteer_cache)
 
+    if gazetteer is not None:
+        effective_categories, canonicals = _resolve_wiki(terms, gazetteer)
+        n_reclassified = sum(
+            1 for t, ec in zip(terms, effective_categories) if ec != t["category"]
+        )
+        print(
+            f"[03_cluster_taxonomy] wiki : {n_reclassified} termes reclassés vers leur vrai type "
+            f"(ex. Kaido lieu -> perso, Haki -> pouvoir)."
+        )
+    else:
+        effective_categories = [t["category"] for t in terms]
+        canonicals = [None] * len(terms)
+
     taxonomy: dict[str, dict[str, list[str]]] = {}
     taxonomy_noise: dict[str, dict[str, list[str]]] = {}
 
-    categories = sorted({t["category"] for t in terms})
+    categories = sorted(set(effective_categories))
     for category in categories:
-        indices = [i for i, t in enumerate(terms) if t["category"] == category]
+        indices = [i for i, ec in enumerate(effective_categories) if ec == category]
         category_terms = [terms[i] for i in indices]
+        category_canonicals = [canonicals[i] for i in indices]
         vectors = embeddings[indices]
 
         total_terms = len(category_terms)
-        gaz_clusters: list[tuple[list[tuple[dict, np.ndarray]], str]] = []
-        if gazetteer is not None and category in GAZETTEER_CATEGORIES:
-            gaz_clusters, leftover_indices = _gazetteer_clusters(category_terms, vectors, gazetteer)
+        gaz_clusters, leftover_indices = _bucket_by_canonical(category_terms, vectors, category_canonicals)
+        if gaz_clusters:
             print(
                 f"[03_cluster_taxonomy] {category} : {len(gaz_clusters)} noms canoniques résolus par le "
                 f"wiki, {len(leftover_indices)} termes en repli embedding."
             )
-            category_terms = [category_terms[i] for i in leftover_indices]
-            vectors = vectors[leftover_indices] if leftover_indices else vectors[:0]
+        category_terms = [category_terms[i] for i in leftover_indices]
+        vectors = vectors[leftover_indices] if leftover_indices else vectors[:0]
 
         if category == "perso":
             clusters_with_anchor, method = _anchor_clusters(category_terms, vectors, args)
