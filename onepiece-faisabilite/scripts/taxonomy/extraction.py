@@ -221,7 +221,39 @@ def _guess_place_or_person(term: str) -> str:
     return "perso"
 
 
-def _extract_spacy(text: str, nlp) -> list[Candidate]:
+class PersonLookup:
+    """Ensemble de noms de personnages connus, pour corriger perso/lieu.
+
+    En_core_web_sm n'a jamais vu de noms propres One Piece pendant son
+    entraînement : il se rabat sur des heuristiques de forme (mot court,
+    consonance japonaise -> GPE/LOC/FAC) qui étiquettent à tort en "lieu"
+    des personnages comme "Zoro" ou "Katakuri" (leur nom complet,
+    "Roronoa Zoro", "Charlotte Katakuri", est lui correctement reconnu comme
+    PERSON — cf. faisabilite-etat-de-lart.md). On corrige donc après coup :
+    toute entité taguée lieu qui correspond à un nom connu (entier ou un de
+    ses mots, ex. "Zoro" dans "Roronoa Zoro") est recatégorisée en "perso".
+    """
+
+    def __init__(self, names: set[str] | None = None) -> None:
+        self.full_names: set[str] = set()
+        self.tokens: set[str] = set()
+        if names:
+            self.add_many(names)
+
+    def add_many(self, names: set[str]) -> None:
+        for name in names:
+            low = name.strip().lower()
+            if not low:
+                continue
+            self.full_names.add(low)
+            self.tokens.update(low.split())
+
+    def matches(self, term: str) -> bool:
+        low = term.strip().lower()
+        return low in self.full_names or low in self.tokens
+
+
+def _extract_spacy(text: str, nlp, persons: PersonLookup | None = None) -> list[Candidate]:
     candidates: list[Candidate] = []
     doc = nlp(text)
     for sent in doc.sents:
@@ -234,14 +266,18 @@ def _extract_spacy(text: str, nlp) -> list[Candidate]:
                 candidates.append(Candidate("perso", ent.text, sentence))
                 person_names.append(ent.text)
             elif ent.label_ in ("GPE", "LOC", "FAC"):
-                candidates.append(Candidate("lieu", ent.text, sentence))
+                if persons and persons.matches(ent.text):
+                    candidates.append(Candidate("perso", ent.text, sentence))
+                    person_names.append(ent.text)
+                else:
+                    candidates.append(Candidate("lieu", ent.text, sentence))
         candidates.extend(_find_object_candidates(sentence))
         candidates.extend(_find_event_candidates(sentence, nlp_doc=sent))
         candidates.extend(_find_rel_candidates(sentence, person_names))
     return candidates
 
 
-def _extract_regex(text: str) -> list[Candidate]:
+def _extract_regex(text: str, persons: PersonLookup | None = None) -> list[Candidate]:
     candidates: list[Candidate] = []
     for sentence in _split_sentences(text):
         person_names = []
@@ -250,6 +286,8 @@ def _extract_regex(text: str) -> list[Candidate]:
             if not _is_valid_proper_noun(term):
                 continue
             category = _guess_place_or_person(term)
+            if category == "lieu" and persons and persons.matches(term):
+                category = "perso"
             candidates.append(Candidate(category, term, sentence))
             if category == "perso":
                 person_names.append(term)
@@ -259,13 +297,18 @@ def _extract_regex(text: str) -> list[Candidate]:
     return candidates
 
 
-def extract_candidates(text: str, nlp=None) -> list[Candidate]:
+def extract_candidates(
+    text: str, nlp=None, persons: PersonLookup | None = None
+) -> list[Candidate]:
     """Point d'entrée unique : extrait tous les candidats d'un texte libre.
 
     `nlp` est un modèle spaCy déjà chargé (ou None pour forcer le mode regex).
+    `persons` est un `PersonLookup` optionnel de noms de personnages connus
+    (ex. le front-matter du chapitre, ou la taxonomie déjà construite), pour
+    corriger les entités "lieu" qui sont en réalité des personnages.
     """
     if not text or not text.strip():
         return []
     if nlp is not None:
-        return _extract_spacy(text, nlp)
-    return _extract_regex(text)
+        return _extract_spacy(text, nlp, persons=persons)
+    return _extract_regex(text, persons=persons)

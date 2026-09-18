@@ -22,7 +22,7 @@ import csv
 from pathlib import Path
 
 from taxonomy.console import ensure_utf8_stdout
-from taxonomy.extraction import extract_candidates, load_nlp
+from taxonomy.extraction import PersonLookup, extract_candidates, load_nlp
 from taxonomy.md_parser import iter_chapters
 
 ensure_utf8_stdout()
@@ -71,7 +71,12 @@ def main() -> None:
                     n_rows += 1
 
             # Source 3 : extraction NLP sur le texte libre (résumés + notes factuelles).
-            for cand in extract_candidates(chapter.full_text, nlp=nlp):
+            # `persons` corrige les entités "lieu" qui sont en fait des personnages
+            # du chapitre mal étiquetés par spaCy (cf. PersonLookup) : ex. "Zoro"
+            # étiqueté GPE/LOC par en_core_web_sm alors que "Roronoa Zoro" est
+            # présent dans le front-matter.
+            persons = PersonLookup({c["name"] for c in chapter.characters if c.get("name")})
+            for cand in extract_candidates(chapter.full_text, nlp=nlp, persons=persons):
                 writer.writerow(
                     [chapter.chapter_id, cand.category_guess, cand.raw_term, cand.context_snippet]
                 )

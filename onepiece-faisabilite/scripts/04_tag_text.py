@@ -24,7 +24,7 @@ import numpy as np
 
 from taxonomy.console import ensure_utf8_stdout
 from taxonomy.embedding import Embedder
-from taxonomy.extraction import extract_candidates, load_nlp
+from taxonomy.extraction import PersonLookup, extract_candidates, load_nlp
 
 ensure_utf8_stdout()
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -53,6 +53,20 @@ def _exact_match_lookup(taxonomy: dict) -> dict[tuple[str, str], str]:
     return lookup
 
 
+def _known_persons(taxonomy: dict) -> PersonLookup:
+    """Noms de personnages connus de la taxonomie (canoniques + variantes).
+
+    Sert à corriger, comme en étape 1, les entités "lieu" mal étiquetées par
+    spaCy sur des noms propres hors-domaine (cf. PersonLookup dans
+    taxonomy/extraction.py).
+    """
+    names: set[str] = set()
+    for canonical, variants in taxonomy.get("perso", {}).items():
+        names.add(canonical)
+        names.update(variants)
+    return PersonLookup(names)
+
+
 def tag_text(
     text: str,
     taxonomy: dict,
@@ -68,7 +82,7 @@ def tag_text(
     catégorie. Sous `min_similarity`, le tag reste la forme brute extraite
     (mapped=False).
     """
-    candidates = extract_candidates(text, nlp=nlp)
+    candidates = extract_candidates(text, nlp=nlp, persons=_known_persons(taxonomy))
     if not candidates:
         return []
 
