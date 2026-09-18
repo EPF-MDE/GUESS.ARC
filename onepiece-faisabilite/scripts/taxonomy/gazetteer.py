@@ -69,6 +69,7 @@ def normalized_candidate(term: str) -> str | None:
 class Resolution:
     canonical: str | None  # nom de page wiki, ou None si absent du wiki
     wiki_category: str | None  # type déduit des catégories wiki, ou None si indéterminé
+    family: str | None = None  # catégorie de famille wiki (ex. "Shimotsuki Family"), ou None
 
 
 # Mots-clés des catégories wiki (sans le préfixe "Category:") qui trahissent
@@ -77,24 +78,45 @@ class Resolution:
 # "pouvoir" est un type absent de la taxonomie d'origine (techniques, styles
 # de combat, Haki...) ; "groupe" aussi (équipages, organisations) : tous deux
 # n'existaient pas avant que le wiki permette de les distinguer de perso/lieu.
-_CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("pouvoir", ("Fighting Styles", "Rokushiki", "Named Techniques", "Named Attacks", "Techniques")),
-    (
-        "objet",
-        (
-            "Devil Fruits", "Paramecia", "Zoan", "Logia", "Weapons", "Swords", "Ships",
-            "Vessels", "Artifacts", "Treasures",
-        ),
-    ),
+# "objet" était un fourre-tout (fruits du démon, navires, épées, poneglyphes,
+# trésors mélangés). Les sous-types ci-dessous ont été vérifiés par de vraies
+# requêtes API (action=query&titles=...&prop=categories) sur des pages
+# connues avant d'être codés, jamais devinés :
+#   - fruit : "Gomu Gomu no Mi"/"Mera Mera no Mi"/"Yami Yami no Mi" portent
+#     Paramecia/Zoan/Logia (jamais le libellé générique "Devil Fruits" lui-même) ;
+#   - arme : "Wado Ichimonji"/"Enma"/"Kiribachi" portent Swords/Blades, "Art of
+#     Weather/Clima-Tact" porte Polearms, "Usopp Tactics/Kabuto" porte
+#     "Projectile Weapons" -> le mot "Weapons" seul couvre déjà ce dernier cas ;
+#   - navire : "Going Merry"/"Thousand Sunny"/"Noah" portent toutes "...Ships" ;
+#   - poneglyphe : il n'existe qu'UNE SEULE page pour le concept ("Poneglyph"),
+#     tous les poneglyphes nommés (Rio, Road...) y redirigent. Sa catégorie
+#     "Artifacts" est aussi celle d'objets sans rapport (One Piece le trésor,
+#     Pluton, Noah, le chapeau de paille...), donc pas assez fine seule ; sa
+#     catégorie "Literature" est, elle, partagée avec Newspaper/Logbook/Comic
+#     Strips, pas assez fine non plus. Seule l'INTERSECTION des deux
+#     catégories identifie spécifiquement Poneglyph parmi tout ce qui a été
+#     vérifié par requête API -> règle "toutes ces catégories" (all_of), pas
+#     "au moins une" (any_of) comme les autres règles.
+# Le reste de "Artifacts" (trésors : One Piece, chapeau de paille, Tamatebako,
+# Roulette...) retombe dans le "objet" générique, faute de catégorie wiki
+# dédiée au trésor (Category:Treasures n'existe pas sur ce wiki).
+_CATEGORY_RULES: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+    ("pouvoir", ("Fighting Styles", "Rokushiki", "Named Techniques", "Named Attacks", "Techniques"), ()),
+    ("fruit", ("Paramecia", "Zoan", "Logia", "Devil Fruits"), ()),
+    ("arme", ("Weapons", "Swords", "Blades", "Polearms"), ()),
+    ("navire", ("Ships", "Vessels"), ()),
+    ("poneglyphe", (), ("Literature", "Artifacts")),
+    ("objet", ("Artifacts", "Treasures"), ()),
     (
         "lieu",
         (
             "Locations", "Islands", "Oceans", "Seas", "Territories", "Countries", "Towns",
             "Cities", "Kingdoms", "Archipelagos", "Regions", "Villages",
         ),
+        (),
     ),
-    ("groupe", ("Crews", "Groups")),
-    ("perso", ("Characters", "Humans", "Users", "Residents", "Combatants")),
+    ("groupe", ("Crews", "Groups"), ()),
+    ("perso", ("Characters", "Humans", "Users", "Residents", "Combatants"), ()),
 ]
 
 
@@ -106,13 +128,47 @@ def classify_categories(categories: list[str]) -> str | None:
     utilise X, jamais X lui-même : elle est donc ignorée pour les règles
     autres que "perso", sans quoi un personnage utilisateur d'un fruit Zoan
     serait classé "objet" à cause du seul mot "Zoan" (cas réel : Kaidou).
+
+    Chaque règle teste soit "au moins un" de ses mots-clés (`any_of`), soit
+    "tous" (`all_of`, ex. poneglyphe) : la première règle qui matche l'emporte.
     """
     names = [c.removeprefix("Category:") for c in categories]
-    for tag, keywords in _CATEGORY_RULES:
+    for tag, any_of, all_of in _CATEGORY_RULES:
         pool = names if tag == "perso" else [n for n in names if "Users" not in n]
-        for name in pool:
-            if any(re.search(rf"\b{re.escape(kw)}\b", name) for kw in keywords):
-                return tag
+
+        def _has(kw: str) -> bool:
+            return any(re.search(rf"\b{re.escape(kw)}\b", name) for name in pool)
+
+        if all_of and all(_has(kw) for kw in all_of):
+            return tag
+        if any_of and any(_has(kw) for kw in any_of):
+            return tag
+    return None
+
+
+# Vérifié par de vraies requêtes API sur plusieurs personnages : Roronoa Zoro
+# porte "Category:Shimotsuki Family", Sanji "Category:Vinsmoke Family", Luffy
+# et Ace tous deux "Category:Dadan Family" (famille d'accueil, pas de sang,
+# mais bien une vraie catégorie de famille partagée). Chaque catégorie de
+# famille se nomme "Category:<Nom> Family" (singulier) ; les catégories méta
+# au pluriel qui les regroupent ("Category:Families", "Category:Non-Canon
+# Families"...) n'ont pas cet exact suffixe et sont donc naturellement
+# exclues par le motif, sans liste d'exclusion à maintenir à la main.
+_FAMILY_CATEGORY_RE = re.compile(r"^.+ Family$")
+
+
+def extract_family(categories: list[str]) -> str | None:
+    """Catégorie de famille wiki d'un personnage (ex. "Shimotsuki Family"), ou None.
+
+    Sert à vérifier une relation de filiation entre deux personnages : s'ils
+    partagent la même famille, la relation est réelle et pas seulement
+    déduite d'un mot-clé ("father", "brother"...) trouvé près de leurs deux
+    noms dans une phrase, sans savoir s'ils sont effectivement apparentés.
+    """
+    for c in categories:
+        name = c.removeprefix("Category:")
+        if _FAMILY_CATEGORY_RE.match(name):
+            return name
     return None
 
 
@@ -307,5 +363,6 @@ class WikiGazetteer:
             result[t] = Resolution(
                 canonical=entry.get("canonical"),
                 wiki_category=classify_categories(entry.get("categories", [])),
+                family=extract_family(entry.get("categories", [])),
             )
         return result
