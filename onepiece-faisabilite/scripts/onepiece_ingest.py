@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
+import cloudscraper
 import requests
 
 API = "https://onepiece.fandom.com/api.php"
@@ -257,7 +258,7 @@ def save_state(state: dict) -> None:
 def run(max_chapter: int, incremental: bool, delay: float) -> None:
     BRONZE.mkdir(parents=True, exist_ok=True)
     state = load_state() if incremental else {}
-    session = requests.Session()
+    session = cloudscraper.create_scraper()
     session.headers["User-Agent"] = UA
 
     bronze_path = BRONZE / "chapters.jsonl"
