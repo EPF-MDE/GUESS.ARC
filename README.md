@@ -13,7 +13,7 @@ de *One Piece* par apprentissage automatique.
 | --- | --- |
 | `onepiece-faisabilite/faisabilite-etat-de-lart.md` | Le livrable : benchmark des sources, cadrage ML, plan sur 8 semaines |
 | `onepiece-faisabilite/scripts/onepiece_ingest.py` | Ingestion bronze + silver depuis l'API MediaWiki du wiki One Piece anglais |
-| `onepiece-faisabilite/scripts/test_parse.py` | Tests du parseur sur des extraits réels des chapitres 500 et 1193 |
+| `test/` | Sanity-check sans réseau du format de `data/bronze/` et `data/silver/` |
 
 ### Environnement
 
@@ -48,13 +48,12 @@ Sorties, relatives au dossier courant :
 ### Lancer les tests
 
 ```bash
-cd onepiece-faisabilite/scripts && python test_parse.py
+python -m unittest discover -s test -p "test_*.py"
 ```
 
-17 assertions, sans accès réseau. Elles couvrent les deux variantes de format
-rencontrées sur le wiki : les annotations en parenthèses nues des anciens
-chapitres (`*[[Kalifa]] (cover)`) et celles en apostrophes des récents
-(`*[[King]] ''(cover)''`).
+Sans accès réseau. Vérifie que `data/bronze/chapters.jsonl` et
+`data/silver/chapter_NNNN.md` respectent le format attendu (champs/types,
+front-matter, sections) avant de brancher la couche d'appel API dessus.
 
 ### Chiffres clés du livrable
 
