@@ -1,9 +1,13 @@
-"""Integration-shaped sanity check for the Gemini->Mistral fallback wiring
-(issue #6 acceptance criteria), with requests.post mocked out so it still
-runs with no network access — same spirit as test_taxonomy_envelope.py.
+"""Integration-shaped sanity check for the Gemini->Mistral->Groq fallback
+wiring (issue #6, #7 acceptance criteria), with requests.post mocked out so
+it still runs with no network access — same spirit as
+test_taxonomy_envelope.py.
 
-Covers AC1: forcing a systematic Gemini failure falls over to Mistral, which
-produces the expected JSON for the same chapter.
+Covers AC1 of #6: forcing a systematic Gemini failure falls over to Mistral,
+which produces the expected JSON for the same chapter.
+Covers AC1 of #7: forcing a systematic failure on both Gemini and Mistral
+falls over to Groq, which produces the expected JSON for the same chapter —
+reusing the same generic mechanism (#6), no Groq-specific branching.
 """
 import copy
 import json
@@ -13,7 +17,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "API"))
-from providers import GEMINI, MISTRAL  # noqa: E402
+from providers import GEMINI, GROQ, MISTRAL  # noqa: E402
 from taxonomy_client import call_provider_chain  # noqa: E402
 from provider_fallback import AllProvidersFailedError  # noqa: E402
 
@@ -49,7 +53,12 @@ def no_sleep(_seconds: float) -> None:
 class TestGeminiToMistralFallback(unittest.TestCase):
     def setUp(self):
         patcher = patch.dict(
-            "os.environ", {"GEMINI_API_KEY": "invalid-key", "MISTRAL_API_KEY": "valid-key"}
+            "os.environ",
+            {
+                "GEMINI_API_KEY": "invalid-key",
+                "MISTRAL_API_KEY": "valid-key",
+                "GROQ_API_KEY": "valid-key",
+            },
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -112,6 +121,61 @@ class TestGeminiToMistralFallback(unittest.TestCase):
                     [GEMINI, MISTRAL], SYSTEM_PROMPT, CHAPTER_MARKDOWN, JSON_SCHEMA, sleep_fn=no_sleep
                 )
         self.assertEqual(set(ctx.exception.errors), {"gemini", "mistral"})
+
+
+class TestGeminiMistralGroqFallback(unittest.TestCase):
+    """Issue #7 AC1: forcing a systematic failure on both Gemini and Mistral
+    falls over to Groq (openai/gpt-oss-120b), which produces the expected
+    JSON for the same chapter — same generic mechanism as #6, no
+    Groq-specific branching in call_provider_chain."""
+
+    def setUp(self):
+        patcher = patch.dict(
+            "os.environ",
+            {
+                "GEMINI_API_KEY": "invalid-key",
+                "MISTRAL_API_KEY": "invalid-key",
+                "GROQ_API_KEY": "valid-key",
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_persistent_gemini_and_mistral_failure_falls_over_to_groq(self):
+        groq_envelope = copy.deepcopy(VALID_ENVELOPE)
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            if "generativelanguage" in url or "mistral" in url:
+                return FakeResponse(500)
+            return envelope_response(groq_envelope)
+
+        with patch("taxonomy_client.requests.post", side_effect=fake_post):
+            envelope, used = call_provider_chain(
+                [GEMINI, MISTRAL, GROQ],
+                SYSTEM_PROMPT,
+                CHAPTER_MARKDOWN,
+                JSON_SCHEMA,
+                sleep_fn=no_sleep,
+            )
+
+        self.assertEqual(envelope, groq_envelope)
+        self.assertIs(used, GROQ)
+        self.assertEqual(used.model(), "openai/gpt-oss-120b")
+
+    def test_all_three_providers_failing_raises_all_providers_failed(self):
+        def fake_post(url, headers=None, json=None, timeout=None):
+            return FakeResponse(500)
+
+        with patch("taxonomy_client.requests.post", side_effect=fake_post):
+            with self.assertRaises(AllProvidersFailedError) as ctx:
+                call_provider_chain(
+                    [GEMINI, MISTRAL, GROQ],
+                    SYSTEM_PROMPT,
+                    CHAPTER_MARKDOWN,
+                    JSON_SCHEMA,
+                    sleep_fn=no_sleep,
+                )
+        self.assertEqual(set(ctx.exception.errors), {"gemini", "mistral", "groq"})
 
 
 if __name__ == "__main__":

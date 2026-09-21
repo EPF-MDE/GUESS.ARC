@@ -47,9 +47,24 @@ MISTRAL = ProviderConfig(
     default_model="mistral-small-latest",
 )
 
-PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL}
+# `llama-3.3-70b-versatile` was deprecated on Groq's free tier on 2026-06-17;
+# `openai/gpt-oss-120b` replaces it (issue #7).
+#
+# Note (issue #7 AC4): unlike Gemini/Mistral, Groq's response headers don't
+# expose remaining RPD (requests-per-day) quota — a future quota counter
+# (next ticket) can't read it off Groq responses and must track Groq usage
+# some other way (e.g. counting calls locally).
+GROQ = ProviderConfig(
+    name="groq",
+    base_url="https://api.groq.com/openai/v1",
+    api_key_env="GROQ_API_KEY",
+    model_env="GROQ_MODEL",
+    default_model="openai/gpt-oss-120b",
+)
+
+PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL, "groq": GROQ}
 
 # Ordered fallback chain (issue #6): tried in this order, Gemini first. Future
-# tickets (#7 Groq, #8 OpenRouter) extend this list — never branch on provider
-# name in the call/fallback logic itself.
-FALLBACK_CHAIN = ["gemini", "mistral"]
+# tickets (#8 OpenRouter) extend this list — never branch on provider name in
+# the call/fallback logic itself.
+FALLBACK_CHAIN = ["gemini", "mistral", "groq"]

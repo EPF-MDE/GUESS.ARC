@@ -1,4 +1,4 @@
-# API — client de tagging taxonomie (issues #5, #6)
+# API — client de tagging taxonomie (issues #5, #6, #7)
 
 Client HTTP unique, compatible OpenAI, qui appelle un LLM pour tagger **un**
 chapitre à la fois (fichier `.md` silver entier) et écrit un
@@ -9,7 +9,7 @@ clé, identifiant de modèle) — voir `providers.py`. Les appels passent par un
 **chaîne de fallback** (`provider_fallback.py`, issue #6) : le provider
 courant est tenté, avec retry en place sur `429`/`5xx`, puis bascule sur le
 suivant si l'échec persiste. Chaîne branchée : Gemini (1er), Mistral (2e
-relais).
+relais), Groq (3e relais).
 
 ## Obtenir une clé Gemini (gratuite)
 
@@ -31,6 +31,22 @@ elle-même pour les chiffres à jour.
 Le tier Experiment a un débit (TPM) élevé mais un RPM faible — c'est pour ça
 qu'il sert de relais derrière Gemini plutôt que de moteur principal.
 
+## Obtenir une clé Groq (gratuite)
+
+1. Aller sur [console.groq.com/keys](https://console.groq.com/keys).
+2. Se connecter (ou créer un compte), cliquer sur **Create API Key**.
+3. Copier la clé.
+
+Sert de 3e relais (`openai/gpt-oss-120b`) derrière Gemini et Mistral. Le
+modèle précédent (`llama-3.3-70b-versatile`) a été déprécié sur le tier
+gratuit le 2026-06-17.
+
+> **Note quota** : contrairement à Gemini/Mistral, Groq ne renvoie pas le
+> RPD (requêtes/jour) restant dans les en-têtes de sa réponse. Le futur
+> compteur de quota (ticket suivant) ne pourra pas le lire depuis les
+> réponses Groq et devra suivre l'usage autrement (ex. comptage local des
+> appels).
+
 ## Où les déposer
 
 Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner :
@@ -38,6 +54,7 @@ Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner :
 ```
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
 MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
+GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
 ```
 
 `.env` est dans `.gitignore` — ne jamais commiter de clé.
@@ -47,7 +64,7 @@ MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
 ```bash
 pip install -r requirements.txt
 
-# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini puis mistral)
+# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral, groq)
 python API/taxonomy_client.py --chapters 1 2
 
 # tous les chapitres 1..N
@@ -76,3 +93,5 @@ python API/taxonomy_client.py --chapters 1 --providers mistral
 | `GEMINI_MODEL` | Surcharge le modèle par défaut (`gemini-2.5-flash`) | Non |
 | `MISTRAL_API_KEY` | Clé Mistral AI Studio (tier Experiment) | Oui, pour `mistral` (2e relais par défaut) |
 | `MISTRAL_MODEL` | Surcharge le modèle par défaut (`mistral-small-latest`) | Non |
+| `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (3e relais par défaut) |
+| `GROQ_MODEL` | Surcharge le modèle par défaut (`openai/gpt-oss-120b`) | Non |

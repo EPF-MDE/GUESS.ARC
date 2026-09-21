@@ -2,8 +2,9 @@
 """
 Taxonomy tagging client (issue #5) — single OpenAI-compatible HTTP client,
 one chapter (entire silver .md, front-matter + every section) per call.
-Providers are tried in a fallback chain (issue #6): Gemini first, Mistral as
-2nd relay if Gemini errors persistently or its quota is exhausted.
+Providers are tried in a fallback chain (issues #6, #7): Gemini first,
+Mistral as 2nd relay, Groq as 3rd relay if the prior links error
+persistently or their quota is exhausted.
 
 Reads data/silver/chapter_NNNN.md, writes data/taxonomy/chapter_NNNN.json.
 Chapters already present under data/taxonomy/ are skipped: no re-call, no
@@ -13,7 +14,8 @@ Usage:
     python API/taxonomy_client.py --chapters 1 2
     python API/taxonomy_client.py --max-chapter 50
 
-See API/README.md for how to obtain and set GEMINI_API_KEY / MISTRAL_API_KEY.
+See API/README.md for how to obtain and set GEMINI_API_KEY / MISTRAL_API_KEY /
+GROQ_API_KEY.
 """
 from __future__ import annotations
 
