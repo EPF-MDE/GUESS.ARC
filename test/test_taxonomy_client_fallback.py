@@ -367,5 +367,63 @@ class TestOpenRouterFallback(unittest.TestCase):
         self.assertIn("ALL PROVIDERS FAILED", stderr.getvalue())
 
 
+class TestChapterNumberMismatchIsRejected(unittest.TestCase):
+    """A model can return a schema-valid envelope that just isn't about the
+    chapter it was asked for — observed for real on Groq: asked for chapter
+    1's silver .md, it returned a well-formed chapter 82 envelope, seemingly
+    drawn from parametric memory instead of the supplied text.
+    tag_chapter must reject that (and never write it to disk) instead of
+    trusting chapter.number blindly, which would silently collide with a
+    later real chapter 82 in the same output_dir."""
+
+    def setUp(self):
+        patcher = patch.dict(
+            "os.environ",
+            {"GEMINI_API_KEY": "valid-key", "MISTRAL_API_KEY": "valid-key"},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_mismatched_chapter_number_raises_and_writes_nothing(self):
+        wrong_chapter_envelope = copy.deepcopy(VALID_ENVELOPE)  # chapter.number == 82
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            return envelope_response(wrong_chapter_envelope)
+
+        with tempfile.TemporaryDirectory() as tmp_taxonomy_dir, patch(
+            "taxonomy_client.requests.post", side_effect=fake_post
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                tag_chapter(
+                    1,
+                    [GEMINI],
+                    SYSTEM_PROMPT,
+                    JSON_SCHEMA,
+                    output_dir=pathlib.Path(tmp_taxonomy_dir),
+                )
+            self.assertIn("82", str(ctx.exception))
+            self.assertEqual(list(pathlib.Path(tmp_taxonomy_dir).glob("*.json")), [])
+
+    def test_matching_chapter_number_is_written_normally(self):
+        matching_envelope = copy.deepcopy(VALID_ENVELOPE)
+        matching_envelope["chapter"]["number"] = 1
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            return envelope_response(matching_envelope)
+
+        with tempfile.TemporaryDirectory() as tmp_taxonomy_dir, patch(
+            "taxonomy_client.requests.post", side_effect=fake_post
+        ):
+            out_path = tag_chapter(
+                1,
+                [GEMINI],
+                SYSTEM_PROMPT,
+                JSON_SCHEMA,
+                output_dir=pathlib.Path(tmp_taxonomy_dir),
+            )
+            self.assertEqual(out_path.name, "chapter_0001.json")
+            self.assertTrue(out_path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

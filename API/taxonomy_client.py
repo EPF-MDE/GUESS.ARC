@@ -294,6 +294,21 @@ def tag_chapter(
             f"chapter {number}: model output failed schema validation:\n" + "\n".join(errors)
         )
 
+    # A model can return a schema-valid envelope that just isn't about the
+    # chapter it was asked for (observed on Groq: asked for chapter 1's
+    # silver .md, it returned a well-formed chapter 82 envelope, apparently
+    # drawn from parametric memory instead of the supplied text). Trusting
+    # chapter.number blindly here would write chapter_0082.json for a
+    # request that was never made, silently colliding with (or shadowing)
+    # this run's real chapter 82 later — so it's rejected the same way as a
+    # schema error, not written to disk.
+    returned_number = envelope.get("chapter", {}).get("number")
+    if returned_number != number:
+        raise ValueError(
+            f"chapter {number}: model output claims to be chapter.number="
+            f"{returned_number!r} instead of the requested {number} — rejected, not written"
+        )
+
     filename = taxonomy_output_filename(envelope)
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / filename
@@ -333,7 +348,23 @@ def run(chapters: list[int] | None, max_chapter: int | None, provider_names: lis
         raise SystemExit("either --chapters or --max-chapter is required")
 
     for number in numbers:
-        tag_chapter(number, providers, system_prompt, json_schema, quota=quota)
+        try:
+            tag_chapter(number, providers, system_prompt, json_schema, quota=quota)
+        except AllProvidersFailedError:
+            # Already printed loudly by tag_chapter (issue #8 AC) — move on
+            # to the next chapter instead of losing the rest of a
+            # potentially long (up to 1193-chapter) run over one exhausted
+            # chapter; it stays absent from data/taxonomy/, so a later rerun
+            # picks it back up.
+            continue
+        except ValueError as exc:
+            # A schema-invalid envelope, or one whose self-reported
+            # chapter.number doesn't match what was requested (a model
+            # hallucinating an unrelated chapter instead of grounding in the
+            # supplied text) — rejected by tag_chapter before being written.
+            # Same reasoning as above: log loudly and keep going.
+            print(f"chapter {number}: rejected model output: {exc}", file=sys.stderr)
+            continue
 
 
 def main() -> None:

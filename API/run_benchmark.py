@@ -116,6 +116,17 @@ def run(chapters: list[int] | None, batch_size: int, provider_names: list[str], 
                 # doesn't block the rest of the run, but remember it to
                 # report a non-zero exit at the end.
                 failed.append((name, number))
+            except ValueError as exc:
+                # tag_chapter rejects a schema-invalid envelope, or one whose
+                # self-reported chapter.number doesn't match what was asked
+                # for (observed on Groq: it returned a well-formed but
+                # unrelated chapter's tags), by raising ValueError instead of
+                # writing bad data to disk. A model misbehaving on one
+                # (provider, chapter) pair must not crash the whole
+                # benchmark and skip every remaining provider — log it and
+                # move on, same as an exhausted-fallback failure.
+                print(f"chapter {number}: rejected {name}'s output: {exc}", file=sys.stderr)
+                failed.append((name, number))
 
     if log.path is not None:
         print_report(log.path)
