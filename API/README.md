@@ -82,14 +82,30 @@ en permanence). Les requêtes envoient aussi les en-têtes `HTTP-Referer` et
 
 ## Où les déposer
 
-Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner :
+Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner les 4
+clés (obligatoires pour que la chaîne de fallback complète tourne de bout en
+bout). Les `*_MODEL` sont pré-remplies avec le modèle gratuit retenu pour
+chaque provider — à ne changer que pour tester un autre modèle :
 
 ```
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
+GEMINI_MODEL=gemini-2.5-flash
+
 MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
+MISTRAL_MODEL=mistral-small-latest
+
 GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
+GROQ_MODEL=openai/gpt-oss-120b
+
 OPENROUTER_API_KEY=la-clé-openrouter-copiée-ci-dessus
+OPENROUTER_MODEL=
 ```
+
+`OPENROUTER_MODEL` reste volontairement vide : contrairement aux 3 autres, le
+modèle OpenRouter n'est jamais codé en dur (issue #8) — le client résout un
+modèle `:free` disponible via `GET /models?max_price=0` à chaque appel, parce
+que le catalogue gratuit change dans le temps. Ne renseigner cette ligne que
+pour forcer un modèle précis à la place de la résolution automatique.
 
 `.env` est dans `.gitignore` — ne jamais commiter de clé.
 
