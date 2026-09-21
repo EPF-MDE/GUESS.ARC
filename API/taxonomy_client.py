@@ -2,9 +2,9 @@
 """
 Taxonomy tagging client (issue #5) — single OpenAI-compatible HTTP client,
 one chapter (entire silver .md, front-matter + every section) per call.
-Providers are tried in a fallback chain (issues #6, #7): Gemini first,
-Mistral as 2nd relay, Groq as 3rd relay if the prior links error
-persistently or their quota is exhausted.
+Providers are tried in a fallback chain (issues #6, #7, #8): Gemini first,
+Mistral as 2nd relay, Groq as 3rd relay, OpenRouter as 4th and last relay
+if the prior links error persistently or their quota is exhausted.
 
 Reads data/silver/chapter_NNNN.md, writes data/taxonomy/chapter_NNNN.json.
 Chapters already present under data/taxonomy/ are skipped: no re-call, no
@@ -15,7 +15,7 @@ Usage:
     python API/taxonomy_client.py --max-chapter 50
 
 See API/README.md for how to obtain and set GEMINI_API_KEY / MISTRAL_API_KEY /
-GROQ_API_KEY.
+GROQ_API_KEY / OPENROUTER_API_KEY.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import requests
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from provider_fallback import ProviderCallError, call_with_fallback  # noqa: E402
+from provider_fallback import AllProvidersFailedError, ProviderCallError, call_with_fallback  # noqa: E402
 from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
 from taxonomy_core import (  # noqa: E402
     build_system_prompt,
@@ -60,8 +60,36 @@ def _parse_retry_after(response: requests.Response) -> float | None:
         return None
 
 
+def resolve_free_model(provider: ProviderConfig) -> str:
+    """Pick a `:free` model id from the provider's live catalog (issue #8) —
+    `GET /models?max_price=0` — instead of a hardcoded id, since the free
+    catalog rotates over time. Called once per provider attempt (from the
+    call_provider_chain factory, not from inside call_provider), so it isn't
+    re-run on every in-place 429/5xx retry of the completion call.
+
+    Raises ProviderCallError — on 429/5xx, or when the catalog currently has
+    no `:free` model at all — so a resolution failure is folded into the same
+    per-provider error (and, if every provider fails, the same
+    AllProvidersFailedError) as a chat completion failure, instead of
+    escaping as a bare, unhandled exception."""
+    url = provider.base_url.rstrip("/") + "/models"
+    headers = {
+        "Authorization": f"Bearer {provider.api_key()}",
+        **(provider.extra_headers or {}),
+    }
+    response = requests.get(url, headers=headers, params={"max_price": 0}, timeout=30)
+    if response.status_code == 429 or 500 <= response.status_code < 600:
+        raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
+    response.raise_for_status()
+    free_models = [m["id"] for m in response.json().get("data", []) if m.get("id", "").endswith(":free")]
+    if not free_models:
+        raise ProviderCallError(503, message=f"{provider.name}: no ':free' model available in the current catalog")
+    return free_models[0]
+
+
 def call_provider(
     provider: ProviderConfig,
+    model: str,
     system_prompt: str,
     chapter_markdown: str,
     json_schema: dict,
@@ -73,7 +101,7 @@ def call_provider(
     Not covered by tests: it needs network access."""
     url = provider.base_url.rstrip("/") + "/chat/completions"
     body = {
-        "model": provider.model(),
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": chapter_markdown},
@@ -90,6 +118,7 @@ def call_provider(
     headers = {
         "Authorization": f"Bearer {provider.api_key()}",
         "Content-Type": "application/json",
+        **(provider.extra_headers or {}),
     }
     response = requests.post(url, headers=headers, json=body, timeout=120)
     if response.status_code == 429 or 500 <= response.status_code < 600:
@@ -114,7 +143,11 @@ def call_provider_chain(
     tests inject a no-op `sleep_fn` there instead of waiting on real backoffs."""
 
     def factory(provider: ProviderConfig):
-        return lambda: call_provider(provider, system_prompt, chapter_markdown, json_schema)
+        # Resolved once per provider attempt, not on every in-place retry
+        # (issue #8) — a resolution failure here is a ProviderCallError,
+        # caught by call_with_fallback exactly like a completion failure.
+        model = provider.model() or resolve_free_model(provider)
+        return lambda: call_provider(provider, model, system_prompt, chapter_markdown, json_schema)
 
     return call_with_fallback(providers, factory, **retry_kwargs)
 
@@ -136,7 +169,17 @@ def tag_chapter(
         return None
 
     chapter_markdown = silver_path.read_text(encoding="utf-8")
-    envelope, used_provider = call_provider_chain(providers, system_prompt, chapter_markdown, json_schema)
+    try:
+        envelope, used_provider = call_provider_chain(providers, system_prompt, chapter_markdown, json_schema)
+    except AllProvidersFailedError as exc:
+        # issue #8 AC: never silently skip a chapter when every provider in
+        # the chain is exhausted — surface it loudly and re-raise instead of
+        # letting the batch loop move on unnoticed.
+        print(
+            f"chapter {number}: ALL PROVIDERS FAILED ({', '.join(p.name for p in providers)}): {exc}",
+            file=sys.stderr,
+        )
+        raise
     if used_provider is not providers[0]:
         print(f"chapter {number}: fell back to provider '{used_provider.name}'")
 

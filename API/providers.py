@@ -16,7 +16,13 @@ class ProviderConfig:
     base_url: str
     api_key_env: str
     model_env: str
-    default_model: str
+    # None means "no fixed model — resolve one at call time" (issue #8:
+    # OpenRouter's free catalog changes over time, so it's never hardcoded
+    # here). `model_env` still overrides it when set, same as every provider.
+    default_model: str | None
+    # Static headers to send with every request to this provider (issue #8:
+    # OpenRouter's HTTP-Referer/X-Title). None for providers that need none.
+    extra_headers: dict[str, str] | None = None
 
     def api_key(self) -> str:
         key = os.environ.get(self.api_key_env)
@@ -27,7 +33,7 @@ class ProviderConfig:
             )
         return key
 
-    def model(self) -> str:
+    def model(self) -> str | None:
         return os.environ.get(self.model_env) or self.default_model
 
 
@@ -62,9 +68,24 @@ GROQ = ProviderConfig(
     default_model="openai/gpt-oss-120b",
 )
 
-PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL, "groq": GROQ}
+OPENROUTER = ProviderConfig(
+    name="openrouter",
+    base_url="https://openrouter.ai/api/v1",
+    api_key_env="OPENROUTER_API_KEY",
+    model_env="OPENROUTER_MODEL",
+    # No hardcoded id (issue #8 acceptance criteria): the free catalog rotates,
+    # so taxonomy_client.py resolves a `:free` model via GET /models?max_price=0
+    # at call time whenever this is None and OPENROUTER_MODEL isn't set.
+    default_model=None,
+    extra_headers={
+        "HTTP-Referer": "https://github.com/EPF-MDE/GUESS.ARC",
+        "X-Title": "GUESS.ARC taxonomy tagger",
+    },
+)
 
-# Ordered fallback chain (issue #6): tried in this order, Gemini first. Future
-# tickets (#8 OpenRouter) extend this list — never branch on provider name in
-# the call/fallback logic itself.
-FALLBACK_CHAIN = ["gemini", "mistral", "groq"]
+PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL, "groq": GROQ, "openrouter": OPENROUTER}
+
+# Ordered fallback chain (issue #6): tried in this order, Gemini first, then
+# Mistral (#6), Groq (#7), OpenRouter as the 4th and last relay (#8) — never
+# branch on provider name in the call/fallback logic itself.
+FALLBACK_CHAIN = ["gemini", "mistral", "groq", "openrouter"]

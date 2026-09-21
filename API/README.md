@@ -1,4 +1,4 @@
-# API — client de tagging taxonomie (issues #5, #6, #7)
+# API — client de tagging taxonomie (issues #5, #6, #7, #8)
 
 Client HTTP unique, compatible OpenAI, qui appelle un LLM pour tagger **un**
 chapitre à la fois (fichier `.md` silver entier) et écrit un
@@ -9,7 +9,11 @@ clé, identifiant de modèle) — voir `providers.py`. Les appels passent par un
 **chaîne de fallback** (`provider_fallback.py`, issue #6) : le provider
 courant est tenté, avec retry en place sur `429`/`5xx`, puis bascule sur le
 suivant si l'échec persiste. Chaîne branchée : Gemini (1er), Mistral (2e
-relais), Groq (3e relais).
+relais), Groq (3e relais), OpenRouter (4e et dernier relais).
+
+Si les 4 providers de la chaîne échouent sur un chapitre donné, le client ne
+saute jamais silencieusement le chapitre : une erreur `AllProvidersFailedError`
+est levée (avec un message explicite sur stderr) et remonte à l'appelant.
 
 ## Obtenir une clé Gemini (gratuite)
 
@@ -47,6 +51,19 @@ gratuit le 2026-06-17.
 > réponses Groq et devra suivre l'usage autrement (ex. comptage local des
 > appels).
 
+## Obtenir une clé OpenRouter (gratuite)
+
+1. Aller sur [openrouter.ai/keys](https://openrouter.ai/keys).
+2. Se connecter (ou créer un compte), cliquer sur **Create Key**.
+3. Copier la clé.
+
+Sert de 4e et dernier relais, derrière Gemini, Mistral et Groq. Contrairement
+aux autres providers, le modèle n'est **jamais codé en dur** : le client
+interroge `GET /models?max_price=0` au moment de l'appel pour choisir un
+modèle `:free` disponible dans le catalogue gratuit d'OpenRouter (qui tourne
+en permanence). Les requêtes envoient aussi les en-têtes `HTTP-Referer` et
+`X-Title` recommandés par OpenRouter pour identifier l'app appelante.
+
 ## Où les déposer
 
 Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner :
@@ -55,6 +72,7 @@ Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner :
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
 MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
 GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
+OPENROUTER_API_KEY=la-clé-openrouter-copiée-ci-dessus
 ```
 
 `.env` est dans `.gitignore` — ne jamais commiter de clé.
@@ -64,7 +82,7 @@ GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
 ```bash
 pip install -r requirements.txt
 
-# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral, groq)
+# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral, groq, openrouter)
 python API/taxonomy_client.py --chapters 1 2
 
 # tous les chapitres 1..N
@@ -95,3 +113,5 @@ python API/taxonomy_client.py --chapters 1 --providers mistral
 | `MISTRAL_MODEL` | Surcharge le modèle par défaut (`mistral-small-latest`) | Non |
 | `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (3e relais par défaut) |
 | `GROQ_MODEL` | Surcharge le modèle par défaut (`openai/gpt-oss-120b`) | Non |
+| `OPENROUTER_API_KEY` | Clé OpenRouter | Oui, pour `openrouter` (4e et dernier relais par défaut) |
+| `OPENROUTER_MODEL` | Fixe un modèle au lieu de la résolution runtime (`GET /models?max_price=0`) | Non |
