@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://guess.arc/taxonomy-schema-v1.json",
+  "title": "GUESS.ARC taxonomy chapter envelope v1",
+  "description": "Formal JSON Schema for the envelope in docs/taxonomy-schema.md (issue #2/#5). Loaded from this file at call time, both for the API response_format and for output validation — never hardcoded in the client.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "chapter", "characters", "interactions"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "chapter": { "$ref": "#/$defs/chapter" },
+    "characters": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/character" }
+    },
+    "interactions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/interaction" }
+    }
+  },
+  "$defs": {
+    "chapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "arc",
+        "chapter_mood",
+        "tension_level",
+        "locations",
+        "location_change",
+        "sea_region",
+        "cliffhanger_type",
+        "marines_present",
+        "yonko_present",
+        "yonko_name",
+        "shichibukai_present",
+        "world_government_present",
+        "revolutionary_army_present",
+        "road_poneglyph_found",
+        "ancient_weapon_mentioned",
+        "will_of_d_mentioned",
+        "color_spread",
+        "new_arc_starts",
+        "arc_ends",
+        "new_alliance_formed",
+        "confidence"
+      ],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "arc": { "type": "string" },
+        "chapter_mood": { "type": "string" },
+        "tension_level": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "locations": { "type": "array", "items": { "type": "string" } },
+        "location_change": { "type": "boolean" },
+        "sea_region": { "type": "string" },
+        "cliffhanger_type": { "type": ["string", "null"] },
+        "marines_present": { "type": "boolean" },
+        "yonko_present": { "type": "boolean" },
+        "yonko_name": { "type": ["string", "null"] },
+        "shichibukai_present": { "type": "boolean" },
+        "world_government_present": { "type": "boolean" },
+        "revolutionary_army_present": { "type": "boolean" },
+        "road_poneglyph_found": { "type": "boolean" },
+        "ancient_weapon_mentioned": { "type": "boolean" },
+        "will_of_d_mentioned": { "type": "boolean" },
+        "color_spread": { "type": "boolean" },
+        "new_arc_starts": { "type": "boolean" },
+        "arc_ends": { "type": "boolean" },
+        "new_alliance_formed": { "type": "boolean" },
+        "confidence": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "character": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "character_id",
+        "role",
+        "affiliation",
+        "health_state",
+        "emotional_state",
+        "technique_revealed",
+        "haki_used",
+        "power_used",
+        "dies",
+        "death_type",
+        "bounty_revealed",
+        "major_decision",
+        "arc_goal_progress",
+        "has_flashback",
+        "confidence"
+      ],
+      "properties": {
+        "character_id": { "type": "string", "minLength": 1 },
+        "role": { "type": "string" },
+        "affiliation": { "type": ["string", "null"] },
+        "health_state": { "type": "string" },
+        "emotional_state": { "type": "string" },
+        "technique_revealed": { "type": ["string", "null"] },
+        "haki_used": { "type": "array", "items": { "type": "string" } },
+        "power_used": { "type": ["string", "null"] },
+        "dies": { "type": "boolean" },
+        "death_type": { "type": ["string", "null"] },
+        "bounty_revealed": { "type": "boolean" },
+        "major_decision": { "type": "boolean" },
+        "arc_goal_progress": { "type": "string" },
+        "has_flashback": { "type": "boolean" },
+        "confidence": { "type": "integer", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "fight_id", "battle", "duels", "ends_this_chapter", "winner"],
+      "properties": {
+        "type": { "const": "fight" },
+        "fight_id": { "type": "string", "minLength": 1 },
+        "battle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sides"],
+          "properties": {
+            "sides": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "duels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["participants", "confidence"],
+            "properties": {
+              "participants": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": { "type": "string" }
+              },
+              "confidence": { "type": "integer", "minimum": 0, "maximum": 100 }
+            }
+          }
+        },
+        "ends_this_chapter": { "type": "boolean" },
+        "winner": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+"""OpenAI-compatible provider configs (issue #5).
+
+A provider is only a base URL, the name of the env var holding its API key, and
+a model id — never per-provider request/parsing logic. New providers (ticket
+#6+) are added as a new ProviderConfig entry here, not as new client code.
+"""
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    name: str
+    base_url: str
+    api_key_env: str
+    model_env: str
+    default_model: str
+
+    def api_key(self) -> str:
+        key = os.environ.get(self.api_key_env)
+        if not key:
+            raise RuntimeError(
+                f"{self.api_key_env} is not set — see API/README.md, "
+                f"then set it in the root .env"
+            )
+        return key
+
+    def model(self) -> str:
+        return os.environ.get(self.model_env) or self.default_model
+
+
+GEMINI = ProviderConfig(
+    name="gemini",
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+    api_key_env="GEMINI_API_KEY",
+    model_env="GEMINI_MODEL",
+    default_model="gemini-2.5-flash",
+)
+
+PROVIDERS = {"gemini": GEMINI}
