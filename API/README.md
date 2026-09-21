@@ -1,4 +1,4 @@
-# API — client de tagging taxonomie (issues #5, #6, #7, #8)
+# API — client de tagging taxonomie (issues #5, #6, #7, #8, #9)
 
 Client HTTP unique, compatible OpenAI, qui appelle un LLM pour tagger **un**
 chapitre à la fois (fichier `.md` silver entier) et écrit un
@@ -14,6 +14,22 @@ relais), Groq (3e relais), OpenRouter (4e et dernier relais).
 Si les 4 providers de la chaîne échouent sur un chapitre donné, le client ne
 saute jamais silencieusement le chapitre : une erreur `AllProvidersFailedError`
 est levée (avec un message explicite sur stderr) et remonte à l'appelant.
+
+## Compteur de quota journalier (`API/quota_state.json`, issue #9)
+
+Avant d'appeler un provider, le client vérifie son budget journalier local
+dans `API/quota_state.json` (`{provider: {date, count}}`) et bascule
+directement sur le suivant de la chaîne si le budget est épuisé — **sans
+effectuer l'appel réseau**. Le compteur est mis à jour à chaque appel
+*réussi* et persiste entre deux exécutions (redémarrage à froid) ; il n'est
+remis à zéro que lorsque la date stockée n'est plus celle du jour.
+
+Seuls Groq (1000 req/jour, tier gratuit `openai/gpt-oss-120b`) et OpenRouter
+(50 req/jour sans crédit acheté) ont une limite locale configurée
+(`ProviderConfig.daily_limit`) : Gemini et Mistral exposent déjà leur RPD
+restant dans les en-têtes de réponse, donc ne sont pas (encore) suivis
+localement. `API/quota_state.json` est local à la machine et n'est pas
+commité (voir `.gitignore`).
 
 ## Obtenir une clé Gemini (gratuite)
 

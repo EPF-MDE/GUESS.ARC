@@ -4,7 +4,9 @@ Taxonomy tagging client (issue #5) — single OpenAI-compatible HTTP client,
 one chapter (entire silver .md, front-matter + every section) per call.
 Providers are tried in a fallback chain (issues #6, #7, #8): Gemini first,
 Mistral as 2nd relay, Groq as 3rd relay, OpenRouter as 4th and last relay
-if the prior links error persistently or their quota is exhausted.
+if the prior links error persistently or their quota is exhausted — checked
+preventively via a persistent local counter (issue #9,
+API/quota_state.json) before a provider is even called.
 
 Reads data/silver/chapter_NNNN.md, writes data/taxonomy/chapter_NNNN.json.
 Chapters already present under data/taxonomy/ are skipped: no re-call, no
@@ -30,6 +32,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from provider_fallback import AllProvidersFailedError, ProviderCallError, call_with_fallback  # noqa: E402
 from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
+from quota_state import QUOTA_EXHAUSTED_STATUS, QuotaState  # noqa: E402
 from taxonomy_core import (  # noqa: E402
     build_system_prompt,
     extract_taxonomy_definition,
@@ -133,23 +136,41 @@ def call_provider_chain(
     system_prompt: str,
     chapter_markdown: str,
     json_schema: dict,
+    quota: QuotaState | None = None,
     **retry_kwargs,
 ) -> tuple[dict, ProviderConfig]:
     """Try `providers` in order (issue #6): current provider first, retrying
     in place on 429/5xx, then falling over to the next provider if it's
     still failing. Returns (envelope, provider_that_succeeded).
 
+    `quota` (issue #9) is checked *before* each provider is attempted: a
+    provider whose local daily budget is exhausted (see
+    ProviderConfig.daily_limit) is skipped straight away — no network call —
+    exactly like a persistently-failing provider falling over to the next
+    one. Defaults to an in-memory, never-persisted QuotaState so callers
+    that don't care about quotas (e.g. most tests) aren't affected by, or
+    don't affect, API/quota_state.json.
+
     `retry_kwargs` (e.g. `sleep_fn`) are forwarded to call_with_fallback —
     tests inject a no-op `sleep_fn` there instead of waiting on real backoffs."""
+    if quota is None:
+        quota = QuotaState(path=None)
 
     def factory(provider: ProviderConfig):
+        if not quota.has_budget(provider.name, provider.daily_limit):
+            raise ProviderCallError(
+                QUOTA_EXHAUSTED_STATUS,
+                message=f"{provider.name}: local daily quota exhausted, skipped without a network call",
+            )
         # Resolved once per provider attempt, not on every in-place retry
         # (issue #8) — a resolution failure here is a ProviderCallError,
         # caught by call_with_fallback exactly like a completion failure.
         model = provider.model() or resolve_free_model(provider)
         return lambda: call_provider(provider, model, system_prompt, chapter_markdown, json_schema)
 
-    return call_with_fallback(providers, factory, **retry_kwargs)
+    envelope, used_provider = call_with_fallback(providers, factory, **retry_kwargs)
+    quota.record_success(used_provider.name)
+    return envelope, used_provider
 
 
 def tag_chapter(
@@ -157,6 +178,7 @@ def tag_chapter(
     providers: list[ProviderConfig],
     system_prompt: str,
     json_schema: dict,
+    quota: QuotaState | None = None,
 ) -> Path | None:
     silver_path = SILVER_DIR / f"chapter_{number:04d}.md"
     if not silver_path.exists():
@@ -170,7 +192,9 @@ def tag_chapter(
 
     chapter_markdown = silver_path.read_text(encoding="utf-8")
     try:
-        envelope, used_provider = call_provider_chain(providers, system_prompt, chapter_markdown, json_schema)
+        envelope, used_provider = call_provider_chain(
+            providers, system_prompt, chapter_markdown, json_schema, quota=quota
+        )
     except AllProvidersFailedError as exc:
         # issue #8 AC: never silently skip a chapter when every provider in
         # the chain is exhausted — surface it loudly and re-raise instead of
@@ -200,6 +224,11 @@ def tag_chapter(
 def run(chapters: list[int] | None, max_chapter: int | None, provider_names: list[str]) -> None:
     load_dotenv(REPO_ROOT / ".env")
     providers = [PROVIDERS[name] for name in provider_names]
+    # Loaded once and shared across every chapter in this run (issue #9): a
+    # provider's budget spent tagging chapter N carries over to chapter N+1
+    # in the same run, and persists to API/quota_state.json so it also
+    # carries over across a cold restart of the script.
+    quota = QuotaState()
 
     taxonomy_definition = extract_taxonomy_definition(SCHEMA_DOC_PATH.read_text(encoding="utf-8"))
     system_prompt = build_system_prompt(taxonomy_definition)
@@ -213,7 +242,7 @@ def run(chapters: list[int] | None, max_chapter: int | None, provider_names: lis
         raise SystemExit("either --chapters or --max-chapter is required")
 
     for number in numbers:
-        tag_chapter(number, providers, system_prompt, json_schema)
+        tag_chapter(number, providers, system_prompt, json_schema, quota=quota)
 
 
 def main() -> None:

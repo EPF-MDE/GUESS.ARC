@@ -23,6 +23,10 @@ class ProviderConfig:
     # Static headers to send with every request to this provider (issue #8:
     # OpenRouter's HTTP-Referer/X-Title). None for providers that need none.
     extra_headers: dict[str, str] | None = None
+    # Local daily request budget enforced by quota_state.py (issue #9). None
+    # means "not locally tracked" — Gemini/Mistral expose their remaining RPD
+    # in response headers, so a local counter isn't needed for them (yet).
+    daily_limit: int | None = None
 
     def api_key(self) -> str:
         key = os.environ.get(self.api_key_env)
@@ -57,15 +61,16 @@ MISTRAL = ProviderConfig(
 # `openai/gpt-oss-120b` replaces it (issue #7).
 #
 # Note (issue #7 AC4): unlike Gemini/Mistral, Groq's response headers don't
-# expose remaining RPD (requests-per-day) quota — a future quota counter
-# (next ticket) can't read it off Groq responses and must track Groq usage
-# some other way (e.g. counting calls locally).
+# expose remaining RPD (requests-per-day) quota, so it's tracked locally
+# instead (issue #9) — 1,000 RPD is the free-tier limit for
+# openai/gpt-oss-120b (console.groq.com/docs/rate-limits).
 GROQ = ProviderConfig(
     name="groq",
     base_url="https://api.groq.com/openai/v1",
     api_key_env="GROQ_API_KEY",
     model_env="GROQ_MODEL",
     default_model="openai/gpt-oss-120b",
+    daily_limit=1000,
 )
 
 OPENROUTER = ProviderConfig(
@@ -81,6 +86,8 @@ OPENROUTER = ProviderConfig(
         "HTTP-Referer": "https://github.com/EPF-MDE/GUESS.ARC",
         "X-Title": "GUESS.ARC taxonomy tagger",
     },
+    # Hard-capped at 50 requests/day without purchased credits (issue #9).
+    daily_limit=50,
 )
 
 PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL, "groq": GROQ, "openrouter": OPENROUTER}
