@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from benchmark_log import BenchmarkLog, CallLogEntry  # noqa: E402
+from fights_index import update_fights_index_file  # noqa: E402
 from provider_fallback import AllProvidersFailedError, ProviderCallError, call_with_fallback  # noqa: E402
 from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
 from quota_state import QUOTA_EXHAUSTED_STATUS, QuotaState  # noqa: E402
@@ -275,6 +276,13 @@ def tag_chapter(
     out_path = TAXONOMY_DIR / filename
     out_path.write_text(json.dumps(envelope, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"chapter {number}: wrote {out_path}")
+
+    # issue #11: keep the Fights Index in sync as soon as a chapter with at
+    # least one `type: fight` interaction is written — a no-op otherwise, so
+    # a chapter with no fight never creates/touches fights_index.json.
+    if any(i.get("type") == "fight" for i in envelope.get("interactions", [])):
+        update_fights_index_file(number, envelope, path=TAXONOMY_DIR / "fights_index.json")
+
     return out_path
 
 
