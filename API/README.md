@@ -89,7 +89,7 @@ chaque provider — à ne changer que pour tester un autre modèle :
 
 ```
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 
 MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
 MISTRAL_MODEL=mistral-small-latest
@@ -134,6 +134,10 @@ python API/taxonomy_client.py --chapters 1 --providers mistral
   backoff exponentiel plafonné à ~120 s, avant de réessayer le même
   provider ; sur `5xx` : une nouvelle tentative, puis bascule sur le
   provider suivant si l'échec persiste.
+- `max_completion_tokens` est fixé à 8192 sur chaque appel : sans ça, un
+  provider (observé sur Groq) peut tronquer le JSON avant la fin de l'objet
+  (schéma non respecté) et répondre `400` plutôt qu'un code retryable — ce
+  qui fait échouer le chapitre au lieu de basculer sur le relais suivant.
 
 ## Run de benchmark + journalisation (`API/run_benchmark.py`, issue #10)
 
@@ -175,12 +179,40 @@ re-consomme ni appel ni quota pour les chapitres déjà traités.
 Journal écrit par défaut dans `API/benchmark_log.jsonl` (append, jamais
 commité — voir `.gitignore`) ; surchargeable via `--log-file`.
 
+### Smoke test
+
+Pour vérifier rapidement que la chaîne de fallback, le compteur de quota et
+la journalisation fonctionnent de bout en bout sans lancer le lot complet
+(20 chapitres) :
+
+```bash
+# tests unitaires — aucun appel réseau, aucune clé requise
+python -m pytest test/test_run_benchmark.py test/test_benchmark_log.py test/test_taxonomy_client_benchmark_log.py -v
+
+# run réel sur 1-2 chapitres seulement (nécessite .env avec les clés, voir ci-dessus)
+python API/run_benchmark.py --chapters 1 2
+
+# ré-afficher le rapport sans refaire d'appel
+python API/run_benchmark.py --report-only
+```
+
+- `--chapters 1 2` déclenche de vrais appels réseau sur la chaîne complète
+  (Gemini → Mistral → Groq → OpenRouter) et écrit `data/taxonomy/chapter_0001.json`
+  / `chapter_0002.json` — à supprimer ensuite si ces fichiers ne sont pas
+  censés rester (ou choisir des numéros de chapitre déjà attendus dans le
+  lot final).
+- `API/benchmark_log.jsonl` et `API/quota_state.json` sont dans `.gitignore` :
+  un smoke test ne salit jamais `git status`.
+- Si un chapitre est déjà présent dans `data/taxonomy/`, le relancer ne
+  refait aucun appel (logique de skip, issue #5) — utile pour re-tester sans
+  reconsommer de quota.
+
 ## Variables d'environnement
 
 | Variable | Rôle | Obligatoire |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Clé Google AI Studio | Oui, pour `gemini` (1er de la chaîne par défaut) |
-| `GEMINI_MODEL` | Surcharge le modèle par défaut (`gemini-2.5-flash`) | Non |
+| `GEMINI_MODEL` | Surcharge le modèle par défaut (`gemini-3.6-flash`) | Non |
 | `MISTRAL_API_KEY` | Clé Mistral AI Studio (tier Experiment) | Oui, pour `mistral` (2e relais par défaut) |
 | `MISTRAL_MODEL` | Surcharge le modèle par défaut (`mistral-small-latest`) | Non |
 | `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (3e relais par défaut) |

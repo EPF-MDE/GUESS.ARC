@@ -123,6 +123,12 @@ def call_provider(
                 "schema": json_schema,
             },
         },
+        # Some providers (observed on Groq) default to a completion budget too
+        # small for a chapter with several characters/interactions, and
+        # truncate the JSON mid-object instead of erroring — surfaced as a
+        # 400 "does not validate: missing properties" rather than a 429/5xx,
+        # so it isn't retried or fallen over, it just crashes the run.
+        "max_completion_tokens": 8192,
     }
     headers = {
         "Authorization": f"Bearer {provider.api_key()}",
