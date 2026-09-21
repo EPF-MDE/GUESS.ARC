@@ -19,6 +19,7 @@ import io
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr
 from unittest.mock import patch
@@ -346,15 +347,20 @@ class TestOpenRouterFallback(unittest.TestCase):
             return FakeResponse(500)
 
         stderr = io.StringIO()
-        with patch("taxonomy_client.requests.post", side_effect=fake_post), patch(
-            "taxonomy_client.requests.get", side_effect=fake_get
-        ), redirect_stderr(stderr):
+        # Isolated output dir: without it, this test depends on whether
+        # data/taxonomy/chapter_0001.json already exists on disk from a real
+        # run — tag_chapter would then skip straight to "already exists"
+        # instead of exercising the all-providers-failed path at all.
+        with tempfile.TemporaryDirectory() as tmp_taxonomy_dir, patch(
+            "taxonomy_client.requests.post", side_effect=fake_post
+        ), patch("taxonomy_client.requests.get", side_effect=fake_get), redirect_stderr(stderr):
             with self.assertRaises(AllProvidersFailedError):
                 tag_chapter(
                     1,
                     [GEMINI, MISTRAL, GROQ, OPENROUTER],
                     SYSTEM_PROMPT,
                     JSON_SCHEMA,
+                    output_dir=pathlib.Path(tmp_taxonomy_dir),
                 )
 
         self.assertIn("chapter 1", stderr.getvalue())

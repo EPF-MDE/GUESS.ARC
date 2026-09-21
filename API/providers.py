@@ -27,6 +27,13 @@ class ProviderConfig:
     # means "not locally tracked" — Gemini/Mistral expose their remaining RPD
     # in response headers, so a local counter isn't needed for them (yet).
     daily_limit: int | None = None
+    # response_format capability (spec section 4.3): only providers confirmed
+    # to support `{"type": "json_schema", "strict": true, ...}` get it: every
+    # other provider falls back to `{"type": "json_object"}` and relies on
+    # the applicative schema validation already run in tag_chapter on every
+    # response regardless of provider. A config flag, not a branch on
+    # provider.name, so the fallback/call logic stays generic.
+    supports_strict_json_schema: bool = False
 
     def api_key(self) -> str:
         key = os.environ.get(self.api_key_env)
@@ -47,6 +54,9 @@ GEMINI = ProviderConfig(
     api_key_env="GEMINI_API_KEY",
     model_env="GEMINI_MODEL",
     default_model="gemini-3.6-flash",
+    # Confirmed by the spec (section 4.3) as supporting strict json_schema;
+    # Mistral/Groq/OpenRouter are not confirmed, so they use json_object.
+    supports_strict_json_schema=True,
 )
 
 MISTRAL = ProviderConfig(

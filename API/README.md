@@ -128,8 +128,13 @@ python API/taxonomy_client.py --chapters 1 --providers mistral
   réseau, aucune consommation de quota supplémentaire.
 - Le bloc `## DÉFINITION TAXONOMIE` du prompt système est chargé depuis
   `docs/taxonomy-schema.md` à chaque lancement — jamais codé en dur.
-- Le schéma de sortie (`response_format: json_schema` strict + validation)
-  est chargé depuis `docs/taxonomy-schema.json`.
+- Le schéma de sortie est chargé depuis `docs/taxonomy-schema.json` et sert
+  deux usages (spec section 4.3) : `response_format: {"type": "json_schema",
+  "strict": true, ...}` pour les providers confirmés le supporter (Gemini
+  seul pour l'instant, `ProviderConfig.supports_strict_json_schema`) ; pour
+  les autres (Mistral, Groq, OpenRouter), `response_format: {"type":
+  "json_object"}` en repli, avec la même validation applicative de
+  l'enveloppe contre ce schéma après coup, quel que soit le provider utilisé.
 - Sur `429` : le client respecte `Retry-After` si présent, sinon attend un
   backoff exponentiel plafonné à ~120 s, avant de réessayer le même
   provider ; sur `5xx` : une nouvelle tentative, puis bascule sur le
@@ -141,13 +146,28 @@ python API/taxonomy_client.py --chapters 1 --providers mistral
 
 ## Run de benchmark + journalisation (`API/run_benchmark.py`, issue #10)
 
-Lance la chaîne de fallback complète sur un **lot configurable de chapitres**
-(20 par défaut) tirés de `data/silver/`, et journalise **chaque appel**
-(retries en place inclus) dans un fichier JSONL : provider/modèle utilisé,
-tokens d'entrée/sortie réels (`usage.prompt_tokens`/`completion_tokens` de la
-réponse), succès/échec, code d'erreur le cas échéant. Un provider sauté pour
-quota local épuisé (issue #9) n'est pas journalisé comme un appel : il n'a
-jamais touché le réseau.
+Le but du banc de test (spec section 1) est de comparer les modèles **entre
+eux** sur le même lot de chapitres — pas d'obtenir une seule taxonomie par
+chapitre. `run_benchmark.py` appelle donc chaque provider **indépendamment**
+sur le **même lot configurable de chapitres** (20 par défaut, tirés de
+`data/silver/`) : pas de bascule d'un provider à l'autre ici (un chapitre en
+échec sur un modèle est journalisé comme échec pour ce modèle, avec retry en
+place sur `429`/`5xx`, puis le run passe au chapitre suivant *pour ce même
+modèle* — jamais transmis à un autre). C'est volontairement différent de
+`taxonomy_client.py` en usage direct, où la chaîne de fallback sert la
+fiabilité (le premier qui répond gagne) pour tagger le corpus réel une fois
+un modèle choisi à l'issue de ce benchmark.
+
+Chaque provider écrit dans son propre sous-dossier
+`data/taxonomy/<provider>/chapter_NNNN.json` (jamais un
+`data/taxonomy/chapter_NNNN.json` partagé) : les 4 sorties sur les mêmes
+chapitres restent comparables côte à côte, pas seulement leurs statistiques
+agrégées. Chaque appel (retries en place inclus) est en plus journalisé dans
+un fichier JSONL : provider/modèle utilisé, tokens d'entrée/sortie réels
+(`usage.prompt_tokens`/`completion_tokens` de la réponse), succès/échec,
+code d'erreur le cas échéant. Un provider sauté pour quota local épuisé
+(issue #9) n'est pas journalisé comme un appel : il n'a jamais touché le
+réseau.
 
 ```bash
 # lot par défaut (20 premiers chapitres de data/silver/)
@@ -158,6 +178,9 @@ python API/run_benchmark.py --batch-size 50
 
 # chapitres précis plutôt que le lot par défaut
 python API/run_benchmark.py --chapters 1 2 3
+
+# comparer seulement un sous-ensemble de modèles
+python API/run_benchmark.py --providers gemini mistral
 
 # ré-afficher le rapport d'un run précédent sans refaire d'appel réseau
 python API/run_benchmark.py --report-only
@@ -171,13 +194,29 @@ comparer aux limites publiées (RPM/RPD/TPM/contexte) de chaque provider pour
 décider quel(s) modèle(s) tiennent à l'échelle des 1193 chapitres du corpus
 complet.
 
-Le run est **reprenable** : il réutilise la logique de skip de
-`tag_chapter` (issue #5) — un chapitre déjà présent dans `data/taxonomy/`
-n'est pas retaggé, donc relancer le même lot après une coupure ne
-re-consomme ni appel ni quota pour les chapitres déjà traités.
+Le run est **reprenable par modèle** : il réutilise la logique de skip de
+`tag_chapter` (issue #5), maintenant scopée au sous-dossier de chaque
+provider — un chapitre déjà présent dans `data/taxonomy/<provider>/` n'est
+pas retaggé *pour ce provider*, donc relancer le même lot après une coupure
+ne re-consomme ni appel ni quota pour les couples (provider, chapitre) déjà
+traités, indépendamment les uns des autres.
 
 Journal écrit par défaut dans `API/benchmark_log.jsonl` (append, jamais
 commité — voir `.gitignore`) ; surchargeable via `--log-file`.
+
+### `data/taxonomy/fights_index.json` par modèle
+
+Chaque sous-dossier `data/taxonomy/<provider>/` a son propre
+`fights_index.json`, maintenu au fil du tagging (issue #11) — les
+`fight_id` produits par un modèle n'ont aucune raison de coïncider avec ceux
+d'un autre. Un chapitre taggé **avant** que cette maintenance existe (ou
+copié hors bande) ne peuple pas rétroactivement l'index ; pour le
+reconstruire à partir des `chapter_NNNN.json` déjà présents dans un
+dossier :
+
+```bash
+python API/rebuild_fights_index.py --taxonomy-dir data/taxonomy/gemini
+```
 
 ### Smoke test
 
@@ -196,16 +235,16 @@ python API/run_benchmark.py --chapters 1 2
 python API/run_benchmark.py --report-only
 ```
 
-- `--chapters 1 2` déclenche de vrais appels réseau sur la chaîne complète
-  (Gemini → Mistral → Groq → OpenRouter) et écrit `data/taxonomy/chapter_0001.json`
-  / `chapter_0002.json` — à supprimer ensuite si ces fichiers ne sont pas
-  censés rester (ou choisir des numéros de chapitre déjà attendus dans le
-  lot final).
+- `--chapters 1 2` déclenche de vrais appels réseau sur les 4 providers
+  (Gemini, Mistral, Groq, OpenRouter, indépendamment) et écrit
+  `data/taxonomy/<provider>/chapter_0001.json` / `chapter_0002.json` pour
+  chacun — à supprimer ensuite si ces fichiers ne sont pas censés rester (ou
+  choisir des numéros de chapitre déjà attendus dans le lot final).
 - `API/benchmark_log.jsonl` et `API/quota_state.json` sont dans `.gitignore` :
   un smoke test ne salit jamais `git status`.
-- Si un chapitre est déjà présent dans `data/taxonomy/`, le relancer ne
-  refait aucun appel (logique de skip, issue #5) — utile pour re-tester sans
-  reconsommer de quota.
+- Si un chapitre est déjà présent dans `data/taxonomy/<provider>/`, le
+  relancer ne refait aucun appel pour ce provider (logique de skip, issue
+  #5) — utile pour re-tester sans reconsommer de quota.
 
 ## Variables d'environnement
 
@@ -219,3 +258,4 @@ python API/run_benchmark.py --report-only
 | `GROQ_MODEL` | Surcharge le modèle par défaut (`openai/gpt-oss-120b`) | Non |
 | `OPENROUTER_API_KEY` | Clé OpenRouter | Oui, pour `openrouter` (4e et dernier relais par défaut) |
 | `OPENROUTER_MODEL` | Fixe un modèle au lieu de la résolution runtime (`GET /models?max_price=0`) | Non |
+| `ANTHROPIC_API_KEY` | Clé Anthropic (POC Konrad) | Non — usage séparé, sans lien avec ce banc de test |

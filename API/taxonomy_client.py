@@ -110,20 +110,28 @@ def call_provider(
     — `{"input_tokens": None, "output_tokens": None}` if a provider omits
     that object, rather than failing the call over a benchmark-only detail."""
     url = provider.base_url.rstrip("/") + "/chat/completions"
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": chapter_markdown},
-        ],
-        "response_format": {
+    # Spec section 4.3: strict json_schema only for providers confirmed to
+    # support it (ProviderConfig.supports_strict_json_schema); everyone else
+    # gets free-form json_object and leans on the applicative schema
+    # validation tag_chapter already runs on every response.
+    if provider.supports_strict_json_schema:
+        response_format = {
             "type": "json_schema",
             "json_schema": {
                 "name": "taxonomy_envelope_v1",
                 "strict": True,
                 "schema": json_schema,
             },
-        },
+        }
+    else:
+        response_format = {"type": "json_object"}
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": chapter_markdown},
+        ],
+        "response_format": response_format,
         # Some providers (observed on Groq) default to a completion budget too
         # small for a chapter with several characters/interactions, and
         # truncate the JSON mid-object instead of erroring — surfaced as a
@@ -237,13 +245,28 @@ def tag_chapter(
     json_schema: dict,
     quota: QuotaState | None = None,
     log: BenchmarkLog | None = None,
+    output_dir: Path | None = None,
 ) -> Path | None:
+    """`output_dir` (default: TAXONOMY_DIR, i.e. `data/taxonomy/`) is where
+    `chapter_NNNN.json` and this run's `fights_index.json` are written and
+    where the "already tagged, skip" resumability check looks. The benchmark
+    (run_benchmark.py) passes one subdirectory per model — e.g.
+    `data/taxonomy/gemini/` — since its whole point is comparing each
+    model's own tagging output on the same chapters side by side, not just
+    whichever provider a production fallback chain happened to answer with
+    first (issue #3 spec section 1: "pour chaque provider/modèle... envoyer
+    un appel par chapitre"). Resolved from the module-level TAXONOMY_DIR at
+    call time (not bound as a mutable default) so tests patching
+    `taxonomy_client.TAXONOMY_DIR` keep working unchanged."""
+    if output_dir is None:
+        output_dir = TAXONOMY_DIR
+
     silver_path = SILVER_DIR / f"chapter_{number:04d}.md"
     if not silver_path.exists():
         print(f"chapter {number}: no silver file at {silver_path}, skipped")
         return None
 
-    already = TAXONOMY_DIR / f"chapter_{number:04d}.json"
+    already = output_dir / f"chapter_{number:04d}.json"
     if already.exists():
         print(f"chapter {number}: {already} already exists, skipped (no API call)")
         return None
@@ -272,16 +295,19 @@ def tag_chapter(
         )
 
     filename = taxonomy_output_filename(envelope)
-    TAXONOMY_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = TAXONOMY_DIR / filename
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / filename
     out_path.write_text(json.dumps(envelope, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"chapter {number}: wrote {out_path}")
 
     # issue #11: keep the Fights Index in sync as soon as a chapter with at
     # least one `type: fight` interaction is written — a no-op otherwise, so
-    # a chapter with no fight never creates/touches fights_index.json.
+    # a chapter with no fight never creates/touches fights_index.json. Kept
+    # under the same output_dir as the chapter file: each model's fallback
+    # chain produces its own fight_id continuity, so a per-model benchmark
+    # run gets its own fights_index.json, never a shared/mixed one.
     if any(i.get("type") == "fight" for i in envelope.get("interactions", [])):
-        update_fights_index_file(number, envelope, path=TAXONOMY_DIR / "fights_index.json")
+        update_fights_index_file(number, envelope, path=output_dir / "fights_index.json")
 
     return out_path
 
