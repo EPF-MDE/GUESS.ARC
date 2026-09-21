@@ -2,7 +2,8 @@
 """
 Taxonomy tagging client (issue #5) — single OpenAI-compatible HTTP client,
 one chapter (entire silver .md, front-matter + every section) per call.
-First provider wired: Gemini, via Google AI Studio's OpenAI-compatible endpoint.
+Providers are tried in a fallback chain (issue #6): Gemini first, Mistral as
+2nd relay if Gemini errors persistently or its quota is exhausted.
 
 Reads data/silver/chapter_NNNN.md, writes data/taxonomy/chapter_NNNN.json.
 Chapters already present under data/taxonomy/ are skipped: no re-call, no
@@ -12,7 +13,7 @@ Usage:
     python API/taxonomy_client.py --chapters 1 2
     python API/taxonomy_client.py --max-chapter 50
 
-See API/README.md for how to obtain and set GEMINI_API_KEY.
+See API/README.md for how to obtain and set GEMINI_API_KEY / MISTRAL_API_KEY.
 """
 from __future__ import annotations
 
@@ -25,7 +26,8 @@ import requests
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from providers import PROVIDERS, ProviderConfig  # noqa: E402
+from provider_fallback import ProviderCallError, call_with_fallback  # noqa: E402
+from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
 from taxonomy_core import (  # noqa: E402
     build_system_prompt,
     extract_taxonomy_definition,
@@ -44,6 +46,18 @@ def load_json_schema(path: Path = JSON_SCHEMA_PATH) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _parse_retry_after(response: requests.Response) -> float | None:
+    """Retry-After in seconds, if the header is present and numeric. The
+    HTTP-date form is not handled — falls back to backoff in that case."""
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def call_provider(
     provider: ProviderConfig,
     system_prompt: str,
@@ -51,7 +65,10 @@ def call_provider(
     json_schema: dict,
 ) -> dict:
     """One OpenAI-compatible chat completion call with a strict json_schema
-    response_format. Not covered by tests: it needs network access."""
+    response_format. Raises ProviderCallError on 429/5xx so
+    provider_fallback.call_with_retry can react (retry in place, or give up
+    on this provider); any other HTTP error propagates via raise_for_status.
+    Not covered by tests: it needs network access."""
     url = provider.base_url.rstrip("/") + "/chat/completions"
     body = {
         "model": provider.model(),
@@ -73,14 +90,36 @@ def call_provider(
         "Content-Type": "application/json",
     }
     response = requests.post(url, headers=headers, json=body, timeout=120)
+    if response.status_code == 429 or 500 <= response.status_code < 600:
+        raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
     response.raise_for_status()
     content = response.json()["choices"][0]["message"]["content"]
     return json.loads(content)
 
 
+def call_provider_chain(
+    providers: list[ProviderConfig],
+    system_prompt: str,
+    chapter_markdown: str,
+    json_schema: dict,
+    **retry_kwargs,
+) -> tuple[dict, ProviderConfig]:
+    """Try `providers` in order (issue #6): current provider first, retrying
+    in place on 429/5xx, then falling over to the next provider if it's
+    still failing. Returns (envelope, provider_that_succeeded).
+
+    `retry_kwargs` (e.g. `sleep_fn`) are forwarded to call_with_fallback —
+    tests inject a no-op `sleep_fn` there instead of waiting on real backoffs."""
+
+    def factory(provider: ProviderConfig):
+        return lambda: call_provider(provider, system_prompt, chapter_markdown, json_schema)
+
+    return call_with_fallback(providers, factory, **retry_kwargs)
+
+
 def tag_chapter(
     number: int,
-    provider: ProviderConfig,
+    providers: list[ProviderConfig],
     system_prompt: str,
     json_schema: dict,
 ) -> Path | None:
@@ -95,7 +134,9 @@ def tag_chapter(
         return None
 
     chapter_markdown = silver_path.read_text(encoding="utf-8")
-    envelope = call_provider(provider, system_prompt, chapter_markdown, json_schema)
+    envelope, used_provider = call_provider_chain(providers, system_prompt, chapter_markdown, json_schema)
+    if used_provider is not providers[0]:
+        print(f"chapter {number}: fell back to provider '{used_provider.name}'")
 
     errors = validate_taxonomy_envelope(envelope, json_schema)
     if errors:
@@ -111,9 +152,9 @@ def tag_chapter(
     return out_path
 
 
-def run(chapters: list[int] | None, max_chapter: int | None, provider_name: str) -> None:
+def run(chapters: list[int] | None, max_chapter: int | None, provider_names: list[str]) -> None:
     load_dotenv(REPO_ROOT / ".env")
-    provider = PROVIDERS[provider_name]
+    providers = [PROVIDERS[name] for name in provider_names]
 
     taxonomy_definition = extract_taxonomy_definition(SCHEMA_DOC_PATH.read_text(encoding="utf-8"))
     system_prompt = build_system_prompt(taxonomy_definition)
@@ -127,16 +168,22 @@ def run(chapters: list[int] | None, max_chapter: int | None, provider_name: str)
         raise SystemExit("either --chapters or --max-chapter is required")
 
     for number in numbers:
-        tag_chapter(number, provider, system_prompt, json_schema)
+        tag_chapter(number, providers, system_prompt, json_schema)
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--chapters", type=int, nargs="+", help="explicit chapter numbers to tag")
     p.add_argument("--max-chapter", type=int, help="tag chapters 1..N")
-    p.add_argument("--provider", default="gemini", choices=sorted(PROVIDERS))
+    p.add_argument(
+        "--providers",
+        nargs="+",
+        default=FALLBACK_CHAIN,
+        choices=sorted(PROVIDERS),
+        help="ordered fallback chain, current provider first (default: %(default)s)",
+    )
     args = p.parse_args()
-    run(args.chapters, args.max_chapter, args.provider)
+    run(args.chapters, args.max_chapter, args.providers)
 
 
 if __name__ == "__main__":

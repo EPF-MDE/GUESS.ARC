@@ -39,4 +39,17 @@ GEMINI = ProviderConfig(
     default_model="gemini-2.5-flash",
 )
 
-PROVIDERS = {"gemini": GEMINI}
+MISTRAL = ProviderConfig(
+    name="mistral",
+    base_url="https://api.mistral.ai/v1",
+    api_key_env="MISTRAL_API_KEY",
+    model_env="MISTRAL_MODEL",
+    default_model="mistral-small-latest",
+)
+
+PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL}
+
+# Ordered fallback chain (issue #6): tried in this order, Gemini first. Future
+# tickets (#7 Groq, #8 OpenRouter) extend this list — never branch on provider
+# name in the call/fallback logic itself.
+FALLBACK_CHAIN = ["gemini", "mistral"]
