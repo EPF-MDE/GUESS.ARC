@@ -1,4 +1,4 @@
-# API — client de tagging taxonomie (issues #5, #6, #7, #8, #9)
+# API — client de tagging taxonomie (issues #5, #6, #7, #8, #9, #10)
 
 Client HTTP unique, compatible OpenAI, qui appelle un LLM pour tagger **un**
 chapitre à la fois (fichier `.md` silver entier) et écrit un
@@ -134,6 +134,46 @@ python API/taxonomy_client.py --chapters 1 --providers mistral
   backoff exponentiel plafonné à ~120 s, avant de réessayer le même
   provider ; sur `5xx` : une nouvelle tentative, puis bascule sur le
   provider suivant si l'échec persiste.
+
+## Run de benchmark + journalisation (`API/run_benchmark.py`, issue #10)
+
+Lance la chaîne de fallback complète sur un **lot configurable de chapitres**
+(20 par défaut) tirés de `data/silver/`, et journalise **chaque appel**
+(retries en place inclus) dans un fichier JSONL : provider/modèle utilisé,
+tokens d'entrée/sortie réels (`usage.prompt_tokens`/`completion_tokens` de la
+réponse), succès/échec, code d'erreur le cas échéant. Un provider sauté pour
+quota local épuisé (issue #9) n'est pas journalisé comme un appel : il n'a
+jamais touché le réseau.
+
+```bash
+# lot par défaut (20 premiers chapitres de data/silver/)
+python API/run_benchmark.py
+
+# lot configurable
+python API/run_benchmark.py --batch-size 50
+
+# chapitres précis plutôt que le lot par défaut
+python API/run_benchmark.py --chapters 1 2 3
+
+# ré-afficher le rapport d'un run précédent sans refaire d'appel réseau
+python API/run_benchmark.py --report-only
+```
+
+À la fin du run, un rapport par provider est affiché (nombre d'appels,
+succès/échecs, répartition des codes d'erreur, tokens d'entrée/sortie
+min/moyenne/max, et un débit *observé* — appels/min et tokens/min, calculé
+depuis l'horodatage de chaque appel journalisé pour ce provider) — à
+comparer aux limites publiées (RPM/RPD/TPM/contexte) de chaque provider pour
+décider quel(s) modèle(s) tiennent à l'échelle des 1193 chapitres du corpus
+complet.
+
+Le run est **reprenable** : il réutilise la logique de skip de
+`tag_chapter` (issue #5) — un chapitre déjà présent dans `data/taxonomy/`
+n'est pas retaggé, donc relancer le même lot après une coupure ne
+re-consomme ni appel ni quota pour les chapitres déjà traités.
+
+Journal écrit par défaut dans `API/benchmark_log.jsonl` (append, jamais
+commité — voir `.gitignore`) ; surchargeable via `--log-file`.
 
 ## Variables d'environnement
 

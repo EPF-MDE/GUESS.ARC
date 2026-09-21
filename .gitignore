@@ -4,3 +4,4 @@ __pycache__/
 data/
 .env
 API/quota_state.json
+API/benchmark_log.jsonl
