@@ -4,25 +4,32 @@
 Spec section 1: the point of this benchmark is to compare providers against
 each other on the *same* batch of chapters — "pour chaque provider/modèle
 de la section 2, envoyer un appel par chapitre". So each provider in
-`--providers` (default: all 4, gemini/mistral/groq/openrouter) is called
-independently on every chapter of the batch: no cross-provider fallback
+`--providers` (default: all 6 — gemini/mistral/groq plus the 3 fixed
+OpenRouter models, openrouter-nemotron/openrouter-nex-pro/openrouter-dots)
+is called independently on every chapter of the batch: no cross-provider fallback
 here (a provider that fails on a chapter is just logged as a failure for
-that model, retried in place on 429/5xx same as always, but the run moves
-on to the next chapter for that same provider — it never hands the chapter
-to a different model). That is deliberately different from
+that model — it never hands the chapter to a different model). That is
+deliberately different from
 taxonomy_client.py's default CLI, which chains providers as a reliability
 fallback (first success wins) for tagging the real corpus once a model has
 been picked from this benchmark's results.
 
 Each provider writes its own chapter_NNNN.json under
 data/taxonomy/<provider>/ (never a shared data/taxonomy/chapter_NNNN.json)
-so the 4 models' outputs on the same chapters stay side by side and can be
+so each model's outputs on the same chapters stay side by side and can be
 diffed/compared — not just their aggregate stats. Every provider call
 attempt is still journaled to one JSONL log (API/benchmark_log.py) —
 provider/model, real input/output tokens, success/failure, error code — and
 a per-provider summary report is printed at the end, to compare against
 each provider's published RPM/RPD/TPM/context limits (spec section 2) and
 decide which model(s) scale to the full 1193-chapter corpus.
+
+Quota-frugal on free tiers (issue #12, see run_batch): chapters are sent
+round-robin across providers, each provider paced to its
+ProviderConfig.min_interval_s, a 429 is deferred to the end of the batch
+instead of retried in place, and a repeated 429 marks the provider exhausted
+for the day in API/quota_state.json — a same-day rerun skips it without any
+network call. 5xx keep tag_chapter's short in-place retry.
 
 Resumable per provider: reuses taxonomy_client.tag_chapter's existing
 skip-if-already-tagged logic (issue #5), scoped to each provider's own
@@ -46,20 +53,28 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from benchmark_log import BenchmarkLog, DEFAULT_LOG_PATH, format_report, load_entries, summarize  # noqa: E402
 from provider_fallback import AllProvidersFailedError  # noqa: E402
-from providers import FALLBACK_CHAIN, PROVIDERS  # noqa: E402
-from quota_state import QuotaState  # noqa: E402
+from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
+from quota_state import QUOTA_EXHAUSTED_STATUS, QuotaState  # noqa: E402
 from taxonomy_client import SCHEMA_DOC_PATH, SILVER_DIR, TAXONOMY_DIR, load_json_schema, tag_chapter  # noqa: E402
 from taxonomy_core import build_system_prompt, extract_taxonomy_definition  # noqa: E402
+from throttle import Throttle  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHAPTER_NUMBER_RE = re.compile(r"chapter_(\d+)\.md$")
+
+# A 429 whose Retry-After exceeds this is a daily quota, not a per-minute
+# one: waiting until the end of the batch won't help, so the provider is
+# marked exhausted straight away instead of deferred (issue #12).
+MAX_DEFERRABLE_RETRY_AFTER_S = 60.0
 
 
 def default_batch(batch_size: int) -> list[int]:
@@ -97,47 +112,122 @@ def run(chapters: list[int] | None, batch_size: int, provider_names: list[str], 
           f"providers={provider_names} (each called independently, no cross-provider "
           f"fallback — see module docstring), log={log.path}")
 
-    # One model at a time, retried in place on 429/5xx (no fallover to the
-    # next provider — see module docstring): the goal is per-model results
-    # on the identical chapter batch, not "whichever model answered first".
-    failed: list[tuple[str, int]] = []
-    for name in provider_names:
+    throttle = Throttle()
+
+    def pace(provider: ProviderConfig) -> None:
+        throttle.wait(provider.quota_name, provider.min_interval_s)
+
+    def tag(name: str, number: int) -> None:
         provider = PROVIDERS[name]
-        output_dir = TAXONOMY_DIR / provider.name
-        for number in numbers:
-            try:
-                tag_chapter(
-                    number, [provider], system_prompt, json_schema,
-                    quota=quota, log=log, output_dir=output_dir,
-                )
-            except AllProvidersFailedError:
-                # Already printed loudly by tag_chapter (issue #8 AC) — keep
-                # the batch going so one exhausted (provider, chapter) pair
-                # doesn't block the rest of the run, but remember it to
-                # report a non-zero exit at the end.
-                failed.append((name, number))
-            except ValueError as exc:
-                # tag_chapter rejects a schema-invalid envelope, or one whose
-                # self-reported chapter.number doesn't match what was asked
-                # for (observed on Groq: it returned a well-formed but
-                # unrelated chapter's tags), by raising ValueError instead of
-                # writing bad data to disk. A model misbehaving on one
-                # (provider, chapter) pair must not crash the whole
-                # benchmark and skip every remaining provider — log it and
-                # move on, same as an exhausted-fallback failure.
-                print(f"chapter {number}: rejected {name}'s output: {exc}", file=sys.stderr)
-                failed.append((name, number))
+        tag_chapter(
+            number, [provider], system_prompt, json_schema,
+            quota=quota, log=log, output_dir=TAXONOMY_DIR / provider.name,
+            before_call=pace, max_429_attempts=0,
+        )
+
+    result = run_batch(numbers, provider_names, tag, quota)
 
     if log.path is not None:
         print_report(log.path)
 
-    if failed:
-        by_provider: dict[str, list[int]] = {}
-        for name, number in failed:
-            by_provider.setdefault(name, []).append(number)
-        detail = "; ".join(f"{name}: {nums}" for name, nums in by_provider.items())
-        print(f"\n{len(failed)} (provider, chapter) pair(s) failed: {detail}", file=sys.stderr)
+    for label, pairs in (("failed", result.failed), ("skipped (provider exhausted today)", result.skipped)):
+        if pairs:
+            print(f"\n{len(pairs)} (provider, chapter) pair(s) {label}: {_by_provider(pairs)}", file=sys.stderr)
+    if result.failed or result.skipped:
         raise SystemExit(1)
+
+
+def _by_provider(pairs: list[tuple[str, int]]) -> str:
+    grouped: dict[str, list[int]] = {}
+    for name, number in pairs:
+        grouped.setdefault(name, []).append(number)
+    return "; ".join(f"{name}: {nums}" for name, nums in grouped.items())
+
+
+@dataclass
+class BatchResult:
+    failed: list[tuple[str, int]] = field(default_factory=list)
+    # Pairs never sent because their provider was out of quota for the day.
+    skipped: list[tuple[str, int]] = field(default_factory=list)
+    # quota_name keys (not provider names) out of budget for today.
+    exhausted: set[str] = field(default_factory=set)
+
+
+def run_batch(
+    numbers: list[int],
+    provider_names: list[str],
+    tag_fn: Callable[[str, int], object],
+    quota: QuotaState,
+) -> BatchResult:
+    """Quota-frugal schedule for the benchmark (issue #12), independent of
+    HTTP: `tag_fn(provider_name, chapter)` does one (provider, chapter) pair
+    and raises what tag_chapter raises.
+
+    - Round-robin: chapter N goes to every provider before chapter N+1 goes
+      to any, so each provider rests while the others work.
+    - A 429 is never retried in place (`tag_fn` must not either): the pair is
+      deferred and retried once after the whole batch. A second 429 there —
+      or a Retry-After longer than MAX_DEFERRABLE_RETRY_AFTER_S at any
+      point — marks the provider exhausted for the day in `quota` (persisted)
+      and skips every pair it still had, with no network call. Providers
+      already marked exhausted today are skipped from the start. Exhaustion
+      is tracked per ProviderConfig.quota_name, the account the quota
+      belongs to: the 3 OpenRouter models share one key, so one of them
+      proving it spent skips the other two as well.
+    - A provider whose local daily budget runs out (QUOTA_EXHAUSTED_STATUS)
+      is skipped for the rest of the run too, without a mark: the local
+      counter already persists that.
+    - Anything else (5xx after tag_chapter's own short retry, a validation
+      rejection) fails just that pair; the run goes on."""
+    result = BatchResult()
+    for key in {PROVIDERS[name].quota_name for name in provider_names}:
+        if quota.is_exhausted(key):
+            print(f"{key}: marked exhausted earlier today in quota_state.json, skipped (no API call)")
+            result.exhausted.add(key)
+    deferred: list[tuple[str, int]] = []
+
+    def attempt(name: str, number: int, is_retry: bool) -> None:
+        key = PROVIDERS[name].quota_name
+        if key in result.exhausted:
+            result.skipped.append((name, number))
+            return
+        try:
+            tag_fn(name, number)
+        except AllProvidersFailedError as exc:
+            # Already printed loudly by tag_chapter (issue #8 AC).
+            error = exc.errors.get(name)
+            status = getattr(error, "status_code", None)
+            if status == QUOTA_EXHAUSTED_STATUS:
+                result.exhausted.add(key)
+                result.skipped.append((name, number))
+            elif status == 429:
+                retry_after = error.retry_after
+                if is_retry or (retry_after is not None and retry_after > MAX_DEFERRABLE_RETRY_AFTER_S):
+                    print(f"{name}: 429 again, '{key}' marked exhausted for today — remaining chapters "
+                          f"of every provider on it are skipped", file=sys.stderr)
+                    quota.mark_exhausted(key)
+                    result.exhausted.add(key)
+                    result.failed.append((name, number))
+                else:
+                    print(f"chapter {number}: {name} answered 429, deferred to the end of the batch")
+                    deferred.append((name, number))
+            else:
+                result.failed.append((name, number))
+        except ValueError as exc:
+            # tag_chapter rejects a schema-invalid envelope, or one whose
+            # self-reported chapter.number doesn't match what was asked for
+            # (observed on Groq), instead of writing bad data to disk — and
+            # journals it as VALIDATION_REJECTED. One misbehaving pair must
+            # not crash the whole benchmark.
+            print(f"chapter {number}: rejected {name}'s output: {exc}", file=sys.stderr)
+            result.failed.append((name, number))
+
+    for number in numbers:
+        for name in provider_names:
+            attempt(name, number, is_retry=False)
+    for name, number in deferred:
+        attempt(name, number, is_retry=True)
+    return result
 
 
 def main() -> None:

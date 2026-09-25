@@ -27,6 +27,13 @@ class ProviderConfig:
     # means "not locally tracked" — Gemini/Mistral expose their remaining RPD
     # in response headers, so a local counter isn't needed for them (yet).
     daily_limit: int | None = None
+    # Key quota_state.py counts against (defaults to `name` when None). Set
+    # this to a shared value when several ProviderConfigs draw from the same
+    # underlying account limit — e.g. multiple fixed OpenRouter models each
+    # billed against the same 50 req/day free-tier cap on one API key: they
+    # must not each get their own 50, or the local tracker would let the run
+    # make 3x the real budget before OpenRouter itself starts 429ing.
+    quota_key: str | None = None
     # response_format capability (spec section 4.3): only providers confirmed
     # to support `{"type": "json_schema", "strict": true, ...}` get it: every
     # other provider falls back to `{"type": "json_object"}` and relies on
@@ -34,6 +41,12 @@ class ProviderConfig:
     # response regardless of provider. A config flag, not a branch on
     # provider.name, so the fallback/call logic stays generic.
     supports_strict_json_schema: bool = False
+    # Minimum seconds between two calls to this provider in the benchmark
+    # (issue #12), enforced by throttle.Throttle (run_benchmark.py) before every
+    # attempt, keyed by `quota_name` so configs sharing one account share
+    # one pace. Derived from each free tier's published limits (see
+    # API/README.md): pacing to them is cheaper than learning them via 429s.
+    min_interval_s: float = 0.0
 
     def api_key(self) -> str:
         key = os.environ.get(self.api_key_env)
@@ -47,6 +60,10 @@ class ProviderConfig:
     def model(self) -> str | None:
         return os.environ.get(self.model_env) or self.default_model
 
+    @property
+    def quota_name(self) -> str:
+        return self.quota_key or self.name
+
 
 GEMINI = ProviderConfig(
     name="gemini",
@@ -57,6 +74,8 @@ GEMINI = ProviderConfig(
     # Confirmed by the spec (section 4.3) as supporting strict json_schema;
     # Mistral/Groq/OpenRouter are not confirmed, so they use json_object.
     supports_strict_json_schema=True,
+    # ~20 RPD on the free tier, RPM unpublished.
+    min_interval_s=15.0,
 )
 
 MISTRAL = ProviderConfig(
@@ -65,6 +84,8 @@ MISTRAL = ProviderConfig(
     api_key_env="MISTRAL_API_KEY",
     model_env="MISTRAL_MODEL",
     default_model="mistral-small-latest",
+    # Experiment tier: 1 req/s.
+    min_interval_s=2.0,
 )
 
 # `llama-3.3-70b-versatile` was deprecated on Groq's free tier on 2026-06-17;
@@ -81,28 +102,91 @@ GROQ = ProviderConfig(
     model_env="GROQ_MODEL",
     default_model="openai/gpt-oss-120b",
     daily_limit=1000,
+    # 30 RPM but only 8k TPM, and one chapter is ~5-7k tokens: ~1 req/min.
+    min_interval_s=60.0,
 )
 
+OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://github.com/EPF-MDE/GUESS.ARC",
+    "X-Title": "GUESS.ARC taxonomy tagger",
+}
+
+# Dynamic-catalog OpenRouter config (issue #8): resolves a `:free` model at
+# call time via GET /models?max_price=0 instead of a hardcoded id. Kept
+# available (e.g. for direct/manual use) but deliberately left out of
+# PROVIDERS/FALLBACK_CHAIN below: picking blindly off the rotating catalog
+# can land on a model whose free endpoint doesn't accept our response_format,
+# which OpenRouter answers with a raw 400 that isn't retried or fallen over —
+# it just crashes the run (observed in practice). The fixed-model configs
+# below replace it for actual benchmark/production use.
 OPENROUTER = ProviderConfig(
     name="openrouter",
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
     model_env="OPENROUTER_MODEL",
-    # No hardcoded id (issue #8 acceptance criteria): the free catalog rotates,
-    # so taxonomy_client.py resolves a `:free` model via GET /models?max_price=0
-    # at call time whenever this is None and OPENROUTER_MODEL isn't set.
     default_model=None,
-    extra_headers={
-        "HTTP-Referer": "https://github.com/EPF-MDE/GUESS.ARC",
-        "X-Title": "GUESS.ARC taxonomy tagger",
-    },
-    # Hard-capped at 50 requests/day without purchased credits (issue #9).
+    extra_headers=OPENROUTER_HEADERS,
     daily_limit=50,
+    # :free models: 20 RPM.
+    min_interval_s=3.0,
 )
 
-PROVIDERS = {"gemini": GEMINI, "mistral": MISTRAL, "groq": GROQ, "openrouter": OPENROUTER}
+# Each model we want to benchmark via OpenRouter is its own fixed-model
+# ProviderConfig, confirmed (via GET /models) to advertise `response_format`
+# support. Each writes to its own data/taxonomy/<name>/ — never a shared
+# data/taxonomy/openrouter/ — so the 3 models stay directly comparable, same
+# as gemini/mistral/groq.
+#
+# All three share one OpenRouter API key and its 50 req/day free-tier cap
+# (issue #9), so they share one quota_key ("openrouter") rather than each
+# getting their own 50 in quota_state.json.
+OPENROUTER_NEMOTRON = ProviderConfig(
+    name="openrouter-nemotron",
+    base_url="https://openrouter.ai/api/v1",
+    api_key_env="OPENROUTER_API_KEY",
+    model_env="OPENROUTER_NEMOTRON_MODEL",
+    default_model="nvidia/nemotron-3-super-120b-a12b:free",
+    extra_headers=OPENROUTER_HEADERS,
+    daily_limit=50,
+    quota_key="openrouter",
+    min_interval_s=3.0,
+)
+
+OPENROUTER_NEX_PRO = ProviderConfig(
+    name="openrouter-nex-pro",
+    base_url="https://openrouter.ai/api/v1",
+    api_key_env="OPENROUTER_API_KEY",
+    model_env="OPENROUTER_NEX_PRO_MODEL",
+    default_model="nex-agi/nex-n2.5-pro:free",
+    extra_headers=OPENROUTER_HEADERS,
+    daily_limit=50,
+    quota_key="openrouter",
+    min_interval_s=3.0,
+)
+
+OPENROUTER_DOTS = ProviderConfig(
+    name="openrouter-dots",
+    base_url="https://openrouter.ai/api/v1",
+    api_key_env="OPENROUTER_API_KEY",
+    model_env="OPENROUTER_DOTS_MODEL",
+    default_model="dots-studio/dots-3-note-preview:free",
+    extra_headers=OPENROUTER_HEADERS,
+    daily_limit=50,
+    quota_key="openrouter",
+    min_interval_s=3.0,
+)
+
+PROVIDERS = {
+    "gemini": GEMINI,
+    "mistral": MISTRAL,
+    "groq": GROQ,
+    "openrouter-nemotron": OPENROUTER_NEMOTRON,
+    "openrouter-nex-pro": OPENROUTER_NEX_PRO,
+    "openrouter-dots": OPENROUTER_DOTS,
+}
 
 # Ordered fallback chain (issue #6): tried in this order, Gemini first, then
-# Mistral (#6), Groq (#7), OpenRouter as the 4th and last relay (#8) — never
-# branch on provider name in the call/fallback logic itself.
-FALLBACK_CHAIN = ["gemini", "mistral", "groq", "openrouter"]
+# Mistral (#6), Groq (#7), then the 3 fixed OpenRouter models (#8) as the
+# last relays — never branch on provider name in the call/fallback logic
+# itself.
+FALLBACK_CHAIN = ["gemini", "mistral", "groq", "openrouter-nemotron", "openrouter-nex-pro", "openrouter-dots"]

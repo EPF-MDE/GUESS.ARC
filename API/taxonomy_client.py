@@ -25,12 +25,13 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Callable
 
 import requests
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from benchmark_log import BenchmarkLog, CallLogEntry  # noqa: E402
+from benchmark_log import VALIDATION_REJECTED, BenchmarkLog, CallLogEntry  # noqa: E402
 from fights_index import update_fights_index_file  # noqa: E402
 from provider_fallback import AllProvidersFailedError, ProviderCallError, call_with_fallback  # noqa: E402
 from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
@@ -82,7 +83,14 @@ def resolve_free_model(provider: ProviderConfig) -> str:
         "Authorization": f"Bearer {provider.api_key()}",
         **(provider.extra_headers or {}),
     }
-    response = requests.get(url, headers=headers, params={"max_price": 0}, timeout=30)
+    try:
+        response = requests.get(url, headers=headers, params={"max_price": 0}, timeout=30)
+    except requests.exceptions.RequestException as exc:
+        # A transport-level failure (timeout, connection reset, ...) never
+        # reaches response.status_code — without this it propagates as a
+        # bare requests exception, uncaught by call_with_fallback, and
+        # crashes the whole run instead of falling over like a 5xx would.
+        raise ProviderCallError(503, message=f"{provider.name}: {exc}") from exc
     if response.status_code == 429 or 500 <= response.status_code < 600:
         raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
     response.raise_for_status()
@@ -144,12 +152,45 @@ def call_provider(
         "Content-Type": "application/json",
         **(provider.extra_headers or {}),
     }
-    response = requests.post(url, headers=headers, json=body, timeout=120)
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=120)
+    except requests.exceptions.RequestException as exc:
+        # Same reasoning as resolve_free_model: a transport-level failure
+        # (observed here as a Gemini outage manifesting as a hung read that
+        # times out rather than a clean 503) must become a ProviderCallError
+        # so the run falls over/retries instead of crashing.
+        raise ProviderCallError(503, message=f"{provider.name}: {exc}") from exc
     if response.status_code == 429 or 500 <= response.status_code < 600:
         raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
     response.raise_for_status()
     payload = response.json()
-    content = payload["choices"][0]["message"]["content"]
+    # OpenRouter (see providers.py's OPENROUTER comment) can answer with
+    # HTTP 200 but an in-band `{"error": ...}` body instead of `choices`
+    # when the upstream free model itself fails (no capacity, moderation,
+    # etc.). Surfaced here as a ProviderCallError, same as any other
+    # provider failure, instead of a raw KeyError/IndexError that isn't
+    # caught by call_with_fallback and crashes the whole run.
+    if not payload.get("choices"):
+        error = payload.get("error") or {}
+        code = error.get("code")
+        status_code = code if isinstance(code, int) and 400 <= code < 600 else 502
+        raise ProviderCallError(
+            status_code,
+            message=f"{provider.name}: provider returned no choices: {error.get('message') or payload}",
+        )
+    choice = payload["choices"][0]
+    content = choice.get("message", {}).get("content")
+    if not content:
+        # `choices` was non-empty but the message content itself is null/empty
+        # — observed on reasoning models that put their answer in a separate
+        # field and leave `content` null, or a response cut off by
+        # finish_reason "length"/"content_filter". Same treatment as a
+        # missing `choices`: a ProviderCallError the fallback/benchmark loop
+        # can log and move past, not a raw TypeError from json.loads(None).
+        raise ProviderCallError(
+            502,
+            message=f"{provider.name}: empty message content (finish_reason={choice.get('finish_reason')!r})",
+        )
     usage = payload.get("usage") or {}
     return json.loads(content), {
         "input_tokens": usage.get("prompt_tokens"),
@@ -165,6 +206,7 @@ def call_provider_chain(
     quota: QuotaState | None = None,
     chapter: int | None = None,
     log: BenchmarkLog | None = None,
+    before_call: Callable[[ProviderConfig], None] | None = None,
     **retry_kwargs,
 ) -> tuple[dict, ProviderConfig]:
     """Try `providers` in order (issue #6): current provider first, retrying
@@ -190,13 +232,19 @@ def call_provider_chain(
     call. `chapter` is carried on each entry so the log can be
     cross-referenced with data/taxonomy/chapter_NNNN.json.
 
-    `retry_kwargs` (e.g. `sleep_fn`) are forwarded to call_with_fallback —
-    tests inject a no-op `sleep_fn` there instead of waiting on real backoffs."""
+    `before_call` (issue #12), if given, runs right before every chat
+    completion attempt, in-place retries included — run_benchmark.py uses it
+    to pace each provider to its `min_interval_s`.
+
+    `retry_kwargs` (e.g. `sleep_fn`, `max_429_attempts`) are forwarded to
+    call_with_fallback — tests inject a no-op `sleep_fn` there instead of
+    waiting on real backoffs, and the benchmark passes `max_429_attempts=0`
+    so a 429 surfaces at once instead of being retried in place."""
     if quota is None:
         quota = QuotaState(path=None)
 
     def factory(provider: ProviderConfig):
-        if not quota.has_budget(provider.name, provider.daily_limit):
+        if not quota.has_budget(provider.quota_name, provider.daily_limit):
             raise ProviderCallError(
                 QUOTA_EXHAUSTED_STATUS,
                 message=f"{provider.name}: local daily quota exhausted, skipped without a network call",
@@ -218,6 +266,8 @@ def call_provider_chain(
             raise
 
         def attempt():
+            if before_call is not None:
+                before_call(provider)
             try:
                 envelope, usage = call_provider(provider, model, system_prompt, chapter_markdown, json_schema)
             except ProviderCallError as exc:
@@ -234,7 +284,7 @@ def call_provider_chain(
         return attempt
 
     envelope, used_provider = call_with_fallback(providers, factory, **retry_kwargs)
-    quota.record_success(used_provider.name)
+    quota.record_success(used_provider.quota_name)
     return envelope, used_provider
 
 
@@ -246,6 +296,7 @@ def tag_chapter(
     quota: QuotaState | None = None,
     log: BenchmarkLog | None = None,
     output_dir: Path | None = None,
+    **chain_kwargs,
 ) -> Path | None:
     """`output_dir` (default: TAXONOMY_DIR, i.e. `data/taxonomy/`) is where
     `chapter_NNNN.json` and this run's `fights_index.json` are written and
@@ -257,7 +308,14 @@ def tag_chapter(
     first (issue #3 spec section 1: "pour chaque provider/modèle... envoyer
     un appel par chapitre"). Resolved from the module-level TAXONOMY_DIR at
     call time (not bound as a mutable default) so tests patching
-    `taxonomy_client.TAXONOMY_DIR` keep working unchanged."""
+    `taxonomy_client.TAXONOMY_DIR` keep working unchanged.
+
+    `chain_kwargs` (e.g. `before_call`, `max_429_attempts`, `sleep_fn`) are
+    forwarded to call_provider_chain.
+
+    A rejected envelope (ValueError below) is also journaled to `log` as a
+    VALIDATION_REJECTED entry (issue #12): the call itself was logged as a
+    success, but no file was written."""
     if output_dir is None:
         output_dir = TAXONOMY_DIR
 
@@ -274,7 +332,8 @@ def tag_chapter(
     chapter_markdown = silver_path.read_text(encoding="utf-8")
     try:
         envelope, used_provider = call_provider_chain(
-            providers, system_prompt, chapter_markdown, json_schema, quota=quota, chapter=number, log=log
+            providers, system_prompt, chapter_markdown, json_schema, quota=quota, chapter=number, log=log,
+            **chain_kwargs,
         )
     except AllProvidersFailedError as exc:
         # issue #8 AC: never silently skip a chapter when every provider in
@@ -288,9 +347,17 @@ def tag_chapter(
     if used_provider is not providers[0]:
         print(f"chapter {number}: fell back to provider '{used_provider.name}'")
 
+    def reject(message: str) -> ValueError:
+        if log is not None:
+            log.record(CallLogEntry(
+                chapter=number, provider=used_provider.name, model=used_provider.model(),
+                success=False, error_code=VALIDATION_REJECTED, error_message=message,
+            ))
+        return ValueError(message)
+
     errors = validate_taxonomy_envelope(envelope, json_schema)
     if errors:
-        raise ValueError(
+        raise reject(
             f"chapter {number}: model output failed schema validation:\n" + "\n".join(errors)
         )
 
@@ -304,7 +371,7 @@ def tag_chapter(
     # schema error, not written to disk.
     returned_number = envelope.get("chapter", {}).get("number")
     if returned_number != number:
-        raise ValueError(
+        raise reject(
             f"chapter {number}: model output claims to be chapter.number="
             f"{returned_number!r} instead of the requested {number} — rejected, not written"
         )

@@ -14,10 +14,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "API"))
-from benchmark_log import BenchmarkLog, load_entries, summarize  # noqa: E402
+from benchmark_log import VALIDATION_REJECTED, BenchmarkLog, load_entries, summarize  # noqa: E402
 from provider_fallback import AllProvidersFailedError  # noqa: E402
 from providers import GEMINI, MISTRAL, OPENROUTER  # noqa: E402
-from taxonomy_client import call_provider_chain, tag_chapter  # noqa: E402
+from taxonomy_client import SILVER_DIR, call_provider_chain, tag_chapter  # noqa: E402
 
 from test_taxonomy_client_fallback import FakeResponse, models_response, no_sleep  # noqa: E402
 from test_taxonomy_envelope import VALID_ENVELOPE  # noqa: E402
@@ -278,6 +278,99 @@ class TestOpenRouterCatalogLookupFailureIsLogged(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertFalse(entries[0]["success"])
         self.assertEqual(entries[0]["error_code"], 503)
+
+
+@unittest.skipUnless(SILVER_DIR.exists(), "data/silver/ not present in this checkout")
+class TestValidationRejectionIsLogged(unittest.TestCase):
+    """issue #12: an HTTP 200 whose envelope tag_chapter rejects must show up
+    in the journal as a dedicated failure, so the report can tell "call OK"
+    from "file written"."""
+
+    def setUp(self):
+        patcher = patch.dict("os.environ", {"GEMINI_API_KEY": "valid-key"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.output_dir = pathlib.Path(self.tmpdir.name) / "taxonomy"
+
+    def _tag(self, envelope: dict, number: int, log: BenchmarkLog) -> None:
+        def fake_post(url, headers=None, json=None, timeout=None):
+            return envelope_response_with_usage(envelope, prompt_tokens=10, completion_tokens=5)
+
+        with patch("taxonomy_client.requests.post", side_effect=fake_post):
+            tag_chapter(number, [GEMINI], SYSTEM_PROMPT, JSON_SCHEMA, log=log,
+                        output_dir=self.output_dir, sleep_fn=no_sleep)
+
+    def test_wrong_chapter_number_is_journaled_as_a_rejection(self):
+        log = BenchmarkLog(path=None)
+        with self.assertRaises(ValueError):
+            self._tag(copy.deepcopy(VALID_ENVELOPE), 1, log)  # envelope claims chapter 82
+
+        self.assertEqual([e.success for e in log.entries], [True, False])
+        rejection = log.entries[-1]
+        self.assertEqual(rejection.error_code, VALIDATION_REJECTED)
+        self.assertEqual(rejection.provider, "gemini")
+        self.assertEqual(rejection.chapter, 1)
+        self.assertIn("82", rejection.error_message)
+
+    def test_schema_invalid_envelope_is_journaled_as_a_rejection(self):
+        log = BenchmarkLog(path=None)
+        with self.assertRaises(ValueError):
+            with patch("taxonomy_client.validate_taxonomy_envelope", return_value=["missing 'chapter'"]):
+                self._tag({"not": "an envelope"}, 1, log)
+        self.assertEqual(log.entries[-1].error_code, VALIDATION_REJECTED)
+
+    def test_written_chapter_logs_no_rejection(self):
+        envelope = copy.deepcopy(VALID_ENVELOPE)
+        log = BenchmarkLog(path=None)
+        self._tag(envelope, envelope["chapter"]["number"], log)
+        self.assertEqual([e.error_code for e in log.entries], [None])
+
+
+class TestBenchmarkCallHooks(unittest.TestCase):
+    """The knobs run_benchmark.py relies on (issue #12): a `before_call` hook
+    run before every network attempt (for the per-provider min interval), and
+    `max_429_attempts=0` to surface a 429 immediately instead of retrying it
+    in place."""
+
+    def setUp(self):
+        patcher = patch.dict("os.environ", {"GEMINI_API_KEY": "valid-key"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_before_call_runs_before_every_attempt_including_5xx_retries(self):
+        events = []
+        responses = [FakeResponse(503), envelope_response_with_usage(copy.deepcopy(VALID_ENVELOPE), 1, 1)]
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            events.append("post")
+            return responses.pop(0)
+
+        with patch("taxonomy_client.requests.post", side_effect=fake_post):
+            call_provider_chain(
+                [GEMINI], SYSTEM_PROMPT, CHAPTER_MARKDOWN, JSON_SCHEMA,
+                before_call=lambda provider: events.append(f"before:{provider.name}"), sleep_fn=no_sleep,
+            )
+
+        self.assertEqual(events, ["before:gemini", "post", "before:gemini", "post"])
+
+    def test_zero_429_attempts_means_a_single_call(self):
+        calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            calls.append(url)
+            return FakeResponse(429)
+
+        with patch("taxonomy_client.requests.post", side_effect=fake_post):
+            with self.assertRaises(AllProvidersFailedError) as ctx:
+                call_provider_chain(
+                    [GEMINI], SYSTEM_PROMPT, CHAPTER_MARKDOWN, JSON_SCHEMA,
+                    max_429_attempts=0, sleep_fn=no_sleep,
+                )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(ctx.exception.errors["gemini"].status_code, 429)
 
 
 class TestObservedRateInReport(unittest.TestCase):

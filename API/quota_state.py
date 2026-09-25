@@ -37,7 +37,8 @@ def _today() -> str:
 
 class QuotaState:
     """In-memory view of the quota state, backed by a JSON file at `path`:
-    `{provider_name: {"date": "YYYY-MM-DD", "count": int}}`.
+    `{provider_name: {"date": "YYYY-MM-DD", "count": int, "exhausted": bool}}`
+    (`exhausted` only present once set, issue #12).
 
     `path=None` makes the state purely in-memory (never read from or written
     to disk) — used as the default when no explicit quota tracking is
@@ -84,10 +85,29 @@ class QuotaState:
         preventive check is a best-effort optimisation, not a hard
         guarantee, and a stale "has budget" reading still safely falls back
         to a real 429/5xx and the normal retry/fallback path."""
+        entry = self._todays_entry(provider_name)
+        entry["count"] += 1
+        self._save()
+
+    def is_exhausted(self, provider_name: str) -> bool:
+        """True if `provider_name` was marked exhausted earlier today — the
+        benchmark (issue #12) then skips it with no network call at all."""
+        entry = self._data.get(provider_name)
+        return entry is not None and entry.get("date") == _today() and bool(entry.get("exhausted"))
+
+    def mark_exhausted(self, provider_name: str) -> None:
+        """Record that `provider_name` answered 429 again after being given a
+        rest (or asked for a Retry-After too long to wait out): its real daily
+        quota is gone, whatever the local counter says. Persisted immediately
+        so a same-day rerun skips it too; cleared by the date change like the
+        count."""
+        self._todays_entry(provider_name)["exhausted"] = True
+        self._save()
+
+    def _todays_entry(self, provider_name: str) -> dict:
         today = _today()
         entry = self._data.get(provider_name)
         if entry is None or entry.get("date") != today:
             entry = {"date": today, "count": 0}
-        entry["count"] += 1
-        self._data[provider_name] = entry
-        self._save()
+            self._data[provider_name] = entry
+        return entry

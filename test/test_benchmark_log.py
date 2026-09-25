@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "API"))
-from benchmark_log import BenchmarkLog, CallLogEntry, format_report, load_entries, summarize  # noqa: E402
+from benchmark_log import VALIDATION_REJECTED, BenchmarkLog, CallLogEntry, format_report, load_entries, summarize  # noqa: E402
 
 
 class TestBenchmarkLogPersistence(unittest.TestCase):
@@ -93,6 +93,25 @@ class TestSummarize(unittest.TestCase):
     def test_empty_entries_produce_empty_summary(self):
         self.assertEqual(summarize([]), {})
 
+    def test_validation_rejections_are_counted_apart_from_network_calls(self):
+        """issue #12: a 200 whose envelope tag_chapter then rejected is a
+        successful *call* but no *file* — the report must tell them apart."""
+        entries = [
+            {"provider": "groq", "success": True, "input_tokens": 100, "output_tokens": 50},
+            {"provider": "groq", "success": True, "input_tokens": 100, "output_tokens": 50},
+            {"provider": "groq", "success": False, "error_code": VALIDATION_REJECTED},
+            {"provider": "groq", "success": False, "error_code": 429},
+        ]
+
+        groq = summarize(entries)["groq"]
+
+        self.assertEqual(groq["calls"], 3)
+        self.assertEqual(groq["successes"], 2)
+        self.assertEqual(groq["failures"], 1)
+        self.assertEqual(groq["error_codes"], {"429": 1})
+        self.assertEqual(groq["rejected"], 1)
+        self.assertEqual(groq["files_written"], 1)
+
 
 class TestFormatReport(unittest.TestCase):
     def test_report_mentions_every_provider_and_its_call_count(self):
@@ -105,6 +124,14 @@ class TestFormatReport(unittest.TestCase):
         self.assertIn("groq:", report)
         self.assertIn("calls: 1", report)
         self.assertIn("429", report)
+
+    def test_report_shows_files_written_and_rejections(self):
+        report = format_report(summarize([
+            {"provider": "groq", "success": True, "input_tokens": 10, "output_tokens": 5},
+            {"provider": "groq", "success": False, "error_code": VALIDATION_REJECTED},
+        ]))
+        self.assertIn("files written: 0", report)
+        self.assertIn("rejected by validation: 1", report)
 
     def test_empty_summary_reports_no_calls_logged(self):
         self.assertEqual(format_report({}), "(no calls logged)")

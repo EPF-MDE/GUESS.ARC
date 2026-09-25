@@ -1,4 +1,4 @@
-# API — client de tagging taxonomie (issues #5, #6, #7, #8, #9, #10)
+# API — client de tagging taxonomie (issues #5, #6, #7, #8, #9, #10, #12)
 
 Client HTTP unique, compatible OpenAI, qui appelle un LLM pour tagger **un**
 chapitre à la fois (fichier `.md` silver entier) et écrit un
@@ -9,9 +9,11 @@ clé, identifiant de modèle) — voir `providers.py`. Les appels passent par un
 **chaîne de fallback** (`provider_fallback.py`, issue #6) : le provider
 courant est tenté, avec retry en place sur `429`/`5xx`, puis bascule sur le
 suivant si l'échec persiste. Chaîne branchée : Gemini (1er), Mistral (2e
-relais), Groq (3e relais), OpenRouter (4e et dernier relais).
+relais), Groq (3e relais), puis 3 modèles gratuits fixes servis par
+OpenRouter — `openrouter-nemotron`, `openrouter-nex-pro`, `openrouter-dots`
+(4e à 6e et derniers relais).
 
-Si les 4 providers de la chaîne échouent sur un chapitre donné, le client ne
+Si les 6 providers de la chaîne échouent sur un chapitre donné, le client ne
 saute jamais silencieusement le chapitre : une erreur `AllProvidersFailedError`
 est levée (avec un message explicite sur stderr) et remonte à l'appelant.
 
@@ -28,8 +30,12 @@ Seuls Groq (1000 req/jour, tier gratuit `openai/gpt-oss-120b`) et OpenRouter
 (50 req/jour sans crédit acheté) ont une limite locale configurée
 (`ProviderConfig.daily_limit`) : Gemini et Mistral exposent déjà leur RPD
 restant dans les en-têtes de réponse, donc ne sont pas (encore) suivis
-localement. `API/quota_state.json` est local à la machine et n'est pas
-commité (voir `.gitignore`).
+localement. Les 3 providers OpenRouter (`openrouter-nemotron`,
+`openrouter-nex-pro`, `openrouter-dots`) partagent une seule et même clé et
+donc un seul budget de 50 req/jour : ils comptent sur la même entrée
+`quota_key="openrouter"` dans `API/quota_state.json`, pas 50 chacun.
+`API/quota_state.json` est local à la machine et n'est pas commité (voir
+`.gitignore`).
 
 ## Obtenir une clé Gemini (gratuite)
 
@@ -73,19 +79,28 @@ gratuit le 2026-06-17.
 2. Se connecter (ou créer un compte), cliquer sur **Create Key**.
 3. Copier la clé.
 
-Sert de 4e et dernier relais, derrière Gemini, Mistral et Groq. Contrairement
-aux autres providers, le modèle n'est **jamais codé en dur** : le client
-interroge `GET /models?max_price=0` au moment de l'appel pour choisir un
-modèle `:free` disponible dans le catalogue gratuit d'OpenRouter (qui tourne
-en permanence). Les requêtes envoient aussi les en-têtes `HTTP-Referer` et
-`X-Title` recommandés par OpenRouter pour identifier l'app appelante.
+Sert de 4e, 5e et 6e (derniers) relais, derrière Gemini, Mistral et Groq — un
+relais par modèle fixe : `nvidia/nemotron-3-super-120b-a12b:free`,
+`nex-agi/nex-n2.5-pro:free`, `dots-studio/dots-3-note-preview:free`. Les
+requêtes envoient aussi les en-têtes `HTTP-Referer` et `X-Title` recommandés
+par OpenRouter pour identifier l'app appelante.
+
+Les 3 modèles ont été choisis (via `GET /models` du catalogue public) pour
+leur support confirmé de `response_format`. Une première version résolvait
+le modèle dynamiquement (`GET /models?max_price=0`, premier `:free` trouvé,
+issue #8) : en pratique le catalogue gratuit tourne souvent vers des modèles
+qui n'acceptent pas `response_format`, ce qu'OpenRouter répond par un `400`
+non retenté et non basculé — le run entier plantait. `providers.OPENROUTER`
+(résolution dynamique) reste défini pour un usage direct/manuel, mais n'est
+plus dans la chaîne par défaut.
 
 ## Où les déposer
 
-Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner les 4
+Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner les
 clés (obligatoires pour que la chaîne de fallback complète tourne de bout en
-bout). Les `*_MODEL` sont pré-remplies avec le modèle gratuit retenu pour
-chaque provider — à ne changer que pour tester un autre modèle :
+bout — une seule clé `OPENROUTER_API_KEY` sert aux 3 relais OpenRouter). Les
+`*_MODEL` sont pré-remplies avec le modèle gratuit retenu pour chaque
+provider — à ne changer que pour tester un autre modèle :
 
 ```
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
@@ -98,14 +113,14 @@ GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
 GROQ_MODEL=openai/gpt-oss-120b
 
 OPENROUTER_API_KEY=la-clé-openrouter-copiée-ci-dessus
-OPENROUTER_MODEL=
+OPENROUTER_NEMOTRON_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_NEX_PRO_MODEL=nex-agi/nex-n2.5-pro:free
+OPENROUTER_DOTS_MODEL=dots-studio/dots-3-note-preview:free
 ```
 
-`OPENROUTER_MODEL` reste volontairement vide : contrairement aux 3 autres, le
-modèle OpenRouter n'est jamais codé en dur (issue #8) — le client résout un
-modèle `:free` disponible via `GET /models?max_price=0` à chaque appel, parce
-que le catalogue gratuit change dans le temps. Ne renseigner cette ligne que
-pour forcer un modèle précis à la place de la résolution automatique.
+Les 3 lignes `OPENROUTER_*_MODEL` n'ont besoin d'être renseignées que pour
+forcer un modèle différent de celui codé en dur dans `providers.py` — les
+laisser vides retombe sur le modèle fixe par défaut de chaque relais.
 
 `.env` est dans `.gitignore` — ne jamais commiter de clé.
 
@@ -114,7 +129,8 @@ pour forcer un modèle précis à la place de la résolution automatique.
 ```bash
 pip install -r requirements.txt
 
-# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral, groq, openrouter)
+# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral, groq,
+# openrouter-nemotron, openrouter-nex-pro, openrouter-dots)
 python API/taxonomy_client.py --chapters 1 2
 
 # tous les chapitres 1..N
@@ -151,23 +167,68 @@ eux** sur le même lot de chapitres — pas d'obtenir une seule taxonomie par
 chapitre. `run_benchmark.py` appelle donc chaque provider **indépendamment**
 sur le **même lot configurable de chapitres** (20 par défaut, tirés de
 `data/silver/`) : pas de bascule d'un provider à l'autre ici (un chapitre en
-échec sur un modèle est journalisé comme échec pour ce modèle, avec retry en
-place sur `429`/`5xx`, puis le run passe au chapitre suivant *pour ce même
-modèle* — jamais transmis à un autre). C'est volontairement différent de
+échec sur un modèle est journalisé comme échec pour ce modèle — jamais
+transmis à un autre ; voir la stratégie `429` ci-dessous). C'est volontairement différent de
 `taxonomy_client.py` en usage direct, où la chaîne de fallback sert la
 fiabilité (le premier qui répond gagne) pour tagger le corpus réel une fois
 un modèle choisi à l'issue de ce benchmark.
 
 Chaque provider écrit dans son propre sous-dossier
 `data/taxonomy/<provider>/chapter_NNNN.json` (jamais un
-`data/taxonomy/chapter_NNNN.json` partagé) : les 4 sorties sur les mêmes
+`data/taxonomy/chapter_NNNN.json` partagé) : les sorties sur les mêmes
 chapitres restent comparables côte à côte, pas seulement leurs statistiques
 agrégées. Chaque appel (retries en place inclus) est en plus journalisé dans
 un fichier JSONL : provider/modèle utilisé, tokens d'entrée/sortie réels
 (`usage.prompt_tokens`/`completion_tokens` de la réponse), succès/échec,
 code d'erreur le cas échéant. Un provider sauté pour quota local épuisé
 (issue #9) n'est pas journalisé comme un appel : il n'a jamais touché le
-réseau.
+réseau. Un envelope reçu en `200` mais rejeté par la validation (schéma,
+ou `chapter.number` différent du chapitre demandé) est journalisé en plus
+comme échec avec le code `validation_rejected` : le rapport distingue ainsi
+« appel OK » de « fichier écrit ».
+
+### Stratégie `429` et rythme par provider (issue #12)
+
+Les tiers gratuits se grillent vite si on insiste : le run est organisé pour
+consommer le moins de quota possible.
+
+- **Round-robin** : boucle externe sur les chapitres, interne sur les
+  providers (ch1 sur tous, puis ch2…), pour que chaque provider « se
+  repose » pendant que les autres travaillent.
+- **Intervalle minimal par provider** (`ProviderConfig.min_interval_s`),
+  respecté avant chaque appel, retries `5xx` compris. Les 3 modèles
+  OpenRouter partagent une clé, donc un seul rythme (clé `quota_key`).
+- **Pas de retry en place sur `429`** : le couple (provider, chapitre) est
+  mis dans une file et le run continue. En fin de lot, chaque couple de la
+  file est retenté **une fois** ; un nouveau `429` ⇒ provider marqué
+  **épuisé pour la journée** dans `API/quota_state.json`, et tous ses
+  chapitres restants sont sautés sans appel réseau — y compris lors d'une
+  relance le même jour (date UTC, même mécanisme que le compteur #9).
+  L'épuisement est porté par le compte (`quota_key`) : un modèle OpenRouter
+  épuisé fait sauter les deux autres, qui partagent la même clé.
+- `Retry-After` > 60 s ⇒ quota journalier, pas par minute : provider
+  marqué épuisé directement, sans passer par la file.
+- `503`/`5xx` : 1 retry rapide en place (surcharge côté provider, pas
+  notre quota), puis le couple est compté en échec.
+- Un provider dont le compteur local (#9) est à zéro est sauté pour le reste
+  du run.
+
+| Provider | Limites publiées (tier gratuit, à revérifier par compte) | `min_interval_s` |
+|---|---|---|
+| Gemini `gemini-3.6-flash` | ~20 RPD, RPM non publié | 15 s |
+| Mistral (Experiment) | 1 req/s, 500k TPM | 2 s |
+| Groq `openai/gpt-oss-120b` | 30 RPM, **8k TPM**, 1000 RPD — 1 chapitre ≈ 5–7k tokens | 60 s |
+| OpenRouter `:free` (3 modèles) | 20 RPM, 50 RPD partagés (<10 crédits) | 3 s (partagé) |
+
+Sources : [Groq](https://console.groq.com/docs/rate-limits),
+[OpenRouter](https://openrouter.ai/docs/api-reference/limits),
+[Mistral](https://docs.mistral.ai/admin/user-management-finops/tier),
+[Gemini](https://ai.google.dev/gemini-api/docs/rate-limits).
+
+Pour « dé-épuiser » un provider avant minuit UTC (par ex. après avoir réglé
+un problème de clé), supprimer son champ `"exhausted"` (entrée `openrouter` pour les 3 modèles
+OpenRouter) dans
+`API/quota_state.json`.
 
 ```bash
 # lot par défaut (20 premiers chapitres de data/silver/)
@@ -188,7 +249,8 @@ python API/run_benchmark.py --report-only
 
 À la fin du run, un rapport par provider est affiché (nombre d'appels,
 succès/échecs, répartition des codes d'erreur, tokens d'entrée/sortie
-min/moyenne/max, et un débit *observé* — appels/min et tokens/min, calculé
+min/moyenne/max, nombre de fichiers réellement écrits vs rejetés par la
+validation, et un débit *observé* — appels/min et tokens/min, calculé
 depuis l'horodatage de chaque appel journalisé pour ce provider) — à
 comparer aux limites publiées (RPM/RPD/TPM/contexte) de chaque provider pour
 décider quel(s) modèle(s) tiennent à l'échelle des 1193 chapitres du corpus
@@ -226,7 +288,7 @@ la journalisation fonctionnent de bout en bout sans lancer le lot complet
 
 ```bash
 # tests unitaires — aucun appel réseau, aucune clé requise
-python -m pytest test/test_run_benchmark.py test/test_benchmark_log.py test/test_taxonomy_client_benchmark_log.py -v
+python -m pytest test/test_run_benchmark.py test/test_benchmark_scheduling.py test/test_benchmark_log.py test/test_taxonomy_client_benchmark_log.py -v
 
 # run réel sur 1-2 chapitres seulement (nécessite .env avec les clés, voir ci-dessus)
 python API/run_benchmark.py --chapters 1 2
@@ -235,8 +297,9 @@ python API/run_benchmark.py --chapters 1 2
 python API/run_benchmark.py --report-only
 ```
 
-- `--chapters 1 2` déclenche de vrais appels réseau sur les 4 providers
-  (Gemini, Mistral, Groq, OpenRouter, indépendamment) et écrit
+- `--chapters 1 2` déclenche de vrais appels réseau sur les 6 providers
+  (Gemini, Mistral, Groq, openrouter-nemotron, openrouter-nex-pro,
+  openrouter-dots, indépendamment) et écrit
   `data/taxonomy/<provider>/chapter_0001.json` / `chapter_0002.json` pour
   chacun — à supprimer ensuite si ces fichiers ne sont pas censés rester (ou
   choisir des numéros de chapitre déjà attendus dans le lot final).
@@ -256,6 +319,8 @@ python API/run_benchmark.py --report-only
 | `MISTRAL_MODEL` | Surcharge le modèle par défaut (`mistral-small-latest`) | Non |
 | `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (3e relais par défaut) |
 | `GROQ_MODEL` | Surcharge le modèle par défaut (`openai/gpt-oss-120b`) | Non |
-| `OPENROUTER_API_KEY` | Clé OpenRouter | Oui, pour `openrouter` (4e et dernier relais par défaut) |
-| `OPENROUTER_MODEL` | Fixe un modèle au lieu de la résolution runtime (`GET /models?max_price=0`) | Non |
+| `OPENROUTER_API_KEY` | Clé OpenRouter (partagée par les 3 relais OpenRouter) | Oui, pour `openrouter-nemotron`/`openrouter-nex-pro`/`openrouter-dots` (4e à 6e et derniers relais par défaut) |
+| `OPENROUTER_NEMOTRON_MODEL` | Surcharge le modèle par défaut (`nvidia/nemotron-3-super-120b-a12b:free`) | Non |
+| `OPENROUTER_NEX_PRO_MODEL` | Surcharge le modèle par défaut (`nex-agi/nex-n2.5-pro:free`) | Non |
+| `OPENROUTER_DOTS_MODEL` | Surcharge le modèle par défaut (`dots-studio/dots-3-note-preview:free`) | Non |
 | `ANTHROPIC_API_KEY` | Clé Anthropic (POC Konrad) | Non — usage séparé, sans lien avec ce banc de test |

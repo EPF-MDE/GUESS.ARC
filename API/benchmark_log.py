@@ -31,6 +31,14 @@ MIN_ELAPSED_MINUTES_FOR_RATE = 1.0 / 60.0
 
 DEFAULT_LOG_PATH = Path(__file__).resolve().parent / "benchmark_log.jsonl"
 
+# error_code of an entry that is *not* a network call: tag_chapter rejected an
+# envelope the provider returned with HTTP 200 (schema-invalid, or the wrong
+# chapter.number) and wrote nothing (issue #12). Logged so the report can
+# tell "call OK" from "file written"; summarize() keeps these out of the
+# call/failure/rate counts, since the call itself is already logged as a
+# success.
+VALIDATION_REJECTED = "validation_rejected"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -107,7 +115,9 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         by_provider.setdefault(entry["provider"], []).append(entry)
 
     summary: dict[str, dict[str, Any]] = {}
-    for provider, provider_entries in by_provider.items():
+    for provider, all_entries in by_provider.items():
+        rejected = sum(1 for e in all_entries if e.get("error_code") == VALIDATION_REJECTED)
+        provider_entries = [e for e in all_entries if e.get("error_code") != VALIDATION_REJECTED]
         successes = [e for e in provider_entries if e.get("success")]
         failures = [e for e in provider_entries if not e.get("success")]
         input_tokens = [e["input_tokens"] for e in successes if e.get("input_tokens") is not None]
@@ -133,6 +143,11 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             "calls": len(provider_entries),
             "successes": len(successes),
             "failures": len(failures),
+            "rejected": rejected,
+            # Every successful call either wrote its chapter file or was
+            # rejected by validation — chapters skipped as already tagged
+            # make no call and so no entry.
+            "files_written": len(successes) - rejected,
             "error_codes": error_codes,
             "input_tokens_min": input_stats["min"],
             "input_tokens_max": input_stats["max"],
@@ -156,6 +171,7 @@ def format_report(summary: dict[str, dict[str, Any]]) -> str:
         s = summary[provider]
         lines.append(f"{provider}:")
         lines.append(f"  calls: {s['calls']} (success: {s['successes']}, failure: {s['failures']})")
+        lines.append(f"  files written: {s['files_written']} (rejected by validation: {s['rejected']})")
         if s["error_codes"]:
             codes = ", ".join(f"{code}×{count}" for code, count in sorted(s["error_codes"].items()))
             lines.append(f"  error codes: {codes}")

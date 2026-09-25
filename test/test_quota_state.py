@@ -119,6 +119,45 @@ class TestQuotaStatePersistence(unittest.TestCase):
         self.assertFalse(reloaded.has_budget("openrouter", 50))
 
 
+class TestExhaustedForTheDay(unittest.TestCase):
+    """A provider marked exhausted after a repeated 429 (issue #12) stays
+    skipped for the rest of the (UTC) day, across cold restarts too."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.state_path = pathlib.Path(self.tmpdir.name) / "quota_state.json"
+
+    def test_fresh_provider_is_not_exhausted(self):
+        self.assertFalse(QuotaState(path=None).is_exhausted("mistral"))
+
+    def test_mark_exhausted_survives_a_cold_restart(self):
+        QuotaState(path=self.state_path).mark_exhausted("mistral")
+        reloaded = QuotaState(path=self.state_path)
+        self.assertTrue(reloaded.is_exhausted("mistral"))
+        self.assertFalse(reloaded.is_exhausted("gemini"))
+
+    def test_exhausted_mark_from_a_previous_day_is_ignored(self):
+        yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+        self.state_path.write_text(
+            json.dumps({"mistral": {"date": yesterday, "count": 0, "exhausted": True}}), encoding="utf-8",
+        )
+        self.assertFalse(QuotaState(path=self.state_path).is_exhausted("mistral"))
+
+    def test_mark_exhausted_keeps_todays_success_count(self):
+        qs = QuotaState(path=self.state_path)
+        for _ in range(3):
+            qs.record_success("groq")
+        qs.mark_exhausted("groq")
+        self.assertEqual(qs.remaining("groq", 1000), 997)
+
+    def test_record_success_does_not_clear_the_exhausted_mark(self):
+        qs = QuotaState(path=None)
+        qs.mark_exhausted("groq")
+        qs.record_success("groq")
+        self.assertTrue(qs.is_exhausted("groq"))
+
+
 class TestQuotaExhaustedStatusSentinel(unittest.TestCase):
     def test_is_not_a_429_or_5xx_status(self):
         self.assertNotEqual(QUOTA_EXHAUSTED_STATUS, 429)
