@@ -19,7 +19,7 @@ from provider_fallback import AllProvidersFailedError  # noqa: E402
 from providers import GEMINI, MISTRAL, OPENROUTER  # noqa: E402
 from taxonomy_client import SILVER_DIR, call_provider_chain, tag_chapter  # noqa: E402
 
-from test_taxonomy_client_fallback import FakeResponse, models_response, no_sleep  # noqa: E402
+from test_taxonomy_client_fallback import setUpModule, tearDownModule, FakeResponse, models_response, no_sleep  # noqa: E402
 from test_taxonomy_envelope import VALID_ENVELOPE  # noqa: E402
 
 SYSTEM_PROMPT = "system prompt"

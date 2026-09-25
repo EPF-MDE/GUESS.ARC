@@ -66,6 +66,23 @@ def _parse_retry_after(response: requests.Response) -> float | None:
         return None
 
 
+def _raise_for_provider_status(provider: ProviderConfig, response) -> None:
+    """Turn any HTTP error into a ProviderCallError, never a bare
+    requests.HTTPError: 429/5xx are retried in place by call_with_retry;
+    any other 4xx (observed: OpenRouter 404 once a pinned free model left
+    its catalog) is re-raised at once there, so it falls over to the next
+    provider in a chain and fails just that pair in the benchmark instead
+    of crashing the whole run. The body is kept since it says *why*."""
+    if response.status_code == 429 or 500 <= response.status_code < 600:
+        raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
+    if response.status_code >= 400:
+        detail = (getattr(response, "text", "") or "")[:300]
+        raise ProviderCallError(
+            response.status_code,
+            message=f"{provider.name}: HTTP {response.status_code} for {getattr(response, 'url', '?')}: {detail}",
+        )
+
+
 def resolve_free_model(provider: ProviderConfig) -> str:
     """Pick a `:free` model id from the provider's live catalog (issue #8) —
     `GET /models?max_price=0` — instead of a hardcoded id, since the free
@@ -91,9 +108,7 @@ def resolve_free_model(provider: ProviderConfig) -> str:
         # bare requests exception, uncaught by call_with_fallback, and
         # crashes the whole run instead of falling over like a 5xx would.
         raise ProviderCallError(503, message=f"{provider.name}: {exc}") from exc
-    if response.status_code == 429 or 500 <= response.status_code < 600:
-        raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
-    response.raise_for_status()
+    _raise_for_provider_status(provider, response)
     free_models = [m["id"] for m in response.json().get("data", []) if m.get("id", "").endswith(":free")]
     if not free_models:
         raise ProviderCallError(503, message=f"{provider.name}: no ':free' model available in the current catalog")
@@ -110,7 +125,8 @@ def call_provider(
     """One OpenAI-compatible chat completion call with a strict json_schema
     response_format. Raises ProviderCallError on 429/5xx so
     provider_fallback.call_with_retry can react (retry in place, or give up
-    on this provider); any other HTTP error propagates via raise_for_status.
+    on this provider), and on any other HTTP error (see
+    _raise_for_provider_status).
     Not covered by tests: it needs network access.
 
     Returns (envelope, usage) where `usage` is the real input/output token
@@ -160,9 +176,7 @@ def call_provider(
         # times out rather than a clean 503) must become a ProviderCallError
         # so the run falls over/retries instead of crashing.
         raise ProviderCallError(503, message=f"{provider.name}: {exc}") from exc
-    if response.status_code == 429 or 500 <= response.status_code < 600:
-        raise ProviderCallError(response.status_code, retry_after=_parse_retry_after(response))
-    response.raise_for_status()
+    _raise_for_provider_status(provider, response)
     payload = response.json()
     # OpenRouter (see providers.py's OPENROUTER comment) can answer with
     # HTTP 200 but an in-band `{"error": ...}` body instead of `choices`

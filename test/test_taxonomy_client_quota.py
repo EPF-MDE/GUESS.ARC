@@ -26,7 +26,7 @@ from taxonomy_client import call_provider_chain  # noqa: E402
 from provider_fallback import AllProvidersFailedError  # noqa: E402
 from quota_state import QuotaState  # noqa: E402
 
-from test_taxonomy_client_fallback import FakeResponse, envelope_response, models_response, no_sleep  # noqa: E402
+from test_taxonomy_client_fallback import setUpModule, tearDownModule, FakeResponse, envelope_response, models_response, no_sleep  # noqa: E402
 from test_taxonomy_envelope import VALID_ENVELOPE  # noqa: E402
 
 SYSTEM_PROMPT = "system prompt"

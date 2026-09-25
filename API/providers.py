@@ -16,10 +16,11 @@ class ProviderConfig:
     base_url: str
     api_key_env: str
     model_env: str
-    # None means "no fixed model — resolve one at call time" (issue #8:
-    # OpenRouter's free catalog changes over time, so it's never hardcoded
-    # here). `model_env` still overrides it when set, same as every provider.
-    default_model: str | None
+    # True only for a config with no fixed model that picks a `:free` one
+    # from the live catalog at call time (issue #8: OpenRouter's free catalog
+    # rotates). Every other provider's model comes from `model_env` alone —
+    # model ids are configuration, kept in the root .env, never in code.
+    resolve_model_from_catalog: bool = False
     # Static headers to send with every request to this provider (issue #8:
     # OpenRouter's HTTP-Referer/X-Title). None for providers that need none.
     extra_headers: dict[str, str] | None = None
@@ -58,7 +59,16 @@ class ProviderConfig:
         return key
 
     def model(self) -> str | None:
-        return os.environ.get(self.model_env) or self.default_model
+        """The model id from `model_env`. None only for a catalog-resolved
+        config left unset (the caller then resolves one); otherwise a missing
+        value is a configuration error, same as a missing API key."""
+        value = os.environ.get(self.model_env)
+        if value or self.resolve_model_from_catalog:
+            return value or None
+        raise RuntimeError(
+            f"{self.model_env} is not set — see API/README.md, "
+            f"then set it in the root .env"
+        )
 
     @property
     def quota_name(self) -> str:
@@ -70,7 +80,6 @@ GEMINI = ProviderConfig(
     base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
     api_key_env="GEMINI_API_KEY",
     model_env="GEMINI_MODEL",
-    default_model="gemini-3.6-flash",
     # Confirmed by the spec (section 4.3) as supporting strict json_schema;
     # Mistral/Groq/OpenRouter are not confirmed, so they use json_object.
     supports_strict_json_schema=True,
@@ -83,24 +92,19 @@ MISTRAL = ProviderConfig(
     base_url="https://api.mistral.ai/v1",
     api_key_env="MISTRAL_API_KEY",
     model_env="MISTRAL_MODEL",
-    default_model="mistral-small-latest",
     # Experiment tier: 1 req/s.
     min_interval_s=2.0,
 )
 
-# `llama-3.3-70b-versatile` was deprecated on Groq's free tier on 2026-06-17;
-# `openai/gpt-oss-120b` replaces it (issue #7).
-#
 # Note (issue #7 AC4): unlike Gemini/Mistral, Groq's response headers don't
 # expose remaining RPD (requests-per-day) quota, so it's tracked locally
-# instead (issue #9) — 1,000 RPD is the free-tier limit for
-# openai/gpt-oss-120b (console.groq.com/docs/rate-limits).
+# instead (issue #9) — 1,000 RPD is the free-tier limit of the model
+# currently set in GROQ_MODEL (console.groq.com/docs/rate-limits).
 GROQ = ProviderConfig(
     name="groq",
     base_url="https://api.groq.com/openai/v1",
     api_key_env="GROQ_API_KEY",
     model_env="GROQ_MODEL",
-    default_model="openai/gpt-oss-120b",
     daily_limit=1000,
     # 30 RPM but only 8k TPM, and one chapter is ~5-7k tokens: ~1 req/min.
     min_interval_s=60.0,
@@ -124,7 +128,7 @@ OPENROUTER = ProviderConfig(
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
     model_env="OPENROUTER_MODEL",
-    default_model=None,
+    resolve_model_from_catalog=True,
     extra_headers=OPENROUTER_HEADERS,
     daily_limit=50,
     # :free models: 20 RPM.
@@ -145,7 +149,6 @@ OPENROUTER_NEMOTRON = ProviderConfig(
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
     model_env="OPENROUTER_NEMOTRON_MODEL",
-    default_model="nvidia/nemotron-3-super-120b-a12b:free",
     extra_headers=OPENROUTER_HEADERS,
     daily_limit=50,
     quota_key="openrouter",
@@ -157,7 +160,6 @@ OPENROUTER_NEX_PRO = ProviderConfig(
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
     model_env="OPENROUTER_NEX_PRO_MODEL",
-    default_model="nex-agi/nex-n2.5-pro:free",
     extra_headers=OPENROUTER_HEADERS,
     daily_limit=50,
     quota_key="openrouter",
@@ -169,7 +171,6 @@ OPENROUTER_DOTS = ProviderConfig(
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
     model_env="OPENROUTER_DOTS_MODEL",
-    default_model="dots-studio/dots-3-note-preview:free",
     extra_headers=OPENROUTER_HEADERS,
     daily_limit=50,
     quota_key="openrouter",

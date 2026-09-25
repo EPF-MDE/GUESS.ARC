@@ -36,6 +36,28 @@ CHAPTER_MARKDOWN = "chapter markdown"
 JSON_SCHEMA = {"type": "object"}  # never sent to a real endpoint in these tests
 
 
+# Model ids live only in the root .env (never as code defaults), so tests
+# provide fake ones for every fixed-model provider. OPENROUTER_MODEL is left
+# out on purpose: unset means "resolve from the catalog".
+TEST_MODEL_ENV = {
+    "GEMINI_MODEL": "test/gemini-model",
+    "MISTRAL_MODEL": "test/mistral-model",
+    "GROQ_MODEL": "test/groq-model",
+    "OPENROUTER_NEMOTRON_MODEL": "test/nemotron-model:free",
+    "OPENROUTER_NEX_PRO_MODEL": "test/nex-pro-model:free",
+    "OPENROUTER_DOTS_MODEL": "test/dots-model:free",
+}
+_model_env_patch = patch.dict("os.environ", TEST_MODEL_ENV)
+
+
+def setUpModule():
+    _model_env_patch.start()
+
+
+def tearDownModule():
+    _model_env_patch.stop()
+
+
 class FakeResponse:
     def __init__(self, status_code: int, payload: dict | None = None, headers: dict | None = None):
         self.status_code = status_code
@@ -103,6 +125,27 @@ class TestGeminiToMistralFallback(unittest.TestCase):
         self.assertEqual(envelope, mistral_envelope)
         self.assertIs(used, MISTRAL)
 
+    def test_gemini_404_falls_over_to_mistral_instead_of_crashing(self):
+        # Observed on OpenRouter once a pinned free model left its catalog.
+        mistral_envelope = copy.deepcopy(VALID_ENVELOPE)
+        calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            calls.append(url)
+            if "generativelanguage" in url:
+                return FakeResponse(404)
+            return envelope_response(mistral_envelope)
+
+        with patch("taxonomy_client.requests.post", side_effect=fake_post):
+            envelope, used = call_provider_chain(
+                [GEMINI, MISTRAL], SYSTEM_PROMPT, CHAPTER_MARKDOWN, JSON_SCHEMA, sleep_fn=no_sleep
+            )
+
+        self.assertEqual(envelope, mistral_envelope)
+        self.assertIs(used, MISTRAL)
+        # A 404 is not retried in place: one gemini call, then mistral.
+        self.assertEqual(sum("generativelanguage" in u for u in calls), 1)
+
     def test_gemini_success_never_calls_mistral(self):
         gemini_envelope = copy.deepcopy(VALID_ENVELOPE)
 
@@ -168,7 +211,7 @@ class TestGeminiMistralGroqFallback(unittest.TestCase):
 
         self.assertEqual(envelope, groq_envelope)
         self.assertIs(used, GROQ)
-        self.assertEqual(used.model(), "openai/gpt-oss-120b")
+        self.assertEqual(used.model(), TEST_MODEL_ENV["GROQ_MODEL"])
 
     def test_all_three_providers_failing_raises_all_providers_failed(self):
         def fake_post(url, headers=None, json=None, timeout=None):

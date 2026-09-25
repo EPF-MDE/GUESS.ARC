@@ -15,7 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "API"))
 from providers import GEMINI  # noqa: E402
 from taxonomy_client import tag_chapter  # noqa: E402
 
-from test_taxonomy_client_fallback import envelope_response  # noqa: E402
+from test_taxonomy_client_fallback import setUpModule, tearDownModule, envelope_response  # noqa: E402
 from test_taxonomy_envelope import VALID_ENVELOPE  # noqa: E402
 
 

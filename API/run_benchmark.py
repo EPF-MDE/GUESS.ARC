@@ -104,6 +104,18 @@ def run(chapters: list[int] | None, batch_size: int, provider_names: list[str], 
     system_prompt = build_system_prompt(taxonomy_definition)
     json_schema = load_json_schema()
 
+    # Fail before any API call, not mid-run once the round-robin reaches a
+    # provider whose key or model id is missing from the .env.
+    missing = []
+    for name in provider_names:
+        try:
+            PROVIDERS[name].api_key()
+            PROVIDERS[name].model()
+        except RuntimeError as exc:
+            missing.append(f"  {name}: {exc}")
+    if missing:
+        raise SystemExit("missing configuration, nothing sent:\n" + "\n".join(missing))
+
     numbers = sorted(chapters) if chapters else default_batch(batch_size)
     if not numbers:
         raise SystemExit(f"no chapter_NNNN.md files found under {SILVER_DIR}")

@@ -99,28 +99,30 @@ plus dans la chaîne par défaut.
 Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner les
 clés (obligatoires pour que la chaîne de fallback complète tourne de bout en
 bout — une seule clé `OPENROUTER_API_KEY` sert aux 3 relais OpenRouter). Les
-`*_MODEL` sont pré-remplies avec le modèle gratuit retenu pour chaque
-provider — à ne changer que pour tester un autre modèle :
+`*_MODEL` sont **obligatoires** aussi : aucun modèle n'est codé en dur dans
+`providers.py`, le `.env` est la seule source. Valeurs actuellement retenues
+(modèles gratuits) :
 
 ```
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
 GEMINI_MODEL=gemini-3.6-flash
 
 MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
-MISTRAL_MODEL=mistral-small-latest
+MISTRAL_MODEL=ministral-14b-latest
 
 GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
 GROQ_MODEL=openai/gpt-oss-120b
 
 OPENROUTER_API_KEY=la-clé-openrouter-copiée-ci-dessus
 OPENROUTER_NEMOTRON_MODEL=nvidia/nemotron-3-super-120b-a12b:free
-OPENROUTER_NEX_PRO_MODEL=nex-agi/nex-n2.5-pro:free
+OPENROUTER_NEX_PRO_MODEL=google/gemma-4-31b-it:free
 OPENROUTER_DOTS_MODEL=dots-studio/dots-3-note-preview:free
 ```
 
-Les 3 lignes `OPENROUTER_*_MODEL` n'ont besoin d'être renseignées que pour
-forcer un modèle différent de celui codé en dur dans `providers.py` — les
-laisser vides retombe sur le modèle fixe par défaut de chaque relais.
+Une variable `*_MODEL` absente fait échouer `run_benchmark.py` dès le
+démarrage, avant tout appel API, avec la liste de ce qui manque.
+`OPENROUTER_MODEL` (config dynamique, hors benchmark) est la seule exception :
+vide, elle choisit un modèle `:free` dans le catalogue au moment de l'appel.
 
 `.env` est dans `.gitignore` — ne jamais commiter de clé.
 
@@ -314,13 +316,13 @@ python API/run_benchmark.py --report-only
 | Variable | Rôle | Obligatoire |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Clé Google AI Studio | Oui, pour `gemini` (1er de la chaîne par défaut) |
-| `GEMINI_MODEL` | Surcharge le modèle par défaut (`gemini-3.6-flash`) | Non |
+| `GEMINI_MODEL` | Modèle Gemini (ex. `gemini-3.6-flash`) | Oui, pour `gemini` |
 | `MISTRAL_API_KEY` | Clé Mistral AI Studio (tier Experiment) | Oui, pour `mistral` (2e relais par défaut) |
-| `MISTRAL_MODEL` | Surcharge le modèle par défaut (`mistral-small-latest`) | Non |
+| `MISTRAL_MODEL` | Modèle Mistral (ex. `ministral-14b-latest`) | Oui, pour `mistral` |
 | `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (3e relais par défaut) |
-| `GROQ_MODEL` | Surcharge le modèle par défaut (`openai/gpt-oss-120b`) | Non |
+| `GROQ_MODEL` | Modèle Groq (ex. `openai/gpt-oss-120b`) | Oui, pour `groq` |
 | `OPENROUTER_API_KEY` | Clé OpenRouter (partagée par les 3 relais OpenRouter) | Oui, pour `openrouter-nemotron`/`openrouter-nex-pro`/`openrouter-dots` (4e à 6e et derniers relais par défaut) |
-| `OPENROUTER_NEMOTRON_MODEL` | Surcharge le modèle par défaut (`nvidia/nemotron-3-super-120b-a12b:free`) | Non |
-| `OPENROUTER_NEX_PRO_MODEL` | Surcharge le modèle par défaut (`nex-agi/nex-n2.5-pro:free`) | Non |
-| `OPENROUTER_DOTS_MODEL` | Surcharge le modèle par défaut (`dots-studio/dots-3-note-preview:free`) | Non |
+| `OPENROUTER_NEMOTRON_MODEL` | Modèle du relais nemotron (ex. `nvidia/nemotron-3-super-120b-a12b:free`) | Oui, pour `openrouter-nemotron` |
+| `OPENROUTER_NEX_PRO_MODEL` | Modèle du relais nex-pro (ex. `google/gemma-4-31b-it:free`) | Oui, pour `openrouter-nex-pro` |
+| `OPENROUTER_DOTS_MODEL` | Modèle du relais dots (ex. `dots-studio/dots-3-note-preview:free`) | Oui, pour `openrouter-dots` |
 | `ANTHROPIC_API_KEY` | Clé Anthropic (POC Konrad) | Non — usage séparé, sans lien avec ce banc de test |
