@@ -39,6 +39,12 @@ DEFAULT_LOG_PATH = Path(__file__).resolve().parent / "benchmark_log.jsonl"
 # success.
 VALIDATION_REJECTED = "validation_rejected"
 
+# error_code of a real, answered call whose text wasn't JSON even after
+# syntax repair (issue #13). Unlike VALIDATION_REJECTED it *is* a network call
+# — counted in calls/failures/tokens like any other, since the provider
+# billed it.
+INVALID_JSON = "invalid_json"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -54,6 +60,10 @@ class CallLogEntry:
     output_tokens: int | None = None
     error_code: int | str | None = None
     error_message: str | None = None
+    # issue #13: every repair applied to this call's answer before
+    # validation — {"path", "kind", "before", "after"} each. Empty when the
+    # model was schema-shaped first time.
+    repairs: list[dict[str, Any]] = field(default_factory=list)
     timestamp: str = field(default_factory=_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -120,8 +130,25 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         provider_entries = [e for e in all_entries if e.get("error_code") != VALIDATION_REJECTED]
         successes = [e for e in provider_entries if e.get("success")]
         failures = [e for e in provider_entries if not e.get("success")]
-        input_tokens = [e["input_tokens"] for e in successes if e.get("input_tokens") is not None]
-        output_tokens = [e["output_tokens"] for e in successes if e.get("output_tokens") is not None]
+        # Over every answered call, an invalid_json one included — only a
+        # call that got a body carries token counts.
+        input_tokens = [e["input_tokens"] for e in provider_entries if e.get("input_tokens") is not None]
+        output_tokens = [e["output_tokens"] for e in provider_entries if e.get("output_tokens") is not None]
+        invalid_json = sum(1 for e in provider_entries if e.get("error_code") == INVALID_JSON)
+
+        # issue #13 outcome per answered chapter: a VALIDATION_REJECTED entry
+        # follows the success entry of the same call (tag_chapter logs it
+        # right after), so it cancels the latest success for that chapter.
+        latest_success: dict[Any, int] = {}
+        rejected_success: set[int] = set()
+        for index, entry in enumerate(all_entries):
+            if entry.get("error_code") == VALIDATION_REJECTED:
+                if entry.get("chapter") in latest_success:
+                    rejected_success.add(latest_success.pop(entry.get("chapter")))
+            elif entry.get("success"):
+                latest_success[entry.get("chapter")] = index
+        kept = [e for i, e in enumerate(all_entries) if e.get("success") and i not in rejected_success]
+        repaired = sum(1 for e in kept if e.get("repairs"))
 
         error_codes: dict[str, int] = {}
         for entry in failures:
@@ -148,6 +175,10 @@ def summarize(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             # rejected by validation — chapters skipped as already tagged
             # make no call and so no entry.
             "files_written": len(successes) - rejected,
+            "first_try_valid": len(kept) - repaired,
+            "repaired": repaired,
+            "invalid_json": invalid_json,
+            "total_rejected": rejected + invalid_json,
             "error_codes": error_codes,
             "input_tokens_min": input_stats["min"],
             "input_tokens_max": input_stats["max"],
@@ -172,6 +203,10 @@ def format_report(summary: dict[str, dict[str, Any]]) -> str:
         lines.append(f"{provider}:")
         lines.append(f"  calls: {s['calls']} (success: {s['successes']}, failure: {s['failures']})")
         lines.append(f"  files written: {s['files_written']} (rejected by validation: {s['rejected']})")
+        lines.append(
+            f"  outcome: first-try valid: {s['first_try_valid']}, repaired: {s['repaired']}, "
+            f"rejected: {s['total_rejected']} (validation: {s['rejected']}, invalid json: {s['invalid_json']})"
+        )
         if s["error_codes"]:
             codes = ", ".join(f"{code}×{count}" for code, count in sorted(s["error_codes"].items()))
             lines.append(f"  error codes: {codes}")

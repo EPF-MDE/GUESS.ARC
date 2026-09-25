@@ -31,7 +31,7 @@ import requests
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from benchmark_log import VALIDATION_REJECTED, BenchmarkLog, CallLogEntry  # noqa: E402
+from benchmark_log import INVALID_JSON, VALIDATION_REJECTED, BenchmarkLog, CallLogEntry  # noqa: E402
 from fights_index import update_fights_index_file  # noqa: E402
 from provider_fallback import AllProvidersFailedError, ProviderCallError, call_with_fallback  # noqa: E402
 from providers import FALLBACK_CHAIN, PROVIDERS, ProviderConfig  # noqa: E402
@@ -42,6 +42,7 @@ from taxonomy_core import (  # noqa: E402
     taxonomy_output_filename,
     validate_taxonomy_envelope,
 )
+from taxonomy_repair import InvalidModelJSON, parse_model_json, repair_to_schema  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SILVER_DIR = REPO_ROOT / "data" / "silver"
@@ -121,7 +122,7 @@ def call_provider(
     system_prompt: str,
     chapter_markdown: str,
     json_schema: dict,
-) -> tuple[dict, dict[str, int | None]]:
+) -> tuple[str, dict[str, int | None]]:
     """One OpenAI-compatible chat completion call with a strict json_schema
     response_format. Raises ProviderCallError on 429/5xx so
     provider_fallback.call_with_retry can react (retry in place, or give up
@@ -129,7 +130,9 @@ def call_provider(
     _raise_for_provider_status).
     Not covered by tests: it needs network access.
 
-    Returns (envelope, usage) where `usage` is the real input/output token
+    Returns (content, usage) where `content` is the model's raw text —
+    parsed by the caller (issue #13), so an unparseable answer is still
+    logged with its tokens instead of vanishing in a json.loads here — and `usage` is the real input/output token
     counts from the response's OpenAI-compatible `usage` object (issue #10)
     — `{"input_tokens": None, "output_tokens": None}` if a provider omits
     that object, rather than failing the call over a benchmark-only detail."""
@@ -206,7 +209,7 @@ def call_provider(
             message=f"{provider.name}: empty message content (finish_reason={choice.get('finish_reason')!r})",
         )
     usage = payload.get("usage") or {}
-    return json.loads(content), {
+    return content, {
         "input_tokens": usage.get("prompt_tokens"),
         "output_tokens": usage.get("completion_tokens"),
     }
@@ -283,16 +286,28 @@ def call_provider_chain(
             if before_call is not None:
                 before_call(provider)
             try:
-                envelope, usage = call_provider(provider, model, system_prompt, chapter_markdown, json_schema)
+                content, usage = call_provider(provider, model, system_prompt, chapter_markdown, json_schema)
             except ProviderCallError as exc:
                 log_attempt(model_used=model, success=False, error_code=exc.status_code, error_message=str(exc))
                 raise
-            log_attempt(
-                model_used=model,
-                success=True,
-                input_tokens=usage.get("input_tokens"),
-                output_tokens=usage.get("output_tokens"),
-            )
+            tokens = {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")}
+            # issue #13: repair syntax, then shape, before tag_chapter
+            # validates. Every repair lands on this call's log entry.
+            try:
+                parsed, syntax_repairs = parse_model_json(content)
+            except InvalidModelJSON as exc:
+                # A real call the provider billed: logged and counted in the
+                # quota like any answered call, then surfaced as a rejection
+                # (ValueError), never retried or fallen over.
+                log_attempt(
+                    model_used=model, success=False, error_code=INVALID_JSON,
+                    error_message=f"{exc} | excerpt: {exc.excerpt!r}", **tokens,
+                )
+                quota.record_success(provider.quota_name)
+                raise
+            envelope, shape_repairs = repair_to_schema(parsed, json_schema)
+            repairs = [r.to_dict() for r in syntax_repairs + shape_repairs]
+            log_attempt(model_used=model, success=True, repairs=repairs, **tokens)
             return envelope
 
         return attempt
@@ -329,7 +344,9 @@ def tag_chapter(
 
     A rejected envelope (ValueError below) is also journaled to `log` as a
     VALIDATION_REJECTED entry (issue #12): the call itself was logged as a
-    success, but no file was written."""
+    success, but no file was written. The envelope validated here was
+    already repaired by call_provider_chain (issue #13, taxonomy_repair.py):
+    only what those unambiguous repairs can't fix is rejected."""
     if output_dir is None:
         output_dir = TAXONOMY_DIR
 

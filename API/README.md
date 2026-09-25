@@ -189,6 +189,27 @@ ou `chapter.number` différent du chapitre demandé) est journalisé en plus
 comme échec avec le code `validation_rejected` : le rapport distingue ainsi
 « appel OK » de « fichier écrit ».
 
+### Réparation des réponses mal formées (issue #13)
+
+Avant validation, `API/taxonomy_repair.py` rattrape ce qui peut l'être sans
+inventer de donnée :
+
+- **Syntaxe** : balises ```` ```json ````, texte autour de l'objet, puis
+  `json5` (virgules finales, clés sans guillemets, guillemets simples,
+  commentaires). `json5` plutôt que `json_repair` : ce dernier « complète »
+  une réponse tronquée, ce qui revient à inventer la fin. Un texte
+  irréparable est journalisé avec le code `invalid_json` (tokens + extrait)
+  et compté dans le quota.
+- **Forme**, pilotée par `docs/taxonomy-schema.json` et seulement sur une
+  valeur qui ne respecte pas son type : chaîne → `[chaîne]`, `"null"`/`""` →
+  `null` sur un champ nullable, `"82"` → `82`, `"true"` → `true`. Un champ
+  requis absent, une valeur hors enum ou hors bornes, une propriété
+  inconnue restent rejetés (`validation_rejected`).
+
+Chaque réparation (chemin, type, avant, après) est dans le champ `repairs`
+de l'entrée du journal. Le rapport affiche par provider : conformes du
+premier coup / réparés / rejetés.
+
 ### Stratégie `429` et rythme par provider (issue #12)
 
 Les tiers gratuits se grillent vite si on insiste : le run est organisé pour
