@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from ncp.config import Config
-from ncp.config.schema import DatasetConfig
+from ncp.config.schema import ConfigError, DatasetConfig
 from ncp.data.mapping import RecordMapper
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -68,3 +69,27 @@ def test_silver_config_maps_every_arc_to_a_single_book_id():
     book_ids = {record.book_id for record in records}
 
     assert book_ids == {dataset_config.default_book_id}
+
+
+def test_book_id_is_auto_detected_when_default_book_id_is_unset():
+    """Precedence step 3: field_map.book_id and default_book_id both unset."""
+    config = DatasetConfig(default_book_id=None)
+    raw = {"book_id": "book_two", "chapter": 1, "summary": "..."}
+
+    mapper = RecordMapper.from_sample(config, raw)
+    record = mapper.map_one(raw)
+
+    assert record.book_id == "book_two"
+
+
+def test_book_id_raises_config_error_when_nothing_resolves_it():
+    """Precedence step 4: no field_map.book_id, no default_book_id, no candidate match.
+
+    This is issue #75's original scenario (an "arc" field, nothing else) -
+    it must now raise instead of silently matching "arc".
+    """
+    config = DatasetConfig(default_book_id=None)
+    raw = {"chapter": 1, "summary": "...", "arc": "Romance Dawn Arc"}
+
+    with pytest.raises(ConfigError):
+        RecordMapper.from_sample(config, raw)
