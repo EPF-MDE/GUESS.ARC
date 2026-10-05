@@ -114,3 +114,14 @@ def test_absolute_dataset_path_is_returned_unchanged(tmp_path: Path) -> None:
     config = DatasetConfig(path=str(absolute))
 
     assert config.resolved_path() == absolute
+
+
+def test_posix_style_rooted_dataset_path_is_returned_unchanged() -> None:
+    """A rooted-but-driveless path (`Path.is_absolute()` is False for this on
+    Windows) must still be treated as already anchored, not re-anchored to the
+    project root. This is the exact format `configs/dataset/local.example.yaml`
+    documents (`/absolute/path/to/onepiece-faisabilite/data/silver`).
+    """
+    config = DatasetConfig(path="/absolute/path/to/onepiece-faisabilite/data/silver")
+
+    assert config.resolved_path() == Path("/absolute/path/to/onepiece-faisabilite/data/silver")

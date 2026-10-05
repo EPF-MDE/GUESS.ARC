@@ -120,7 +120,11 @@ class DatasetConfig(_Base):
                 "`--config configs/dataset/local.yaml`."
             )
         path = Path(self.path).expanduser()
-        if path.is_absolute():
+        if path.root:
+            # `path.root` (not `path.is_absolute()`): on Windows, a POSIX-style
+            # rooted path like "/absolute/path/to/x" (the format shown in
+            # configs/dataset/local.example.yaml) has a root but no drive, so
+            # `is_absolute()` is False even though it must not be re-anchored.
             return path
         from ncp.config.loader import project_root
 
