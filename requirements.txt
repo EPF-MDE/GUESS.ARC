@@ -1,2 +1,12 @@
 requests>=2.31
 cloudscraper>=1.2
+
+# Pipeline de taxonomie de tags (onepiece-faisabilite/scripts/0X_*.py)
+pandas>=2.2
+numpy>=1.26
+PyYAML>=6.0
+joblib>=1.3
+scikit-learn>=1.4
+hdbscan>=0.8.40
+spacy>=3.7
+sentence-transformers>=3.0
