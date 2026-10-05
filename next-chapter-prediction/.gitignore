@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Données : jamais versionnées, seuls les .gitkeep le sont
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+!data/**/.gitkeep
+
+# Artefacts d'expériences et poids
+experiments/*
+!experiments/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Configuration locale (chemin du dataset sur la machine courante)
+configs/**/local*.yaml
+configs/**/local*.json
+
+# Notebooks
+.ipynb_checkpoints/
+notebooks/*.ipynb
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

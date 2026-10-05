@@ -1,5 +1,8 @@
 .venv/
 __pycache__/
 *.pyc
-data/
+# Anchored to each project's own data dir: a bare "data/" also matched
+# next-chapter-prediction/src/ncp/data/ (source code), hiding it from git add.
+/next-chapter-prediction/data/
+/onepiece-faisabilite/data/
 onepiece-faisabilite/output/
