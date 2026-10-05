@@ -1,0 +1,46 @@
+# Copy this file to configs/dataset/local.yaml and adjust `dataset.path` to
+# the silver corpus directory on your machine, then run with
+# `--config configs/dataset/silver.yaml --config configs/dataset/local.yaml`
+# (silver.yaml's repo-relative path is the default; local.yaml overrides it
+# only where it differs). `local.yaml` is gitignored (see .gitignore's
+# `configs/**/local*.yaml`) because, unlike silver.yaml, its path is
+# machine-specific and optional: the project must work on a fresh clone
+# without it.
+dataset:
+  # Absolute or relative path to the directory of `chapter_NNNN.md` files
+  # produced by the onepiece-faisabilite pipeline (SPEC §4).
+  path: "/absolute/path/to/onepiece-faisabilite/data/silver"
+  # Registered loader name; `markdown_dir` reads one ChapterRecord per
+  # `chapter_NNNN.md` file (loader implemented in T002).
+  format: markdown_dir
+  # Fixed book id: One Piece is a single continuous narrative (SPEC §1, §4).
+  default_book_id: one_piece
+  field_map:
+    # Front-matter `chapter` (chapter number) -> ChapterRecord.index.
+    chapter_index: chapter
+    # Front-matter `title` (English chapter title) -> ChapterRecord.title.
+    title: title
+    # Remaining front-matter fields named in SPEC §4, kept verbatim in
+    # ChapterRecord.metadata. None are silently dropped.
+    metadata:
+      # Japanese title; corrupted ("{{Ruby") in 195/1193 chapters (SPEC §4).
+      - jname
+      # Story arc name.
+      - arc
+      # Wiki revision id of the source page.
+      - revision_id
+      # Wiki-edit timestamp of that revision; NOT the real publication date
+      # (SPEC §4, §6).
+      - revised_at
+      # Whether the wiki considers this chapter's summary complete.
+      - complete
+      # Number of entries in `characters` below.
+      - character_count
+      # Per-character appearance list: [{name, faction, on_panel}]. The
+      # cover/flashback distinction collapsed into `on_panel` is an open
+      # question (SPEC §4, §26) — kept as-is here.
+      - characters
+      # Attribution source (the Fandom wiki page).
+      - source
+      # Content license (CC BY-SA).
+      - license

@@ -28,6 +28,8 @@ checkpoints/*
 # Configuration locale (chemin du dataset sur la machine courante)
 configs/**/local*.yaml
 configs/**/local*.json
+# ... sauf le gabarit documente, qui est toujours commite (T001).
+!configs/dataset/local.example.yaml
 
 # Notebooks
 .ipynb_checkpoints/
