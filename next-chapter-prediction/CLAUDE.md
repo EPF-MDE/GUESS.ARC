@@ -117,3 +117,9 @@ Before implementing a feature:
 8. Report what changed and remaining risks.
 
 Never implement several unrelated tickets at once.
+
+## Tickets
+
+Tickets are tracked in GitHub Issues (#14–#72, mapping in ROADMAP.md §7).
+The files in tickets/ are a frozen snapshot: do not edit them.
+Ticket status, discussion and changes happen on the GitHub issue.

@@ -110,25 +110,21 @@ embeddings). Complexity: **S**/**M**/**L**, no time units.
 | T007 | Forecasting example builder (history window → t+1) | 01 | Must | T003, T005 | M |
 | T008 | Auxiliary entity-presence target builder | 01 | Must | T002, T007 | S |
 | T009 | Layer 1 raw-notes accessor & integrity report | 02 | Should | T002 | S |
-| T010 | Layer 2 event candidate extraction | 02 | Must | T009, T003 | L |
+| T010 | Layer 2 event candidate extraction | 02 | Must | T009, T003 (both required) | L |
 | T011 | Layer 2 extraction quality spot-check tooling | 02 | Should | T010 | M |
-| T012 | Layer 3 taxonomy construction — frozen mode | 02 | Must | T010, T005, T004 | L |
-| T013 | Layer 3 taxonomy construction — incremental mode | 02 | Could | T012 | M |
-| T014 | Layer 3 taxonomy leakage guard tests | 02 | Must | T012 | S |
+| T012 | Layer 3 taxonomy construction — frozen mode (+ leakage guard tests) | 02 | Must | T010, T005, T004 | L |
+| T013 | Layer 3 taxonomy construction — incremental mode | 02 | Could | T012, T006 | M |
 | T015 | Layer 4 final event label generation | 02 | Must | T012, T010 | M |
 | T016 | Event label frequency thresholding | 02 | Must | T015 | M |
 | T017 | Exploratory `taxonomy.json` review & comparison report | 02 | Should | T012 | M |
 | T018 | Core evaluation metrics module | 08 | Must | — | M |
 | T019 | Leakage-safe evaluation protocol runner | 08 | Must | T018, T005, T006, T007 | L |
 | T020 | Run/result provenance schema & archive | 08 | Must | T019 | S |
-| T021 | Baseline: predict-nothing & most-frequent-events | 03 | Must | T007, T015, T019 | S |
-| T022 | Baseline: recent-event persistence | 03 | Must | T007, T015, T019 | S |
-| T023 | Baseline: frequency-weighted recency | 03 | Must | T007, T015, T019 | S |
-| T024 | Tier A baseline run & report | 03 | Must | T021, T022, T023, T019 | S |
+| T021 | Tier A baselines (predict-nothing, most-frequent, persistence, frequency-weighted recency) | 03 | Must | T007, T015, T019, T016 | M |
+| T024 | Tier A baseline run & report | 03 | Must | T021, T019 | S |
 | T025 | Windowed-history text assembly | 04 | Must | T007, T002 | M |
-| T026 | TF-IDF encoder (Tier B) | 04 | Must | T025, T005, T004 | M |
-| T027 | Sentence-embedding encoder (Tier B, optional) | 04 | Could | T025, T004 | M |
-| T028 | Tier B leakage guard tests | 04 | Must | T026, T027 | S |
+| T026 | TF-IDF encoder (Tier B) (+ Tier B leakage guard tests) | 04 | Must | T025, T005, T004 | M |
+| T027 | Sentence-embedding encoder (Tier B, optional) | 04 | Could | T025, T004, T005 | M |
 | T029 | Entity-history feature extraction (§9, Tier C) | 04 | Must | T008, T007 | M |
 | T030 | Tier C feature assembly + leakage guard tests | 04 | Must | T026, T029 | S |
 | T031 | Character state ontology (`State(t)` #1) | 05 | Must | T003, T007 | L |
@@ -156,7 +152,9 @@ embeddings). Complexity: **S**/**M**/**L**, no time units.
 | T053 | Error analysis: `State(t)` component-availability breakdown | 08 | Should | T040, T044 | M |
 | T054 | Reproducibility/provenance audit | 08 | Must | T020, T050 | S |
 
-54 tickets. None implement EPIC-07 or EPIC-09.
+50 tickets. (T014, T022, T023, and T028 were merged into T012, T021, T021,
+and T026 respectively — see §6 below and each surviving ticket's own notes.
+No ticket ID was reused or renumbered.) None implement EPIC-07 or EPIC-09.
 
 ## 5. Why this order (rules applied)
 
@@ -167,9 +165,9 @@ embeddings). Complexity: **S**/**M**/**L**, no time units.
    T005–T007 exist before T015 (first supervised label table) and long
    before any model ticket (T041+).
 3. **Event taxonomy defined and validated before event prediction** — T012
-   (taxonomy construction) and T014 (its leakage guard) precede T015 (label
-   generation), which precedes every model ticket.
-4. **Baselines before complex models** — EPIC-03 (T021–T024) precedes
+   (taxonomy construction, including its own leakage guard suite) precedes
+   T015 (label generation), which precedes every model ticket.
+4. **Baselines before complex models** — EPIC-03 (T021, T024) precedes
    EPIC-04–06. Tier A is rule-based and needs only EPIC-02's labels plus
    EPIC-08 Part 1's metrics, not any representation work.
 5. **Narrative State independently testable** — T031–T039 each ship with
@@ -195,10 +193,10 @@ embeddings). Complexity: **S**/**M**/**L**, no time units.
 |---|---|
 | Chronological dataset | T001–T003 |
 | Forecasting windows | T005–T007 |
-| Event taxonomy | T009–T017 |
+| Event taxonomy | T009–T013, T015–T017 |
 | Event labels | T015, T016 |
-| Simple baselines | T021–T024 |
-| Text representation | T025–T028 |
+| Simple baselines | T021, T024 |
+| Text representation | T025–T027 |
 | Narrative-state representation | T031–T040 |
 | Next-event prediction | T041–T044 |
 | Rigorous evaluation | T018–T020, T050–T054 |
@@ -212,7 +210,7 @@ table):
 | H1 — state > text-only | Tier D vs. B | T044, T042, T045, T050 |
 | H2 — context length | `history_size` sweep | T047 |
 | H3 — entities > text-only | Tier C vs. B | T043, T042, T046, T050 |
-| H4 — sequential > static | Tier E vs. D | **Not ticketed in v1** — correctly gated to EPIC-07 per §14/§22; T044 (Tier D) is the baseline this future experiment will use. |
+| H4 — sequential > static | Tier E vs. D | **Not ticketed in v1** — SPEC §3 now marks H4 itself `[Later — see §14/§25]`; correctly gated to EPIC-07 per §14/§22; T044 (Tier D) is the baseline this future experiment will use. |
 
 The auxiliary entity target (§5, §9) is covered by T008 and carried through
 T021–T024's and T042–T044's reporting as a secondary metric, never
@@ -237,12 +235,55 @@ Every ticket from T009 onward that builds a vocabulary, taxonomy,
 classifier-input feature, or threshold has a **Risks** section naming the
 specific leakage channel from §6/§23 and an acceptance criterion requiring a
 test that asserts the construction set excludes chapters beyond the active
-boundary. T014, T028, T030, and T040 are dedicated leakage-guard tickets
-layered on top of the per-component checks, so the guarantee is checked at
-three levels: per-component, per-tier, and per-taxonomy.
+boundary. T012, T026, T030, and T040 each carry a dedicated leakage-guard
+test suite layered on top of the per-component checks (T012 and T026 now
+include their guard suites directly, folded in from the former T014 and
+T028 respectively; T030 and T040 always bundled assembly with guard tests),
+so the guarantee is checked at three levels: per-component, per-tier, and
+per-taxonomy.
 
 **The dependency order is coherent.** See §2 and §5 above; the table in §4
 lists dependencies as concrete ticket IDs, all pointing strictly backward
 (no ticket depends on a higher-numbered ticket, except where EPIC-08 Part 2
 tickets depend on EPIC-06 tickets, which is the intended cross-epic edge
 described in §1/§2).
+
+## 7. GitHub issue mapping
+
+All 50 surviving tickets and all 9 epics are published as issues on
+`EPF-MDE/GUESS.ARC`. T014, T022, T023, T028 have no issue — merged into
+T012, T021 (×2), T026 respectively (see §4/§6).
+
+| ID | Issue | ID | Issue | ID | Issue |
+|---|---|---|---|---|---|
+| T001 | [#14](https://github.com/EPF-MDE/GUESS.ARC/issues/14) | T021 | [#33](https://github.com/EPF-MDE/GUESS.ARC/issues/33) | T040 | [#49](https://github.com/EPF-MDE/GUESS.ARC/issues/49) |
+| T002 | [#15](https://github.com/EPF-MDE/GUESS.ARC/issues/15) | T024 | [#34](https://github.com/EPF-MDE/GUESS.ARC/issues/34) | T041 | [#50](https://github.com/EPF-MDE/GUESS.ARC/issues/50) |
+| T003 | [#16](https://github.com/EPF-MDE/GUESS.ARC/issues/16) | T025 | [#35](https://github.com/EPF-MDE/GUESS.ARC/issues/35) | T042 | [#51](https://github.com/EPF-MDE/GUESS.ARC/issues/51) |
+| T004 | [#17](https://github.com/EPF-MDE/GUESS.ARC/issues/17) | T026 | [#36](https://github.com/EPF-MDE/GUESS.ARC/issues/36) | T043 | [#52](https://github.com/EPF-MDE/GUESS.ARC/issues/52) |
+| T005 | [#18](https://github.com/EPF-MDE/GUESS.ARC/issues/18) | T027 | [#37](https://github.com/EPF-MDE/GUESS.ARC/issues/37) | T044 | [#53](https://github.com/EPF-MDE/GUESS.ARC/issues/53) |
+| T006 | [#19](https://github.com/EPF-MDE/GUESS.ARC/issues/19) | T029 | [#38](https://github.com/EPF-MDE/GUESS.ARC/issues/38) | T045 | [#54](https://github.com/EPF-MDE/GUESS.ARC/issues/54) |
+| T007 | [#20](https://github.com/EPF-MDE/GUESS.ARC/issues/20) | T030 | [#39](https://github.com/EPF-MDE/GUESS.ARC/issues/39) | T046 | [#55](https://github.com/EPF-MDE/GUESS.ARC/issues/55) |
+| T008 | [#21](https://github.com/EPF-MDE/GUESS.ARC/issues/21) | T031 | [#40](https://github.com/EPF-MDE/GUESS.ARC/issues/40) | T047 | [#56](https://github.com/EPF-MDE/GUESS.ARC/issues/56) |
+| T009 | [#22](https://github.com/EPF-MDE/GUESS.ARC/issues/22) | T032 | [#41](https://github.com/EPF-MDE/GUESS.ARC/issues/41) | T048 | [#57](https://github.com/EPF-MDE/GUESS.ARC/issues/57) |
+| T010 | [#23](https://github.com/EPF-MDE/GUESS.ARC/issues/23) | T033 | [#42](https://github.com/EPF-MDE/GUESS.ARC/issues/42) | T049 | [#58](https://github.com/EPF-MDE/GUESS.ARC/issues/58) |
+| T011 | [#24](https://github.com/EPF-MDE/GUESS.ARC/issues/24) | T034 | [#43](https://github.com/EPF-MDE/GUESS.ARC/issues/43) | T050 | [#59](https://github.com/EPF-MDE/GUESS.ARC/issues/59) |
+| T012 | [#25](https://github.com/EPF-MDE/GUESS.ARC/issues/25) | T035 | [#44](https://github.com/EPF-MDE/GUESS.ARC/issues/44) | T051 | [#60](https://github.com/EPF-MDE/GUESS.ARC/issues/60) |
+| T013 | [#26](https://github.com/EPF-MDE/GUESS.ARC/issues/26) | T036 | [#45](https://github.com/EPF-MDE/GUESS.ARC/issues/45) | T052 | [#61](https://github.com/EPF-MDE/GUESS.ARC/issues/61) |
+| T015 | [#27](https://github.com/EPF-MDE/GUESS.ARC/issues/27) | T037 | [#46](https://github.com/EPF-MDE/GUESS.ARC/issues/46) | T053 | [#62](https://github.com/EPF-MDE/GUESS.ARC/issues/62) |
+| T016 | [#28](https://github.com/EPF-MDE/GUESS.ARC/issues/28) | T038 | [#47](https://github.com/EPF-MDE/GUESS.ARC/issues/47) | T054 | [#63](https://github.com/EPF-MDE/GUESS.ARC/issues/63) |
+| T017 | [#29](https://github.com/EPF-MDE/GUESS.ARC/issues/29) | T039 | [#48](https://github.com/EPF-MDE/GUESS.ARC/issues/48) | | |
+| T018 | [#30](https://github.com/EPF-MDE/GUESS.ARC/issues/30) | | | | |
+| T019 | [#31](https://github.com/EPF-MDE/GUESS.ARC/issues/31) | | | | |
+| T020 | [#32](https://github.com/EPF-MDE/GUESS.ARC/issues/32) | | | | |
+
+| Epic | Issue |
+|---|---|
+| EPIC-01 — Data Foundation | [#64](https://github.com/EPF-MDE/GUESS.ARC/issues/64) |
+| EPIC-02 — Event Taxonomy | [#65](https://github.com/EPF-MDE/GUESS.ARC/issues/65) |
+| EPIC-03 — Baselines (Tier A) | [#66](https://github.com/EPF-MDE/GUESS.ARC/issues/66) |
+| EPIC-04 — Representations (Tier B / Tier C) | [#67](https://github.com/EPF-MDE/GUESS.ARC/issues/67) |
+| EPIC-05 — Narrative State (Tier D) | [#68](https://github.com/EPF-MDE/GUESS.ARC/issues/68) |
+| EPIC-06 — Event Forecasting (Embedding+MLP, H1–H3, ablations) | [#69](https://github.com/EPF-MDE/GUESS.ARC/issues/69) |
+| EPIC-07 — Sequential Models (Tier E) — `later` | [#70](https://github.com/EPF-MDE/GUESS.ARC/issues/70) |
+| EPIC-08 — Evaluation | [#71](https://github.com/EPF-MDE/GUESS.ARC/issues/71) |
+| EPIC-09 — Summary Generation — `later` | [#72](https://github.com/EPF-MDE/GUESS.ARC/issues/72) |
