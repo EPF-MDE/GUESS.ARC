@@ -5,6 +5,11 @@ produire des dictionnaires, et le mapper decide quel champ source joue le role
 de resume, de numero de chapitre, etc. La correspondance vient de la
 configuration (`dataset.field_map`) ; a defaut elle est devinee parmi des noms
 usuels, et ce qui a ete devine est rapporte a l'utilisateur par `ncp inspect`.
+
+`book_id` suit un ordre de priorite distinct : `field_map.book_id` declare,
+sinon `default_book_id` renseigne (aucune detection dans ce cas), sinon
+detection parmi `CANDIDATE_FIELDS["book_id"]`, sinon `ConfigError` si rien de
+tout cela n'aboutit (voir `resolve_field_map`).
 """
 
 from __future__ import annotations
@@ -13,12 +18,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ncp.config.schema import DatasetConfig
+from ncp.config.schema import ConfigError, DatasetConfig
 from ncp.data.schema import ChapterRecord, RawRecord
 
 #: Noms de champs usuels testes pour chaque champ logique, par ordre de priorite.
 CANDIDATE_FIELDS: dict[str, tuple[str, ...]] = {
-    "book_id": ("book_id", "book", "series", "series_id", "work", "title_id", "novel_id", "arc"),
+    "book_id": ("book_id", "book", "series", "series_id", "work", "title_id", "novel_id"),
     "chapter_index": (
         "chapter_index",
         "chapter_number",
@@ -98,7 +103,36 @@ def resolve_field_map(config: DatasetConfig, sample: Mapping[str, Any]) -> Resol
     resolved = ResolvedFieldMap()
     guessed: list[str] = []
 
-    for logical in ("book_id", "chapter_index", "title", "summary"):
+    # `book_id` suit un ordre de priorite distinct des trois autres champs :
+    # 1. `field_map.book_id` declare -> l'utiliser.
+    # 2. sinon `default_book_id` renseigne -> l'utiliser, aucune detection.
+    # 3. sinon detection parmi `CANDIDATE_FIELDS["book_id"]`.
+    # 4. sinon `ConfigError` : rien ne permet de determiner `book_id`.
+    if configured.book_id:
+        if configured.book_id not in available:
+            raise MappingError(
+                f"`dataset.field_map.book_id` vaut {configured.book_id!r}, absent du dataset. "
+                f"Champs disponibles : {', '.join(sorted(available)) or '(aucun)'}"
+            )
+        resolved.book_id = configured.book_id
+    elif not config.default_book_id:
+        found = _find_field(available, CANDIDATE_FIELDS["book_id"])
+        if found:
+            resolved.book_id = found
+            guessed.append("book_id")
+        else:
+            raise ConfigError(
+                "Impossible de determiner `book_id` : `dataset.field_map.book_id` n'est pas "
+                "declare, `dataset.default_book_id` n'est pas renseigne, et aucun champ usuel "
+                "(book_id, book, series, ...) n'a ete trouve dans l'echantillon. Renseigner "
+                "l'un des deux. Champs disponibles : "
+                f"{', '.join(sorted(available)) or '(aucun)'}"
+            )
+    # sinon : `default_book_id` renseigne, `field_map.book_id` non declare ->
+    # aucune detection (`resolved.book_id` reste `None`, `map_one` utilisera
+    # `default_book_id`).
+
+    for logical in ("chapter_index", "title", "summary"):
         declared = getattr(configured, logical)
         if declared:
             if declared not in available:

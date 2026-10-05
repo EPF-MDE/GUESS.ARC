@@ -83,3 +83,9 @@ def test_malformed_field_map_raises_config_error_not_a_crash():
 
     with pytest.raises(ConfigError):
         Config.from_dict(malformed)
+
+
+def test_silver_dataset_config_validates_successfully():
+    config = _load_silver_config()
+
+    config.validate()  # must not raise: default_book_id covers the missing field_map.book_id
