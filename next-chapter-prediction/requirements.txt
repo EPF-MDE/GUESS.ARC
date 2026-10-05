@@ -1,0 +1,23 @@
+# Coeur : suffisant pour `ncp inspect|preprocess|build-examples|annotate`
+# et pour les baselines non neuronales.
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.4
+networkx>=3.2
+PyYAML>=6.0
+
+# Développement
+pytest>=8.0
+pytest-cov>=5.0
+
+# Visualisation des rapports d'évaluation
+matplotlib>=3.8
+
+# Extraction linguistique (optionnel : fallback regex si absent)
+spacy>=3.7
+
+# Encodeurs / modèles neuronaux (optionnel : fallback TF-IDF si absent).
+# Décommenter quand on passe aux représentations denses.
+# torch>=2.2
+# transformers>=4.40
+# sentence-transformers>=3.0
