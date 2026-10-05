@@ -275,6 +275,12 @@ class Config(_Base):
 
     def validate(self) -> Config:
         """Verifie les invariants independants des donnees. Retourne `self`."""
+        if not self.dataset.field_map.book_id and not self.dataset.default_book_id:
+            raise ConfigError(
+                "`dataset.default_book_id` doit etre renseigne (ou "
+                "`dataset.field_map.book_id` declare) : sans l'un des deux, "
+                "`book_id` serait indefini pour chaque chapitre."
+            )
         fc = self.forecasting
         if fc.history_size < 0:
             raise ConfigError("`forecasting.history_size` doit etre >= 0 (0 = tout l'historique).")

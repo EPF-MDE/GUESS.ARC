@@ -83,3 +83,28 @@ def test_malformed_field_map_raises_config_error_not_a_crash():
 
     with pytest.raises(ConfigError):
         Config.from_dict(malformed)
+
+
+def test_silver_dataset_config_validates_successfully():
+    config = _load_silver_config()
+
+    config.validate()  # must not raise: default_book_id covers the missing field_map.book_id
+
+
+def test_dataset_config_without_any_book_id_source_raises_config_error():
+    """Neither `field_map.book_id` nor a usable `default_book_id` is set.
+
+    `book_id` must never silently end up `None` - every `ChapterRecord` needs
+    one to be grouped into a `Book`.
+    """
+    config = Config.from_dict(
+        {
+            "dataset": {
+                "path": "whatever",
+                "default_book_id": None,
+            }
+        }
+    )
+
+    with pytest.raises(ConfigError):
+        config.validate()
