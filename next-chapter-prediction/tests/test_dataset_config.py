@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 from ncp.config import Config, ConfigError
+from ncp.config.schema import DatasetConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SILVER_CONFIG_PATH = REPO_ROOT / "configs" / "dataset" / "silver.yaml"
@@ -89,3 +90,27 @@ def test_silver_dataset_config_validates_successfully():
     config = _load_silver_config()
 
     config.validate()  # must not raise: default_book_id covers the missing field_map.book_id
+
+
+def test_relative_dataset_path_resolves_against_project_root_regardless_of_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A relative `dataset.path` must resolve the same way from any cwd (#74)."""
+    project_root_dir = tmp_path / "project"
+    (project_root_dir / "src").mkdir(parents=True)
+    (project_root_dir / "pyproject.toml").write_text("")
+    cwd = project_root_dir / "src" / "deeply" / "nested"
+    cwd.mkdir(parents=True)
+    monkeypatch.chdir(cwd)
+
+    config = DatasetConfig(path="../onepiece-faisabilite/data/silver")
+
+    expected = project_root_dir / "../onepiece-faisabilite/data/silver"
+    assert config.resolved_path() == expected
+
+
+def test_absolute_dataset_path_is_returned_unchanged(tmp_path: Path) -> None:
+    absolute = tmp_path / "dataset"
+    config = DatasetConfig(path=str(absolute))
+
+    assert config.resolved_path() == absolute

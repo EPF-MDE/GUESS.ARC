@@ -119,7 +119,12 @@ class DatasetConfig(_Base):
                 "y mettre le chemin du dataset, puis relancer avec "
                 "`--config configs/dataset/local.yaml`."
             )
-        return Path(self.path).expanduser()
+        path = Path(self.path).expanduser()
+        if path.is_absolute():
+            return path
+        from ncp.config.loader import project_root
+
+        return project_root() / path
 
 
 @_register
