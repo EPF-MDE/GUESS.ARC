@@ -18,7 +18,7 @@ from ncp.data.schema import ChapterRecord, RawRecord
 
 #: Noms de champs usuels testes pour chaque champ logique, par ordre de priorite.
 CANDIDATE_FIELDS: dict[str, tuple[str, ...]] = {
-    "book_id": ("book_id", "book", "series", "series_id", "work", "title_id", "novel_id", "arc"),
+    "book_id": ("book_id", "book", "series", "series_id", "work", "title_id", "novel_id"),
     "chapter_index": (
         "chapter_index",
         "chapter_number",
@@ -107,6 +107,11 @@ def resolve_field_map(config: DatasetConfig, sample: Mapping[str, Any]) -> Resol
                     f"Champs disponibles : {', '.join(sorted(available)) or '(aucun)'}"
                 )
             setattr(resolved, logical, declared)
+            continue
+        if logical == "book_id":
+            # `default_book_id` est deja un repli sans danger : deviner une
+            # source pour `book_id` risque de faire correspondre un champ sans
+            # rapport (p. ex. `arc`) et de fragmenter un livre unique.
             continue
         found = _find_field(available, CANDIDATE_FIELDS[logical])
         if found:
