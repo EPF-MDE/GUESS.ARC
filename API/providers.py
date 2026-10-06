@@ -177,7 +177,20 @@ OPENROUTER_DOTS = ProviderConfig(
     min_interval_s=3.0,
 )
 
+# EPF's self-hosted Open WebUI (Ollama backend), OpenAI-compatible under /api.
+# No published quota: it's a shared school server, so pace politely and keep
+# it out of FALLBACK_CHAIN until it has been benchmarked (opt in with
+# `--providers locallm`).
+LOCALLM = ProviderConfig(
+    name="locallm",
+    base_url="https://locallm.mde.epf.fr/api",
+    api_key_env="LOCALLM_API_KEY",
+    model_env="LOCALLM_MODEL",
+    min_interval_s=2.0,
+)
+
 PROVIDERS = {
+    "locallm": LOCALLM,
     "gemini": GEMINI,
     "mistral": MISTRAL,
     "groq": GROQ,
