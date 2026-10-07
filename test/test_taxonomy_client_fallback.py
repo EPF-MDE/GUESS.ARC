@@ -44,8 +44,7 @@ TEST_MODEL_ENV = {
     "MISTRAL_MODEL": "test/mistral-model",
     "GROQ_MODEL": "test/groq-model",
     "OPENROUTER_NEMOTRON_MODEL": "test/nemotron-model:free",
-    "OPENROUTER_NEX_PRO_MODEL": "test/nex-pro-model:free",
-    "OPENROUTER_DOTS_MODEL": "test/dots-model:free",
+    "OPENROUTER_MODEL_PRIMARY": "test/qwen-model:free",
 }
 _model_env_patch = patch.dict("os.environ", TEST_MODEL_ENV)
 

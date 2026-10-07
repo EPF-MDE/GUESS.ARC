@@ -9,11 +9,11 @@ clé, identifiant de modèle) — voir `providers.py`. Les appels passent par un
 **chaîne de fallback** (`provider_fallback.py`, issue #6) : le provider
 courant est tenté, avec retry en place sur `429`/`5xx`, puis bascule sur le
 suivant si l'échec persiste. Chaîne branchée : Gemini (1er), Mistral (2e
-relais), Groq (3e relais), puis 3 modèles gratuits fixes servis par
-OpenRouter — `openrouter-nemotron`, `openrouter-nex-pro`, `openrouter-dots`
-(4e à 6e et derniers relais).
+relais), 2 modèles gratuits fixes servis par OpenRouter —
+`openrouter-nemotron`, `openrouter-qwen` (3e et 4e relais) — puis Groq en
+dernier relais (son budget gratuit est déjà largement consommé).
 
-Si les 6 providers de la chaîne échouent sur un chapitre donné, le client ne
+Si les 5 providers de la chaîne échouent sur un chapitre donné, le client ne
 saute jamais silencieusement le chapitre : une erreur `AllProvidersFailedError`
 est levée (avec un message explicite sur stderr) et remonte à l'appelant.
 
@@ -30,8 +30,8 @@ Seuls Groq (1000 req/jour, tier gratuit `openai/gpt-oss-120b`) et OpenRouter
 (50 req/jour sans crédit acheté) ont une limite locale configurée
 (`ProviderConfig.daily_limit`) : Gemini et Mistral exposent déjà leur RPD
 restant dans les en-têtes de réponse, donc ne sont pas (encore) suivis
-localement. Les 3 providers OpenRouter (`openrouter-nemotron`,
-`openrouter-nex-pro`, `openrouter-dots`) partagent une seule et même clé et
+localement. Les 2 providers OpenRouter (`openrouter-nemotron`,
+`openrouter-qwen`) partagent une seule et même clé et
 donc un seul budget de 50 req/jour : ils comptent sur la même entrée
 `quota_key="openrouter"` dans `API/quota_state.json`, pas 50 chacun.
 `API/quota_state.json` est local à la machine et n'est pas commité (voir
@@ -63,7 +63,8 @@ qu'il sert de relais derrière Gemini plutôt que de moteur principal.
 2. Se connecter (ou créer un compte), cliquer sur **Create API Key**.
 3. Copier la clé.
 
-Sert de 3e relais (`openai/gpt-oss-120b`) derrière Gemini et Mistral. Le
+Sert de dernier relais (`openai/gpt-oss-120b`), derrière Gemini, Mistral et
+les 2 modèles OpenRouter : son budget gratuit est déjà largement consommé. Le
 modèle précédent (`llama-3.3-70b-versatile`) a été déprécié sur le tier
 gratuit le 2026-06-17.
 
@@ -79,14 +80,19 @@ gratuit le 2026-06-17.
 2. Se connecter (ou créer un compte), cliquer sur **Create Key**.
 3. Copier la clé.
 
-Sert de 4e, 5e et 6e (derniers) relais, derrière Gemini, Mistral et Groq — un
-relais par modèle fixe : `nvidia/nemotron-3-super-120b-a12b:free`,
-`nex-agi/nex-n2.5-pro:free`, `dots-studio/dots-3-note-preview:free`. Les
+Sert de 3e et 4e relais, derrière Gemini et Mistral et avant Groq — un
+relais par modèle fixe : `nvidia/nemotron-3.5-lightning:free`,
+`qwen/qwen3.8-27b:free`. Les
 requêtes envoient aussi les en-têtes `HTTP-Referer` et `X-Title` recommandés
 par OpenRouter pour identifier l'app appelante.
 
-Les 3 modèles ont été choisis (via `GET /models` du catalogue public) pour
-leur support confirmé de `response_format`. Une première version résolvait
+Les 2 modèles ont été retenus après un appel réel avec
+`response_format: json_object` (le champ `supported_parameters` du catalogue
+n'est pas fiable : qwen et nemotron-3.5 ne l'annoncent pas mais le
+respectent). Les modèles Gemma `:free` ont été écartés : ils sont servis par
+le pool partagé de Google AI Studio, qui renvoie `429` (« rate-limited
+upstream ») indépendamment de notre propre quota. `meta-llama/llama-3.3-70b-instruct:free`
+n'existe plus au catalogue. Une première version résolvait
 le modèle dynamiquement (`GET /models?max_price=0`, premier `:free` trouvé,
 issue #8) : en pratique le catalogue gratuit tourne souvent vers des modèles
 qui n'acceptent pas `response_format`, ce qu'OpenRouter répond par un `400`
@@ -98,14 +104,14 @@ plus dans la chaîne par défaut.
 
 Copier `.env` (racine du dépôt) si ce n'est pas déjà fait, puis renseigner les
 clés (obligatoires pour que la chaîne de fallback complète tourne de bout en
-bout — une seule clé `OPENROUTER_API_KEY` sert aux 3 relais OpenRouter). Les
+bout — une seule clé `OPENROUTER_API_KEY` sert aux 2 relais OpenRouter). Les
 `*_MODEL` sont **obligatoires** aussi : aucun modèle n'est codé en dur dans
 `providers.py`, le `.env` est la seule source. Valeurs actuellement retenues
 (modèles gratuits) :
 
 ```
 GEMINI_API_KEY=la-clé-gemini-copiée-ci-dessus
-GEMINI_MODEL=gemini-3.6-flash
+GEMINI_MODEL=gemini-2.5-flash
 
 MISTRAL_API_KEY=la-clé-mistral-copiée-ci-dessus
 MISTRAL_MODEL=ministral-14b-latest
@@ -114,9 +120,8 @@ GROQ_API_KEY=la-clé-groq-copiée-ci-dessus
 GROQ_MODEL=openai/gpt-oss-120b
 
 OPENROUTER_API_KEY=la-clé-openrouter-copiée-ci-dessus
-OPENROUTER_NEMOTRON_MODEL=nvidia/nemotron-3-super-120b-a12b:free
-OPENROUTER_NEX_PRO_MODEL=google/gemma-4-31b-it:free
-OPENROUTER_DOTS_MODEL=dots-studio/dots-3-note-preview:free
+OPENROUTER_NEMOTRON_MODEL=nvidia/nemotron-3.5-lightning:free
+OPENROUTER_MODEL_PRIMARY=qwen/qwen3.8-27b:free
 ```
 
 Une variable `*_MODEL` absente fait échouer `run_benchmark.py` dès le
@@ -131,8 +136,8 @@ vide, elle choisit un modèle `:free` dans le catalogue au moment de l'appel.
 ```bash
 pip install -r requirements.txt
 
-# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral, groq,
-# openrouter-nemotron, openrouter-nex-pro, openrouter-dots)
+# un ou plusieurs chapitres précis (chaîne de fallback par défaut : gemini, mistral,
+# openrouter-nemotron, openrouter-qwen, groq)
 python API/taxonomy_client.py --chapters 1 2
 
 # tous les chapitres 1..N
@@ -320,9 +325,9 @@ python API/run_benchmark.py --chapters 1 2
 python API/run_benchmark.py --report-only
 ```
 
-- `--chapters 1 2` déclenche de vrais appels réseau sur les 6 providers
-  (Gemini, Mistral, Groq, openrouter-nemotron, openrouter-nex-pro,
-  openrouter-dots, indépendamment) et écrit
+- `--chapters 1 2` déclenche de vrais appels réseau sur les 5 providers
+  (Gemini, Mistral, Groq, openrouter-nemotron, openrouter-qwen,
+  indépendamment) et écrit
   `data/taxonomy/<provider>/chapter_0001.json` / `chapter_0002.json` pour
   chacun — à supprimer ensuite si ces fichiers ne sont pas censés rester (ou
   choisir des numéros de chapitre déjà attendus dans le lot final).
@@ -337,13 +342,12 @@ python API/run_benchmark.py --report-only
 | Variable | Rôle | Obligatoire |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Clé Google AI Studio | Oui, pour `gemini` (1er de la chaîne par défaut) |
-| `GEMINI_MODEL` | Modèle Gemini (ex. `gemini-3.6-flash`) | Oui, pour `gemini` |
+| `GEMINI_MODEL` | Modèle Gemini (ex. `gemini-2.5-flash`) | Oui, pour `gemini` |
 | `MISTRAL_API_KEY` | Clé Mistral AI Studio (tier Experiment) | Oui, pour `mistral` (2e relais par défaut) |
 | `MISTRAL_MODEL` | Modèle Mistral (ex. `ministral-14b-latest`) | Oui, pour `mistral` |
-| `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (3e relais par défaut) |
+| `GROQ_API_KEY` | Clé Groq | Oui, pour `groq` (dernier relais par défaut) |
 | `GROQ_MODEL` | Modèle Groq (ex. `openai/gpt-oss-120b`) | Oui, pour `groq` |
-| `OPENROUTER_API_KEY` | Clé OpenRouter (partagée par les 3 relais OpenRouter) | Oui, pour `openrouter-nemotron`/`openrouter-nex-pro`/`openrouter-dots` (4e à 6e et derniers relais par défaut) |
-| `OPENROUTER_NEMOTRON_MODEL` | Modèle du relais nemotron (ex. `nvidia/nemotron-3-super-120b-a12b:free`) | Oui, pour `openrouter-nemotron` |
-| `OPENROUTER_NEX_PRO_MODEL` | Modèle du relais nex-pro (ex. `google/gemma-4-31b-it:free`) | Oui, pour `openrouter-nex-pro` |
-| `OPENROUTER_DOTS_MODEL` | Modèle du relais dots (ex. `dots-studio/dots-3-note-preview:free`) | Oui, pour `openrouter-dots` |
+| `OPENROUTER_API_KEY` | Clé OpenRouter (partagée par les 2 relais OpenRouter) | Oui, pour `openrouter-nemotron`/`openrouter-qwen` (3e et 4e relais par défaut) |
+| `OPENROUTER_NEMOTRON_MODEL` | Modèle du relais nemotron (ex. `nvidia/nemotron-3.5-lightning:free`) | Oui, pour `openrouter-nemotron` |
+| `OPENROUTER_MODEL_PRIMARY` | Modèle du relais qwen (ex. `qwen/qwen3.8-27b:free`) | Oui, pour `openrouter-qwen` |
 | `ANTHROPIC_API_KEY` | Clé Anthropic (POC Konrad) | Non — usage séparé, sans lien avec ce banc de test |

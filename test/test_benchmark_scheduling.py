@@ -91,11 +91,11 @@ class TestDeferred429(unittest.TestCase):
 
 
 class TestExhaustionIsPerAccount(unittest.TestCase):
-    """The 3 OpenRouter models share one key and its daily cap (quota_key
+    """The OpenRouter models share one key and its daily cap (quota_key
     "openrouter"): once one of them proves it spent, the others must not
     keep burning 429s against it."""
 
-    OPENROUTER_MODELS = ["openrouter-nemotron", "openrouter-nex-pro", "openrouter-dots"]
+    OPENROUTER_MODELS = ["openrouter-nemotron", "openrouter-qwen"]
 
     def test_exhausting_one_openrouter_model_skips_the_ones_sharing_its_key(self):
         tagger = FakeTagger({
@@ -106,7 +106,7 @@ class TestExhaustionIsPerAccount(unittest.TestCase):
 
         self.assertEqual([c for c in tagger.calls if c[0].startswith("openrouter")], [("openrouter-nemotron", 1)])
         self.assertTrue(quota.is_exhausted("openrouter"))
-        self.assertIn(("openrouter-dots", 2), result.skipped)
+        self.assertIn(("openrouter-qwen", 2), result.skipped)
 
     def test_same_day_rerun_skips_every_model_on_the_exhausted_key(self):
         quota = QuotaState(path=None)

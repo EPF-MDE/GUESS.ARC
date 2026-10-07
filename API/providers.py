@@ -136,12 +136,16 @@ OPENROUTER = ProviderConfig(
 )
 
 # Each model we want to benchmark via OpenRouter is its own fixed-model
-# ProviderConfig, confirmed (via GET /models) to advertise `response_format`
-# support. Each writes to its own data/taxonomy/<name>/ — never a shared
-# data/taxonomy/openrouter/ — so the 3 models stay directly comparable, same
+# ProviderConfig, checked with a real call to return clean JSON under
+# `response_format: json_object` (the catalog's `supported_parameters` isn't
+# a reliable signal: qwen/nemotron-3.5 don't advertise it but honour it).
+# Gemma :free models were dropped: they're served from Google AI Studio's
+# shared upstream pool, which answers 429 regardless of our own quota.
+# Each writes to its own data/taxonomy/<name>/ — never a shared
+# data/taxonomy/openrouter/ — so the models stay directly comparable, same
 # as gemini/mistral/groq.
 #
-# All three share one OpenRouter API key and its 50 req/day free-tier cap
+# They all share one OpenRouter API key and its 50 req/day free-tier cap
 # (issue #9), so they share one quota_key ("openrouter") rather than each
 # getting their own 50 in quota_state.json.
 OPENROUTER_NEMOTRON = ProviderConfig(
@@ -155,22 +159,11 @@ OPENROUTER_NEMOTRON = ProviderConfig(
     min_interval_s=3.0,
 )
 
-OPENROUTER_NEX_PRO = ProviderConfig(
-    name="openrouter-nex-pro",
+OPENROUTER_QWEN = ProviderConfig(
+    name="openrouter-qwen",
     base_url="https://openrouter.ai/api/v1",
     api_key_env="OPENROUTER_API_KEY",
-    model_env="OPENROUTER_NEX_PRO_MODEL",
-    extra_headers=OPENROUTER_HEADERS,
-    daily_limit=50,
-    quota_key="openrouter",
-    min_interval_s=3.0,
-)
-
-OPENROUTER_DOTS = ProviderConfig(
-    name="openrouter-dots",
-    base_url="https://openrouter.ai/api/v1",
-    api_key_env="OPENROUTER_API_KEY",
-    model_env="OPENROUTER_DOTS_MODEL",
+    model_env="OPENROUTER_MODEL_PRIMARY",
     extra_headers=OPENROUTER_HEADERS,
     daily_limit=50,
     quota_key="openrouter",
@@ -182,12 +175,12 @@ PROVIDERS = {
     "mistral": MISTRAL,
     "groq": GROQ,
     "openrouter-nemotron": OPENROUTER_NEMOTRON,
-    "openrouter-nex-pro": OPENROUTER_NEX_PRO,
-    "openrouter-dots": OPENROUTER_DOTS,
+    "openrouter-qwen": OPENROUTER_QWEN,
 }
 
 # Ordered fallback chain (issue #6): tried in this order, Gemini first, then
-# Mistral (#6), Groq (#7), then the 3 fixed OpenRouter models (#8) as the
-# last relays — never branch on provider name in the call/fallback logic
-# itself.
-FALLBACK_CHAIN = ["gemini", "mistral", "groq", "openrouter-nemotron", "openrouter-nex-pro", "openrouter-dots"]
+# Mistral (#6), the fixed OpenRouter models (#8), and Groq (#7) last: its
+# free-tier budget is already largely spent, so it only takes over when every
+# other relay has failed — never branch on provider name in the call/fallback
+# logic itself.
+FALLBACK_CHAIN = ["gemini", "mistral", "openrouter-nemotron", "openrouter-qwen", "groq"]

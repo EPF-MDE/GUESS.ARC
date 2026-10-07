@@ -4,8 +4,8 @@
 Spec section 1: the point of this benchmark is to compare providers against
 each other on the *same* batch of chapters — "pour chaque provider/modèle
 de la section 2, envoyer un appel par chapitre". So each provider in
-`--providers` (default: all 6 — gemini/mistral/groq plus the 3 fixed
-OpenRouter models, openrouter-nemotron/openrouter-nex-pro/openrouter-dots)
+`--providers` (default: all 5 — gemini/mistral/groq plus the 2 fixed
+OpenRouter models, openrouter-nemotron/openrouter-qwen)
 is called independently on every chapter of the batch: no cross-provider fallback
 here (a provider that fails on a chapter is just logged as a failure for
 that model — it never hands the chapter to a different model). That is
@@ -184,7 +184,7 @@ def run_batch(
       and skips every pair it still had, with no network call. Providers
       already marked exhausted today are skipped from the start. Exhaustion
       is tracked per ProviderConfig.quota_name, the account the quota
-      belongs to: the 3 OpenRouter models share one key, so one of them
+      belongs to: the OpenRouter models share one key, so one of them
       proving it spent skips the other two as well.
     - A provider whose local daily budget runs out (QUOTA_EXHAUSTED_STATUS)
       is skipped for the rest of the run too, without a mark: the local
