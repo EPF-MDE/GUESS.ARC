@@ -56,3 +56,24 @@ The identifier linking every chapter's segment of the same ongoing Fight, so a f
 
 **Fights Index**:
 The canonical lookup, keyed by Fight ID, of which chapters/segments belong to a given Fight.
+
+### Embeddings
+
+**Silver File**:
+The cleaned, per-chapter source document: a structured header (arc, Characters with Faction and on-panel flag) followed by the chapter's prose sections. The input from which both taxonomy records and Chapter Embeddings are derived.
+_Avoid_: silver, chapter file, markdown file
+
+**Gold Representation**:
+A machine-learning-ready form of every chapter, derived from Silver Files and consumed by chapter-event prediction. Two coexist: the **Taxonomy Gold** (Chapter Records, Character-in-Chapter Records and Interactions — precise and interpretable, but costly to produce) and the **Embedding Gold** (one Chapter Embedding per chapter — cheap and complete, but not human-readable). Neither replaces the other; they're alternative inputs to the same prediction task.
+_Avoid_: gold (alone — always say which one)
+
+**Long Summary**:
+The free-prose narrative section of a Silver File describing what happens in the chapter. Distinct from the Short Summary and the Chapter Notes, and from the structured header.
+
+**Chapter Embedding**:
+A single vector representing one chapter's Long Summary prose — and only that. Never encodes the structured header, so the cast of a chapter can't leak into it.
+_Avoid_: chapter vector, summary vector
+
+**Predicted Embedding**:
+A Chapter Embedding forecast for chapter n+1 from the Chapter Embeddings of chapters up to n. Judged both directly against the real Chapter Embedding of n+1 and, once decoded, against the Characters listed in chapter n+1's Silver File header — a yardstick independent of both Gold Representations.
+_Avoid_: next vector, forecast
