@@ -45,6 +45,16 @@ Sorties, relatives au dossier courant :
 - `data/silver/chapter_NNNN.md` — un fichier par chapitre, front-matter YAML + résumé long
 - `data/state.json` — les `revid` connus, pour les runs incrémentaux
 
+### Vérifications qualité
+
+Les exigences qualité et leurs preuves sont dans [`QUALITY.md`](QUALITY.md).
+Pour revérifier le corpus silver (bibliothèque standard, sans réseau), depuis la
+racine du repo, en pointant `--silver` vers le dossier écrit par l'ingestion :
+
+```bash
+python scripts/quality/check_silver.py --silver onepiece-faisabilite/scripts/data/silver
+```
+
 ### Pipeline de taxonomie de tags
 
 Construit une taxonomie de tags canoniques (perso, lieu, objet, event, rel) à
