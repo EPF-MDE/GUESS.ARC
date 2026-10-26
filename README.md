@@ -56,6 +56,15 @@ rencontrées sur le wiki : les annotations en parenthèses nues des anciens
 chapitres (`*[[Kalifa]] (cover)`) et celles en apostrophes des récents
 (`*[[King]] ''(cover)''`).
 
+### Vérifications qualité
+
+Les exigences qualité et leurs preuves sont dans [`QUALITY.md`](QUALITY.md).
+Pour revérifier le corpus silver (bibliothèque standard, sans réseau) :
+
+```bash
+python scripts/quality/check_silver.py
+```
+
 ### Chiffres clés du livrable
 
 - Wiki EN : résumé long sur **1193 / 1193** chapitres, complété **~70 min** après la sortie
