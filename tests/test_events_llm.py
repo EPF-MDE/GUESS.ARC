@@ -244,7 +244,7 @@ class TestMerge(LlmTestCase):
         event = self.document["events"][3]
         self.assertEqual(list(event), [
             "id", "origin", "type", "description", "participants", "location",
-            "status", "in_flashback", "evidence", "source",
+            "status", "in_flashback", "evidence", "source", "checks",
         ])
         self.assertEqual(event["evidence"], "Luffy fights Zoro and wins.")
         self.assertEqual(event["source"], "long_summary")
@@ -258,7 +258,7 @@ class TestMerge(LlmTestCase):
         self.assertEqual(meta["revision_id"], 4242)
         self.assertEqual(meta["model"], "fake-gemma")
         for key in ("prompt_version", "schema_version", "taxonomy_version",
-                    "entities_version"):
+                    "entities_version", "checks_version"):
             self.assertRegex(meta[key], r"^v\d+$", key)
         self.assertEqual(meta["attempts"], 1)
         self.assertEqual(meta["origins"], ["wiki", "llm"])

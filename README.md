@@ -26,6 +26,7 @@ src/guess_arc/
     ├── llm.py            # client LLM : (système, utilisateur, schéma) -> texte brut
     ├── response.py       # bloc de réflexion retiré, JSON parsé et validé
     ├── extraction.py     # essais, pause de 15 s, réponses brutes, run.jsonl
+    ├── checks.py         # contrôles des événements llm : preuve, fuite, doublons
     ├── outputs.py        # data/event/out/events_NNNN.json : fusion wiki + llm
     ├── versions.py       # versions du prompt et des entités
     └── pipeline.py       # orchestration, CLI
@@ -169,7 +170,22 @@ est abandonné, sans fichier de sortie, et signalé dans le journal.
   erreur, issue `ok` | `retry` | `abandoned`) ;
 - `data/event/out/events_NNNN.json` : les événements `wiki` puis `llm`, avec
   `unlisted_entities` et un bloc `meta` (modèle, versions du prompt, du schéma,
-  de la taxonomie et des entités, `revision_id`, nombre d'essais, origines).
+  de la taxonomie, des entités et des contrôles, `revision_id`, nombre
+  d'essais, doublons retirés, origines).
+
+Chaque événement `llm` porte des `checks`, qui mesurent la qualité de
+l'extracteur ; un événement en échec est marqué, jamais supprimé, et le
+filtrage se fait au moment de consommer le dataset :
+
+- `evidence_found` : la preuve figure dans le texte d'entrée du chapitre, à des
+  espaces et des guillemets près ;
+- `future_leak` : la description cite un personnage qui n'apparaît qu'après le
+  chapitre (pas encore présenté, fiche datée d'un chapitre ultérieur), ou emploie « later », « will » ou « future ».
+
+`unlisted_checks.future_leak` fait le même contrôle de noms sur
+`unlisted_entities`. Les événements identiques (boucle de répétition à
+température 0) sont retirés, et leur nombre est noté dans
+`meta.duplicates_removed`.
 
 ## Tests
 
@@ -195,6 +211,9 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - l'appel au modèle, à travers le pipeline avec un client factice : nouvel
   essai puis abandon, bloc de réflexion retiré, réponses brutes et journal,
   fusion des deux origines et `meta`, aucun appel en `--dry-run` ;
+- les contrôles, à travers le pipeline avec un client factice : preuve absente
+  ou présente à des guillemets près, personnage futur ou mot du futur dans une
+  description ou `unlisted_entities`, doublons retirés et comptés ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

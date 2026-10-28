@@ -267,6 +267,22 @@ class EntitySelector:
         return c.name in self.presented or (
             c.first_chapter is not None and c.first_chapter <= chapter)
 
+    def _cited(self, mentioned: set[str]) -> list[Character]:
+        """Personnages dont un nom ou un alias figure parmi les clés `mentioned`, dans
+        l'ordre des fiches."""
+        cited = {self.entities.aliases[k].name for k in mentioned & self.entities.aliases.keys()
+                 if not self._common_word(k)}
+        return [c for c in self.entities.characters if c.name in cited]
+
+    def future_names(self, chapter: int, text: str) -> list[str]:
+        """Personnages cités dans `text` qui n'apparaissent qu'après le chapitre
+        `chapter`, déjà observé : pas encore apparus, et dont la fiche date la
+        première apparition. Sans date, rien ne dit que le personnage est futur.
+        `text` entier vaut aussi pour un nom, même écrit en minuscules."""
+        mentioned = mentioned_keys(text, self.entities.max_words) | {name_key(text)}
+        return [c.name for c in self._cited(mentioned)
+                if c.first_chapter is not None and not self._appeared(c, chapter)]
+
     def select(self, ch: SilverChapter, text: str) -> EntityBlock:
         """Entités du chapitre `ch`, déjà observé ; `text` est le texte envoyé au modèle."""
         chosen: dict[str, Character] = {}
@@ -275,10 +291,8 @@ class EntitySelector:
             if "cover" not in a.annotations and self._appeared(c, ch.number):
                 chosen.setdefault(c.name, c)
         mentioned = mentioned_keys(text, self.entities.max_words)
-        cited = {self.entities.aliases[k].name for k in mentioned & self.entities.aliases.keys()
-                 if not self._common_word(k)}
-        for c in self.entities.characters:
-            if c.name in cited and self._appeared(c, ch.number):
+        for c in self._cited(mentioned):
+            if self._appeared(c, ch.number):
                 chosen.setdefault(c.name, c)
         return EntityBlock(
             chapter=ch.number,

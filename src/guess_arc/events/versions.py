@@ -9,3 +9,6 @@ PROMPT_VERSION = "v1"
 SCHEMA_VERSION = "v1"
 ENTITIES_VERSION = "v0"
 TAXONOMY_VERSION = "v1"
+# Règles des contrôles (checks) : elles ne changent pas la réponse du modèle,
+# seulement les marques posées dessus.
+CHECKS_VERSION = "v1"

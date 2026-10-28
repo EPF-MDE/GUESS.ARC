@@ -13,6 +13,7 @@
                  brut ; client factice pour les tests
     response  -> bloc de réflexion retiré, JSON parsé et validé contre le schéma
     extraction -> essais, pause entre deux appels, réponses brutes, run.jsonl
+    checks    -> contrôles des événements llm : preuve, fuite du futur, doublons
     outputs   -> data/event/out/events_NNNN.json : fusion des origines wiki et llm
     versions  -> versions du prompt, du schéma, de la taxonomie et des
                  entités, notées dans chaque sortie

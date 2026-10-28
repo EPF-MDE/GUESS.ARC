@@ -2,7 +2,8 @@
 One Piece — extraction des événements, de la silver vers data/event/.
 
 Avec un client LLM (`run(..., client=...)`), chaque chapitre est envoyé au
-modèle, dans l'ordre, et `out/` fusionne les événements `wiki` et `llm` ; les
+modèle, dans l'ordre, et `out/` fusionne les événements `wiki` et `llm`, ceux-ci
+dédoublonnés et contrôlés (preuve, fuite du futur, voir checks) ; les
 réponses brutes vont dans `raw/` (hors git) et le journal dans `run.jsonl`
 (voir extraction). Le client HTTP n'est pas encore livré (#98) : en ligne de
 commande, seul `--dry-run` fonctionne. Il écrit, sans appeler le modèle,
@@ -29,10 +30,12 @@ import argparse
 import json
 import re
 from collections import Counter
+from functools import partial
 from pathlib import Path
 
 from guess_arc import paths
 
+from .checks import ChapterChecks
 from .future_leaks import load_review, stale_decisions, write_candidates
 from .entities import Entities, EntitySelector
 from .extraction import MAX_ATTEMPTS, PAUSE_S, Pacer, extract_chapter
@@ -129,7 +132,8 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
             if llm is None:
                 abandoned.append(ch.number)
             else:
-                write_output(ch, wiki_by_chapter[ch.number], out_dir, llm)
+                checks = ChapterChecks(p.text, partial(selector.future_names, ch.number))
+                write_output(ch, wiki_by_chapter[ch.number], out_dir, llm, checks)
                 extracted += 1
         candidates.extend(p.leak_candidates)
         removed.update(p.flags)
