@@ -105,6 +105,96 @@ class TestParseCharacters(unittest.TestCase):
         self.assertTrue(by_name(chars, "Loki")["on_panel"])
 
 
+# Une ligne par cas d'annotation, dans les deux graphies (ancienne : (cover),
+# récente : ''(cover)'').
+APPEARANCE_CHARACTERS = """
+;[[Straw Hat Pirates]]
+*[[Monkey D. Luffy]]
+*[[Nami]] (cover)
+*[[Usopp]] ''(flashback)''
+*[[Sanji]] (mentioned)
+*[[Tony Tony Chopper]] ''(cover, dream)''
+*[[Nico Robin]] (K.O.)
+*[[Franky]] ''(k.o)''
+*[[Brook]] (image)
+*[[Jinbe]] ''(silhouette)''
+*[[Roronoa Zoro]] (cover; flashback, K.O.)
+*[[Shanks]] ''(cover story)''
+*[[Buggy]] (flashback; image, shadowed)
+*[[Kaya]] ''(cover)''
+*[[Merry]] (flashback)
+*[[Kuina]] ''(mentioned)''
+*[[Bell-mère]] (dream)
+"""
+
+
+class TestAppearance(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.chars = parse_characters(APPEARANCE_CHARACTERS)
+
+    def appearance(self, name):
+        return by_name(self.chars, name)["appearance"]
+
+    def test_no_annotation_gives_empty_appearance(self):
+        self.assertEqual(self.appearance("Monkey D. Luffy"), [])
+
+    def test_cover_both_spellings(self):
+        self.assertEqual(self.appearance("Nami"), ["cover"])
+        self.assertEqual(self.appearance("Kaya"), ["cover"])
+
+    def test_flashback_both_spellings(self):
+        self.assertEqual(self.appearance("Usopp"), ["flashback"])
+        self.assertEqual(self.appearance("Merry"), ["flashback"])
+
+    def test_mentioned_both_spellings(self):
+        self.assertEqual(self.appearance("Sanji"), ["mentioned"])
+        self.assertEqual(self.appearance("Kuina"), ["mentioned"])
+
+    def test_dream_both_spellings(self):
+        self.assertEqual(self.appearance("Bell-mère"), ["dream"])
+        self.assertEqual(self.appearance("Tony Tony Chopper"), ["cover", "dream"])
+
+    def test_ko_both_spellings(self):
+        self.assertEqual(self.appearance("Nico Robin"), ["ko"])
+        self.assertEqual(self.appearance("Franky"), ["ko"])
+
+    def test_image(self):
+        self.assertEqual(self.appearance("Brook"), ["image"])
+
+    def test_unknown_annotation_falls_into_other(self):
+        self.assertEqual(self.appearance("Jinbe"), ["other"])
+
+    def test_combined_annotations(self):
+        self.assertEqual(self.appearance("Roronoa Zoro"), ["cover", "flashback", "ko"])
+        self.assertEqual(self.appearance("Buggy"), ["flashback", "image", "other"])
+
+    def test_cover_variants_are_cover(self):
+        self.assertEqual(self.appearance("Shanks"), ["cover"])
+
+    def test_on_panel_is_unchanged(self):
+        on_panel = {c["name"]: c["on_panel"] for c in self.chars}
+        self.assertEqual(on_panel, {
+            "Monkey D. Luffy": True, "Nami": False, "Usopp": False, "Sanji": False,
+            "Tony Tony Chopper": False, "Nico Robin": True, "Franky": True,
+            "Brook": True, "Jinbe": True, "Roronoa Zoro": False, "Shanks": False,
+            "Buggy": False, "Kaya": False, "Merry": False, "Kuina": False,
+            "Bell-mère": False,
+        })
+
+    def test_rendered_silver_carries_appearance(self):
+        page = CH1193_PAGE.replace("*[[Loki]]", "*[[Loki]] (K.O.)")
+        md = render_markdown(parse_chapter(1193, page, 123, "2026-09-13T16:09:21Z"))
+        self.assertIn('  - name: "King"\n    faction: "Beasts Pirates"\n'
+                      '    on_panel: false\n    appearance: [cover]\n', md)
+        self.assertIn('  - name: "Loki"\n    faction: "Elbaph"\n'
+                      '    on_panel: true\n    appearance: [ko]\n', md)
+        self.assertIn('  - name: "Roronoa Zoro"\n    faction: "Straw Hat Pirates"\n'
+                      '    on_panel: true\n    appearance: []\n', md)
+        self.assertEqual(validate_silver_content(md, "chapter_1193.md"), [])
+
+
 class TestSection(unittest.TestCase):
 
     def test_deeper_subheading_stays_inside_section(self):

@@ -19,6 +19,32 @@ ARC_RE = re.compile(r"\{\{\s*([A-Za-z0-9 '’\-]+ Arc)\s*\}\}")
 LINK_RE = re.compile(r"\[\[(?:[^\]|]+\|)?([^\]|]+)\]\]")
 # Les chapitres récents annotent ''(cover)'' ; les anciens écrivent (cover).
 ANNOT_RE = re.compile(r"(?:'')?\(([^)]*)\)(?:'')?")
+# Une annotation en combine parfois plusieurs : (cover; flashback, K.O.).
+ANNOT_SPLIT_RE = re.compile(r"[;,&]|\band\b")
+
+# Vocabulaire fermé des apparitions, dans l'ordre d'écriture en silver.
+# Chaque valeur est reconnue par un motif cherché dans un morceau
+# d'annotation ; un morceau qui n'en reconnaît aucun tombe dans 'other'.
+APPEARANCE_PATTERNS = {
+    "cover": re.compile(r"cover"),  # cover, cover page, cover story…
+    "flashback": re.compile(r"flashback"),
+    "mentioned": re.compile(r"mentioned"),
+    "dream": re.compile(r"dream"),
+    "ko": re.compile(r"\bk\.?o\b"),  # K.O., k.o, ko
+    "image": re.compile(r"image|photo|picture|portrait|poster"),
+}
+APPEARANCE_VALUES = (*APPEARANCE_PATTERNS, "other")
+
+
+def normalize_appearance(annots: list[str]) -> list[str]:
+    """Annotations brutes -> valeurs du vocabulaire, sans doublon, dans l'ordre du vocabulaire."""
+    found = set()
+    for part in (p.strip(" '") for a in annots for p in ANNOT_SPLIT_RE.split(a)):
+        if not part:
+            continue
+        hits = {v for v, pat in APPEARANCE_PATTERNS.items() if pat.search(part)}
+        found |= hits or {"other"}
+    return [v for v in APPEARANCE_VALUES if v in found]
 
 
 def section(wikitext: str, heading: str) -> str:
@@ -66,6 +92,7 @@ def parse_characters(char_section: str) -> list[dict]:
                 k in a for a in annots for k in ("cover", "flashback", "mentioned", "dream")
             ),
             "annotations": annots,
+            "appearance": normalize_appearance(annots),
         })
     return out
 

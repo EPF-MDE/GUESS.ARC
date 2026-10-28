@@ -52,7 +52,7 @@ python -m guess_arc.ingestion --rebuild-silver
 Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir`) :
 
 - `data/bronze/chapters.jsonl` : le wikitexte brut archivé, une ligne par chapitre
-- `data/silver/chapter_NNNN.md` : un fichier par chapitre, front-matter YAML (titre, arc, personnages avec faction et `on_panel`) puis résumé court, résumé long et notes
+- `data/silver/chapter_NNNN.md` : un fichier par chapitre, front-matter YAML (titre, arc, personnages avec faction, `on_panel` et `appearance`, la liste normalisée de leurs annotations parmi `cover`, `flashback`, `mentioned`, `dream`, `ko`, `image`, `other`) puis résumé court, résumé long et notes
 - `data/state.json` : les `revid` connus, pour les runs incrémentaux
 
 ## Tests

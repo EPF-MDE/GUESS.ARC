@@ -29,6 +29,7 @@ def render_markdown(ch: Chapter) -> str:
             f"  - name: {yaml_escape(c['name'])}",
             f"    faction: {yaml_escape(c['faction'] or '')}",
             f"    on_panel: {str(c['on_panel']).lower()}",
+            f"    appearance: [{', '.join(c['appearance'])}]",
         ]
     lines += [
         "source: https://onepiece.fandom.com/wiki/Chapter_%d" % ch.number,

@@ -14,6 +14,11 @@ characters:
   - name: "Monkey D. Luffy"
     faction: "Straw Hat Pirates"
     on_panel: true
+    appearance: []
+  - name: "Shanks"
+    faction: "Red Hair Pirates"
+    on_panel: false
+    appearance: [cover, flashback]
 ---
 
 # Chapter 1
@@ -71,15 +76,30 @@ class TestValidateSilverContent(unittest.TestCase):
 
     def test_empty_characters_list_is_reported(self):
         content = VALID_CONTENT.replace(
-            '  - name: "Monkey D. Luffy"\n    faction: "Straw Hat Pirates"\n    on_panel: true\n', ""
+            '  - name: "Monkey D. Luffy"\n    faction: "Straw Hat Pirates"\n    on_panel: true\n'
+            '    appearance: []\n', ""
+        ).replace(
+            '  - name: "Shanks"\n    faction: "Red Hair Pirates"\n    on_panel: false\n'
+            '    appearance: [cover, flashback]\n', ""
         )
         errors = validate_silver_content(content, "chapter_0006.md")
         self.assertTrue(any("'characters:'" in e for e in errors))
 
     def test_character_with_empty_name_placeholder_is_reported(self):
-        content = VALID_CONTENT.replace('name: "Monkey D. Luffy"', 'name: ""')
+        content = (VALID_CONTENT.replace('name: "Monkey D. Luffy"', 'name: ""')
+                   .replace('name: "Shanks"', 'name: ""'))
         errors = validate_silver_content(content, "chapter_0006b.md")
         self.assertTrue(any("'characters:'" in e for e in errors))
+
+    def test_character_without_appearance_is_reported(self):
+        content = VALID_CONTENT.replace("    appearance: [cover, flashback]\n", "")
+        errors = validate_silver_content(content, "chapter_0006c.md")
+        self.assertTrue(any("'appearance:'" in e and "Shanks" in e for e in errors))
+
+    def test_appearance_value_outside_vocabulary_is_reported(self):
+        content = VALID_CONTENT.replace("[cover, flashback]", "[cover, silhouette]")
+        errors = validate_silver_content(content, "chapter_0006d.md")
+        self.assertTrue(any("'silhouette'" in e and "Shanks" in e for e in errors))
 
     def test_missing_section_is_reported(self):
         content = VALID_CONTENT.replace("## Chapter Notes\n\n- A note.\n", "")

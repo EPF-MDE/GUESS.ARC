@@ -6,6 +6,8 @@ walk the real `data/bronze/` and `data/silver/` directories.
 """
 import re
 
+from .parser import APPEARANCE_VALUES
+
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 
@@ -59,6 +61,24 @@ def _front_matter_field_value(front_matter, field):
     return _unquote(match.group(1))
 
 
+def _appearance_errors(front_matter):
+    """Every character entry must carry an 'appearance: [...]' list drawn from the closed vocabulary."""
+    errors = []
+    entries = re.split(r"^\s*-\s*name:", front_matter, flags=re.MULTILINE)[1:]
+    for entry in entries:
+        name = _unquote(entry.splitlines()[0])
+        match = re.search(r"^\s*appearance:[ \t]*\[(.*)\][ \t]*$", entry, re.MULTILINE)
+        if match is None:
+            errors.append(f"character {name!r} missing 'appearance:' list")
+            continue
+        values = [v.strip() for v in match.group(1).split(",") if v.strip()]
+        for value in values:
+            if value not in APPEARANCE_VALUES:
+                errors.append(f"character {name!r} has appearance {value!r} outside "
+                              f"the vocabulary {list(APPEARANCE_VALUES)}")
+    return errors
+
+
 def validate_silver_content(text, filename):
     """Return a list of human-readable errors for one silver chapter file."""
     errors = []
@@ -87,6 +107,7 @@ def validate_silver_content(text, filename):
         names = [_unquote(v) for v in re.findall(r"^\s*-\s*name:[ \t]*(.*)$", front_matter, re.MULTILINE)]
         if not any(names):
             errors.append(prefix("'characters:' list has no entries with a non-empty 'name'"))
+        errors.extend(prefix(e) for e in _appearance_errors(front_matter))
 
     for section in ("Short Summary", "Long Summary", "Chapter Notes"):
         if not re.search(rf"^##\s*{re.escape(section)}\s*$", body, re.MULTILINE):
