@@ -6,7 +6,11 @@
     entities  -> entités « sans futur » du chapitre (data/Entité/), table d'alias,
                  noms autorisés
     inputs    -> data/event/in/events_NNNN.md : le prompt utilisateur exact
-    versions  -> versions du prompt et des entités, notées dans chaque sortie
+    taxonomy  -> les 20 types d'événements que le modèle peut émettre (v1)
+    prompt    -> prompt système versionné, exemple few-shot du ch. 97 (prompts/)
+    schema    -> schéma JSON versionné de la réponse, noms autorisés injectés
+    versions  -> versions du prompt, du schéma, de la taxonomie et des
+                 entités, notées dans chaque sortie
     pipeline  -> orchestration, CLI
 
 Voir la spec (issue #88) et l'ADR 0002 (taxonomie fermée des événements).

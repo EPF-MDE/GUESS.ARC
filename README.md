@@ -66,10 +66,10 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 
 ## Extraction des événements
 
-En cours (spec : issue #88). Seul le préparsing est livré pour l'instant :
+En cours (spec : issue #88). L'appel au modèle n'est pas encore livré :
 
 ```bash
-# écrit data/event/in/events_NNNN.md pour chaque chapitre, sans appeler le modèle
+# écrit les entrées, le prompt système et les schémas, sans appeler le modèle
 python -m guess_arc.events --dry-run
 
 # sur une plage de chapitres
@@ -77,7 +77,7 @@ python -m guess_arc.events --dry-run --from 90 --to 100
 ```
 
 Chaque fichier d'entrée porte un front-matter (`chapter`, `revision_id` de la
-silver, `entities_version`, `prompt_version`, `flags` : le décompte des notes
+silver, `entities_version`, `prompt_version`, `schema_version`, `flags` : le décompte des notes
 retirées par catégorie), puis le prompt utilisateur exact : numéro, titre, arc,
 résumé court, résumé long et notes, sans notes éditoriales (début ou fin d'arc,
 anime, volume, SBS) ni notes de couverture, avec un texte normalisé (entités
@@ -128,6 +128,27 @@ Sur la silver actuelle, le prompt utilisateur fait environ 1 500 tokens en
 médiane, 2 500 au 95e centile et 3 800 au maximum (estimation à 4 caractères
 par token) ; la sortie de `--dry-run` redonne ces chiffres.
 
+### Prompt système et schéma
+
+Communs à tous les chapitres et versionnés (ADR 0002 : changer l'un d'eux
+impose de relancer tous les chapitres). `--dry-run` les écrit dans
+`data/event/prompt/` : `system_vN.md` (le prompt système exact, en anglais) et
+`schema_vN.json` (le schéma de base). Le schéma final de chaque chapitre,
+`data/event/schema/events_NNNN.json`, n'en diffère que par l'enum des noms des
+participants, qui reçoit la liste `allowed_names` du chapitre.
+
+Le schéma n'utilise que `type`, `enum`, `required` et `additionalProperties`
+(plus `properties` et `items`) ; les champs d'un événement viennent dans
+l'ordre `evidence`, `source`, `type`, `description`, `participants`,
+`location`, `status`, `in_flashback`, tous requis. Le type est l'un des 20
+types de la taxonomie v1 (`guess_arc/events/taxonomy.py`), sans
+`first_appearance` ni `return`, réservés à l'origine `wiki`.
+
+Le prompt est assemblé à partir de `guess_arc/events/prompts/` : consignes,
+définition des types et un exemple few-shot sur le chapitre 97 (prompt
+utilisateur figé et sortie rédigée à la main, qui montre la granularité et le
+piège de « Smoker is introduced »). Il fait environ 3 000 tokens.
+
 ## Tests
 
 ```bash
@@ -146,6 +167,9 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - le bloc d'entités « sans futur », à travers `--dry-run`, avec des
   mini-fichiers d'entités : champs envoyés, filtre de temps, table d'alias et
   `allowed_names` ;
+- le prompt système et le schéma, à travers `--dry-run` : mots-clés permis,
+  ordre des champs, enum des types et des noms autorisés, validité de la
+  sortie attendue du ch. 97 contre son propre schéma ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

@@ -12,8 +12,14 @@ dependencies = [
     "cloudscraper>=1.2",
 ]
 
+[project.optional-dependencies]
+test = ["pytest", "jsonschema>=4"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"guess_arc.events" = ["prompts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,10 +1,14 @@
 """
 One Piece — extraction des événements, de la silver vers data/event/.
 
-Pour l'instant, l'appel au modèle n'est pas livré : `--dry-run` écrit, pour
-chaque chapitre, data/event/in/events_NNNN.md (le prompt utilisateur exact) et
-data/event/out/events_NNNN.json (les événements d'origine `wiki`, déduits des
-apparitions), sans appeler le modèle. Les événements `wiki` d'une plage sont
+Pour l'instant, l'appel au modèle n'est pas livré : `--dry-run` écrit, sans
+appeler le modèle,
+- data/event/prompt/system_vN.md et schema_vN.json : le prompt système et le
+  schéma de base, communs à tous les chapitres ;
+- pour chaque chapitre, data/event/in/events_NNNN.md (le prompt utilisateur
+  exact), data/event/schema/events_NNNN.json (le schéma final, avec les noms
+  autorisés du chapitre) et data/event/out/events_NNNN.json (les événements
+  d'origine `wiki`, déduits des apparitions). Les événements `wiki` d'une plage sont
 calculés sur toute la silver qui la précède.
 
 Usage :
@@ -19,6 +23,7 @@ qu'une fois marqués `remove` dans review/future_leaks.json (voir future_leaks).
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from collections import Counter
 from pathlib import Path
@@ -30,7 +35,10 @@ from .entities import Entities, EntitySelector
 from .inputs import estimated_tokens, render_user_prompt, write_input
 from .outputs import write_output
 from .preparse import preparse
+from .prompt import system_prompt
+from .schema import base_schema, chapter_schema
 from .silver import read_chapter
+from .versions import PROMPT_VERSION, SCHEMA_VERSION
 from .wiki import wiki_events
 
 SILVER_NAME_RE = re.compile(r"^chapter_(\d+)\.md$")
@@ -49,12 +57,30 @@ def silver_chapters(silver_dir: Path, first: int | None, last: int | None) -> li
     return [path for _, path in sorted(selected)]
 
 
+def write_json(value, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_prompt(data_dir: Path) -> tuple[Path, Path]:
+    """Prompt système et schéma de base, communs à tous les chapitres."""
+    prompt_dir = paths.event_prompt_dir(data_dir)
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = prompt_dir / f"system_{PROMPT_VERSION}.md"
+    prompt_path.write_text(system_prompt(), encoding="utf-8")
+    schema_path = prompt_dir / f"schema_{SCHEMA_VERSION}.json"
+    write_json(base_schema(), schema_path)
+    return prompt_path, schema_path
+
+
 def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         last: int | None = None, dry_run: bool = False,
         review_path: Path = paths.FUTURE_LEAK_REVIEW_PATH) -> int:
     if not dry_run:
         raise NotImplementedError("extraction llm pas encore disponible : utiliser --dry-run")
     in_dir, out_dir = paths.event_in_dir(data_dir), paths.event_out_dir(data_dir)
+    schema_dir = paths.event_schema_dir(data_dir)
+    prompt_path, schema_path = write_prompt(data_dir)
     # Toute la silver jusqu'à la fin de la plage : les événements `wiki` dépendent
     # des chapitres qui précèdent.
     history = [read_chapter(path)
@@ -78,12 +104,17 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         block = selector.select(ch, p.text)
         chapters.add(p.number)
         write_input(p, block, in_dir)
+        write_json(chapter_schema(block.allowed_names), schema_dir / f"events_{p.number:04d}.json")
         write_output(ch, wiki_by_chapter[ch.number], out_dir)
         candidates.extend(p.leak_candidates)
         removed.update(p.flags)
         sizes.append(estimated_tokens(render_user_prompt(p, block)))
     candidates_path = paths.event_leak_candidates_path(data_dir)
     write_candidates(candidates, candidates_path)
+    print(f"Prompt système : {prompt_path} "
+          f"({estimated_tokens(prompt_path.read_text(encoding='utf-8'))} tokens estimés) ; "
+          f"schéma de base : {schema_path}")
+    print(f"Schémas finaux : {schema_dir}/ ({len(selected)} fichiers écrits)")
     print(f"Entrées : {in_dir}/ ({len(selected)} fichiers écrits)")
     for name, count in removed.items():
         print(f"  {name} : {count}")

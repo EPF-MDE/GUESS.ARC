@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .entities import EntityBlock
 from .preparse import Preparsed
-from .versions import ENTITIES_VERSION, PROMPT_VERSION
+from .versions import ENTITIES_VERSION, PROMPT_VERSION, SCHEMA_VERSION
 
 
 def render_user_prompt(p: Preparsed, entities: EntityBlock) -> str:
@@ -47,6 +47,7 @@ def render_input(p: Preparsed, entities: EntityBlock) -> str:
         f"revision_id: {p.revision_id if p.revision_id is not None else ''}".rstrip(),
         f'entities_version: "{ENTITIES_VERSION}"',
         f'prompt_version: "{PROMPT_VERSION}"',
+        f'schema_version: "{SCHEMA_VERSION}"',
         "flags:",
         *(f"  {name}: {count}" for name, count in p.flags.items()),
         "allowed_names:" + ("" if names else " []"),

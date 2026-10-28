@@ -44,6 +44,16 @@ def event_out_dir(data_dir: Path = DATA_DIR) -> Path:
     return event_dir(data_dir) / "out"
 
 
+def event_prompt_dir(data_dir: Path = DATA_DIR) -> Path:
+    """Prompt système et schéma de base, versionnés : `system_vN.md`, `schema_vN.json`."""
+    return event_dir(data_dir) / "prompt"
+
+
+def event_schema_dir(data_dir: Path = DATA_DIR) -> Path:
+    """Schéma final envoyé au modèle, un `events_NNNN.json` par chapitre."""
+    return event_dir(data_dir) / "schema"
+
+
 def event_raw_dir(data_dir: Path = DATA_DIR) -> Path:
     """Réponses brutes du modèle, une par essai (hors git)."""
     return event_dir(data_dir) / "raw"
