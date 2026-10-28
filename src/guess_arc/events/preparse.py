@@ -1,13 +1,15 @@
 """Préparsing : un chapitre de la silver -> le texte lu par le modèle.
 
-Deux étapes, dans cet ordre :
+Trois étapes, dans cet ordre :
 
 1. normaliser chaque texte (entités HTML, espaces insécables et invisibles,
    restes de balisage wiki, espaces multiples), pour que la preuve citée par le
    modèle se retrouve ensuite telle quelle dans le texte ;
 2. retirer les notes éditoriales (début ou fin d'arc, anime, volume, SBS) et
    les notes de couverture (les cover stories sont exclues en v1), en comptant
-   chaque suppression dans `flags`.
+   chaque suppression dans `flags` ;
+3. repérer les fuites du futur et retirer celles que la relecture humaine a
+   retenues (voir `future_leaks`), comptées dans `flags`.
 
 Les règles de retrait ont été écrites sur la silver réelle (voir
 `plan_extraction_evenements.md`, §2.2). Elles retirent la note entière : une
@@ -20,6 +22,7 @@ import html
 import re
 from dataclasses import dataclass, field
 
+from .future_leaks import Candidate, LeakFilter
 from .silver import SilverChapter
 
 # --- Normalisation -----------------------------------------------------------
@@ -105,9 +108,11 @@ class Preparsed:
     long_summary: str
     notes: list[str]
     flags: dict[str, int] = field(default_factory=dict)
+    leak_candidates: list[Candidate] = field(default_factory=list)
 
 
-def preparse(ch: SilverChapter) -> Preparsed:
+def preparse(ch: SilverChapter,
+             leak_decisions: dict[tuple[int, str, str], str | None] | None = None) -> Preparsed:
     flags = {name: 0 for name, _ in NOTE_RULES}
     notes = []
     for note in map(normalize, ch.notes):
@@ -118,13 +123,19 @@ def preparse(ch: SilverChapter) -> Preparsed:
             flags[rule] += 1
         else:
             notes.append(note)
+    leaks = LeakFilter(ch.number, leak_decisions or {})
+    short_summary = leaks.filter_summary("short_summary", normalize(ch.short_summary))
+    long_summary = leaks.filter_summary("long_summary", normalize(ch.long_summary))
+    notes = leaks.filter_notes(notes)
+    flags["future_leaks_removed"] = leaks.removed
     return Preparsed(
         number=ch.number,
         title=normalize(ch.title),
         arc=normalize(ch.arc),
         revision_id=ch.revision_id,
-        short_summary=normalize(ch.short_summary),
-        long_summary=normalize(ch.long_summary),
+        short_summary=short_summary,
+        long_summary=long_summary,
         notes=notes,
         flags=flags,
+        leak_candidates=leaks.candidates,
     )

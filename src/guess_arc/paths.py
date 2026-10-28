@@ -9,6 +9,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
+# Décisions de relecture des fuites du futur : versionnées, donc hors de data/.
+FUTURE_LEAK_REVIEW_PATH = REPO_ROOT / "review" / "future_leaks.json"
 
 
 def bronze_dir(data_dir: Path = DATA_DIR) -> Path:
@@ -45,3 +47,8 @@ def event_raw_dir(data_dir: Path = DATA_DIR) -> Path:
 def event_run_log_path(data_dir: Path = DATA_DIR) -> Path:
     """Journal d'exécution, une ligne JSON par appel au modèle."""
     return event_dir(data_dir) / "run.jsonl"
+
+
+def event_leak_candidates_path(data_dir: Path = DATA_DIR) -> Path:
+    """Fuites du futur repérées au dernier préparsing, avec leur décision de relecture."""
+    return event_dir(data_dir) / "future_leak_candidates.json"

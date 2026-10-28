@@ -20,11 +20,13 @@ src/guess_arc/
 └── events/               # silver -> data/event (extraction des événements)
     ├── silver.py         # lecture d'un chapitre de la silver
     ├── preparse.py       # notes éditoriales et de couverture retirées, texte normalisé
+    ├── future_leaks.py   # passages qui parlent de la suite, retirés après relecture
     ├── inputs.py         # data/event/in/events_NNNN.md : le prompt utilisateur exact
     ├── versions.py       # versions du prompt et des entités
     └── pipeline.py       # orchestration, CLI
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
+review/future_leaks.json  # relecture humaine des fuites du futur (versionnée)
 ```
 
 Les futures étapes (features, modèle) seront ajoutées comme sous-packages de
@@ -80,6 +82,27 @@ résumé court, résumé long et notes, sans notes éditoriales (début ou fin d
 anime, volume, SBS) ni notes de couverture, avec un texte normalisé (entités
 HTML, espaces insécables, restes de balisage wiki, espaces multiples).
 
+### Fuites du futur
+
+Le préparsing repère par expression régulière les passages qui parlent de la
+suite de l'histoire (« would later », « in the future », « foreshadowing »…) :
+une phrase des résumés, ou une note entière. Il les liste dans
+`data/event/future_leak_candidates.json` (chapitre, section, passage, décision),
+mais ne les retire du texte qu'une fois relus :
+
+1. lancer `python -m guess_arc.events --dry-run` ; la sortie indique combien de
+   candidats restent à relire ;
+2. dans `review/future_leaks.json` (versionné), mettre `decision` à `"remove"`
+   pour un passage qui révèle la suite, à `"keep"` sinon (ellipse du récit,
+   « Brook is later seen… » à l'intérieur du chapitre). Un nouveau candidat se
+   copie depuis la liste des candidats ;
+3. relancer : les passages `remove` disparaissent de `in/` et sont comptés dans
+   `flags.future_leaks_removed`. Un passage `keep` ou pas encore relu (`null`)
+   reste dans le texte.
+
+Un passage est reconnu à son texte exact : si la silver change, il redevient un
+candidat à relire.
+
 ## Tests
 
 ```bash
@@ -93,7 +116,8 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
   en apostrophes des récents (`*[[King]] ''(cover)''`) ;
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
 - le préparsing de l'extraction des événements, à travers `--dry-run`, sur des
-  chapitres silver synthétiques dans un dossier de données temporaire ;
+  chapitres silver synthétiques dans un dossier de données temporaire, dont la
+  détection et le retrait des fuites du futur selon le fichier de relecture ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

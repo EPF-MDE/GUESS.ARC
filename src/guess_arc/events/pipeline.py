@@ -8,6 +8,10 @@ appeler le modèle.
 Usage :
     python -m guess_arc.events --dry-run                       # tous les chapitres
     python -m guess_arc.events --dry-run --from 90 --to 100    # une plage
+
+Le préparsing écrit aussi data/event/future_leak_candidates.json, la liste des
+passages qui parlent de la suite de l'histoire. Ils ne sont retirés du texte
+qu'une fois marqués `remove` dans review/future_leaks.json (voir future_leaks).
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from pathlib import Path
 
 from guess_arc import paths
 
+from .future_leaks import load_review, stale_decisions, write_candidates
 from .inputs import write_input
 from .preparse import preparse
 from .silver import read_chapter
@@ -39,20 +44,33 @@ def silver_chapters(silver_dir: Path, first: int | None, last: int | None) -> li
 
 
 def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
-        last: int | None = None, dry_run: bool = False) -> int:
+        last: int | None = None, dry_run: bool = False,
+        review_path: Path = paths.FUTURE_LEAK_REVIEW_PATH) -> int:
     if not dry_run:
         raise NotImplementedError("extraction llm pas encore disponible : utiliser --dry-run")
     in_dir = paths.event_in_dir(data_dir)
     files = silver_chapters(paths.silver_dir(data_dir), first, last)
-    removed = {}
+    decisions = load_review(review_path)
+    removed, candidates, chapters = {}, [], set()
     for path in files:
-        p = preparse(read_chapter(path))
+        p = preparse(read_chapter(path), decisions)
+        chapters.add(p.number)
         write_input(p, in_dir)
+        candidates.extend(p.leak_candidates)
         for name, count in p.flags.items():
             removed[name] = removed.get(name, 0) + count
+    candidates_path = paths.event_leak_candidates_path(data_dir)
+    write_candidates(candidates, candidates_path)
     print(f"Entrées : {in_dir}/ ({len(files)} fichiers écrits)")
     for name, count in removed.items():
         print(f"  {name} : {count}")
+    pending = sum(c.decision is None for c in candidates)
+    print(f"Fuites du futur : {candidates_path} ({len(candidates)} candidats, "
+          f"{pending} à relire dans {review_path})")
+    stale = stale_decisions(decisions, candidates, chapters)
+    if stale:
+        print(f"  attention : {stale} décisions ne désignent plus aucun passage "
+              "(texte de la silver modifié), à relire")
     return len(files)
 
 
@@ -67,10 +85,13 @@ def main(argv: list[str] | None = None) -> None:
                    help="premier chapitre traité (défaut : le premier de la silver)")
     p.add_argument("--to", dest="last", type=int, default=None,
                    help="dernier chapitre traité (défaut : le dernier de la silver)")
+    p.add_argument("--leak-review", type=Path, default=paths.FUTURE_LEAK_REVIEW_PATH,
+                   help="décisions de relecture des fuites du futur "
+                        "(défaut : review/future_leaks.json)")
     args = p.parse_args(argv)
     if not args.dry_run:
         p.error("l'extraction llm n'est pas encore disponible : utiliser --dry-run")
-    run(args.data_dir, args.first, args.last, dry_run=True)
+    run(args.data_dir, args.first, args.last, dry_run=True, review_path=args.leak_review)
 
 
 if __name__ == "__main__":
