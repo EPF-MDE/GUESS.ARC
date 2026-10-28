@@ -21,6 +21,7 @@ src/guess_arc/
     ├── silver.py         # lecture d'un chapitre de la silver
     ├── preparse.py       # notes éditoriales et de couverture retirées, texte normalisé
     ├── future_leaks.py   # passages qui parlent de la suite, retirés après relecture
+    ├── entities.py       # entités « sans futur » du chapitre et noms autorisés
     ├── inputs.py         # data/event/in/events_NNNN.md : le prompt utilisateur exact
     ├── versions.py       # versions du prompt et des entités
     └── pipeline.py       # orchestration, CLI
@@ -103,6 +104,30 @@ mais ne les retire du texte qu'une fois relus :
 Un passage est reconnu à son texte exact : si la silver change, il redevient un
 candidat à relire.
 
+### Entités « sans futur »
+
+Le prompt utilisateur commence par un bloc `ENTITIES`, construit à partir des
+fiches de `data/Entité/` (v0 : `characters.json`, `devil_fruits.json`,
+`islands.json`). Seules les entités du chapitre t y figurent : les personnages
+de la table qui ne sont pas en couverture, ceux dont un nom ou un alias est
+cité dans le texte, et les fruits et îles cités dans le texte. Un personnage
+n'est envoyé qu'une fois apparu (présenté dans un chapitre ≤ t de la silver, ou
+première apparition « Chapter N » de sa fiche ≤ t).
+
+Les fiches sont réduites aux champs sans futur : nom, alias, race et étapes du
+`journey` datées d'un chapitre ≤ t ; nom (et nom anglais) des fruits ; nom et
+mer des îles. Une table d'alias fait correspondre les noms de la silver et du
+texte aux fiches (« Franky » → « Cutty Flam [Franky] ») : crochets,
+parenthèses, dernier mot non ambigu, casse, accents et apostrophes. Le détail
+des règles est dans `guess_arc/events/entities.py`.
+
+Les noms des personnages envoyés sont listés dans `allowed_names` du
+front-matter : ce sont les seuls que le schéma acceptera comme participants.
+
+Sur la silver actuelle, le prompt utilisateur fait environ 1 500 tokens en
+médiane, 2 500 au 95e centile et 3 800 au maximum (estimation à 4 caractères
+par token) ; la sortie de `--dry-run` redonne ces chiffres.
+
 ## Tests
 
 ```bash
@@ -118,6 +143,9 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - le préparsing de l'extraction des événements, à travers `--dry-run`, sur des
   chapitres silver synthétiques dans un dossier de données temporaire, dont la
   détection et le retrait des fuites du futur selon le fichier de relecture ;
+- le bloc d'entités « sans futur », à travers `--dry-run`, avec des
+  mini-fichiers d'entités : champs envoyés, filtre de temps, table d'alias et
+  `allowed_names` ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

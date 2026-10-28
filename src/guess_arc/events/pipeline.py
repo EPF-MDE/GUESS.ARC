@@ -26,7 +26,8 @@ from pathlib import Path
 from guess_arc import paths
 
 from .future_leaks import load_review, stale_decisions, write_candidates
-from .inputs import write_input
+from .entities import Entities, EntitySelector
+from .inputs import estimated_tokens, render_user_prompt, write_input
 from .outputs import write_output
 from .preparse import preparse
 from .silver import read_chapter
@@ -61,19 +62,36 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
     wiki_by_chapter = wiki_events(history)
     selected = [ch for ch in history if first is None or ch.number >= first]
     decisions = load_review(review_path)
-    removed, candidates, chapters = Counter(), [], set()
-    for ch in selected:
+    entity_dir = paths.entities_dir(data_dir)
+    entities = Entities.load(entity_dir)
+    if not entities.characters:
+        print(f"attention : aucune fiche de personnage dans {entity_dir}/, "
+              "seuls les noms de la table des personnages sont envoyés")
+    # Le filtre de temps lit aussi les chapitres qui précèdent la plage.
+    selector = EntitySelector(entities)
+    removed, candidates, chapters, sizes = Counter(), [], set(), []
+    for ch in history:
+        selector.observe(ch)
+        if first is not None and ch.number < first:
+            continue
         p = preparse(ch, decisions)
+        block = selector.select(ch, p.text)
         chapters.add(p.number)
-        write_input(p, in_dir)
+        write_input(p, block, in_dir)
         write_output(ch, wiki_by_chapter[ch.number], out_dir)
         candidates.extend(p.leak_candidates)
         removed.update(p.flags)
+        sizes.append(estimated_tokens(render_user_prompt(p, block)))
     candidates_path = paths.event_leak_candidates_path(data_dir)
     write_candidates(candidates, candidates_path)
     print(f"Entrées : {in_dir}/ ({len(selected)} fichiers écrits)")
     for name, count in removed.items():
         print(f"  {name} : {count}")
+    if sizes:
+        sizes.sort()
+        print(f"  prompt utilisateur, en tokens estimés (4 caractères/token) : "
+              f"médiane {sizes[len(sizes) // 2]}, 95e centile "
+              f"{sizes[int(len(sizes) * 0.95)]}, max {sizes[-1]}")
     pending = sum(c.decision is None for c in candidates)
     print(f"Fuites du futur : {candidates_path} ({len(candidates)} candidats, "
           f"{pending} à relire dans {review_path})")

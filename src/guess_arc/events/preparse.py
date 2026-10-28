@@ -110,6 +110,11 @@ class Preparsed:
     flags: dict[str, int] = field(default_factory=dict)
     leak_candidates: list[Candidate] = field(default_factory=list)
 
+    @property
+    def text(self) -> str:
+        """Tout le texte envoyé au modèle, où l'on cherche les noms cités."""
+        return "\n".join([self.title, self.short_summary, self.long_summary, *self.notes])
+
 
 def preparse(ch: SilverChapter,
              leak_decisions: dict[tuple[int, str, str], str | None] | None = None) -> Preparsed:

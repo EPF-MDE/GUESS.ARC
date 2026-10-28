@@ -94,6 +94,14 @@ class TestPrompt(PreparseTestCase):
         self.assertEqual(body, (
             'CHAPTER 97 — "Sandai Kitetsu" — Arc: Loguetown Arc\n'
             "\n"
+            "ENTITIES (use these exact names):\n"
+            "Characters:\n"
+            "- Monkey D. Luffy\n"
+            "Devil Fruits mentioned:\n"
+            "- none\n"
+            "Places mentioned:\n"
+            "- none\n"
+            "\n"
             "=== SHORT SUMMARY ===\n"
             "Zoro buys swords.\n"
             "\n"

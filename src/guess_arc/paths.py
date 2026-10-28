@@ -25,6 +25,11 @@ def state_path(data_dir: Path = DATA_DIR) -> Path:
     return data_dir / "state.json"
 
 
+def entities_dir(data_dir: Path = DATA_DIR) -> Path:
+    """Fiches de l'équipe entités (v0) : characters, devil_fruits, islands."""
+    return data_dir / "Entité"
+
+
 def event_dir(data_dir: Path = DATA_DIR) -> Path:
     return data_dir / "event"
 
