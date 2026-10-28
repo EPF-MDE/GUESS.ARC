@@ -48,6 +48,16 @@ class ProviderConfig:
     # one pace. Derived from each free tier's published limits (see
     # API/README.md): pacing to them is cheaper than learning them via 429s.
     min_interval_s: float = 0.0
+    # Read timeout (seconds) of one chat/completions call. The hosted APIs
+    # answer a chapter well within 120 s; a self-hosted model on a shared
+    # GPU (locallm) can take several minutes for the same chapter.
+    request_timeout_s: float = 120.0
+    # Ask for a streamed (SSE) completion instead of one JSON body. Needed
+    # where a gateway cuts any request whose response hasn't started within
+    # its own limit (locallm: 504 after ~5 min): a stream sends bytes as
+    # soon as generation starts. With streaming, request_timeout_s bounds
+    # the gap between two chunks, not the whole generation.
+    stream: bool = False
 
     def api_key(self) -> str:
         key = os.environ.get(self.api_key_env)
@@ -187,6 +197,9 @@ LOCALLM = ProviderConfig(
     api_key_env="LOCALLM_API_KEY",
     model_env="LOCALLM_MODEL",
     min_interval_s=2.0,
+    # gemma3:27b on the shared server exceeded 120 s on chapter 1.
+    request_timeout_s=600.0,
+    stream=True,
 )
 
 PROVIDERS = {

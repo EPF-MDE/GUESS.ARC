@@ -116,6 +116,36 @@ def resolve_free_model(provider: ProviderConfig) -> str:
     return free_models[0]
 
 
+def _collect_stream(response) -> dict:
+    """Fold an OpenAI-compatible SSE stream (`data: {...}` lines, ended by
+    `data: [DONE]`) back into the shape of a non-streamed response —
+    `{"choices": [{"message": {"content"}, "finish_reason"}], "usage"}` — so
+    call_provider handles both the same way. An in-band `{"error": ...}`
+    chunk is returned as-is, like a non-streamed error body."""
+    parts: list[str] = []
+    finish_reason = None
+    usage = None
+    for raw in response.iter_lines(decode_unicode=True):
+        if not raw or not raw.startswith("data:"):
+            continue
+        data = raw[len("data:"):].strip()
+        if data == "[DONE]":
+            break
+        chunk = json.loads(data)
+        if chunk.get("error"):
+            return {"error": chunk["error"]}
+        usage = chunk.get("usage") or usage
+        for choice in chunk.get("choices") or []:
+            parts.append((choice.get("delta") or {}).get("content") or "")
+            finish_reason = choice.get("finish_reason") or finish_reason
+    if not parts and finish_reason is None:
+        return {"usage": usage}
+    return {
+        "choices": [{"message": {"content": "".join(parts)}, "finish_reason": finish_reason}],
+        "usage": usage,
+    }
+
+
 def call_provider(
     provider: ProviderConfig,
     model: str,
@@ -166,21 +196,27 @@ def call_provider(
         # so it isn't retried or fallen over, it just crashes the run.
         "max_completion_tokens": 8192,
     }
+    if provider.stream:
+        body["stream"] = True
+        body["stream_options"] = {"include_usage": True}
     headers = {
         "Authorization": f"Bearer {provider.api_key()}",
         "Content-Type": "application/json",
         **(provider.extra_headers or {}),
     }
     try:
-        response = requests.post(url, headers=headers, json=body, timeout=120)
-    except requests.exceptions.RequestException as exc:
+        # `stream` only passed when set, so non-streaming calls keep the exact
+        # requests.post signature the tests mock.
+        stream_kwargs = {"stream": True} if provider.stream else {}
+        response = requests.post(url, headers=headers, json=body, timeout=provider.request_timeout_s, **stream_kwargs)
+        _raise_for_provider_status(provider, response)
+        payload = _collect_stream(response) if provider.stream else response.json()
+    except (requests.exceptions.RequestException, json.JSONDecodeError) as exc:
         # Same reasoning as resolve_free_model: a transport-level failure
         # (observed here as a Gemini outage manifesting as a hung read that
         # times out rather than a clean 503) must become a ProviderCallError
         # so the run falls over/retries instead of crashing.
         raise ProviderCallError(503, message=f"{provider.name}: {exc}") from exc
-    _raise_for_provider_status(provider, response)
-    payload = response.json()
     # OpenRouter (see providers.py's OPENROUTER comment) can answer with
     # HTTP 200 but an in-band `{"error": ...}` body instead of `choices`
     # when the upstream free model itself fails (no capacity, moderation,
