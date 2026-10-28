@@ -5,7 +5,10 @@ Avec un client LLM (`run(..., client=...)`), chaque chapitre est envoyé au
 modèle, dans l'ordre, et `out/` fusionne les événements `wiki` et `llm`, ceux-ci
 dédoublonnés et contrôlés (preuve, fuite du futur, voir checks) ; les
 réponses brutes vont dans `raw/` (hors git) et le journal dans `run.jsonl`
-(voir extraction). Le client HTTP n'est pas encore livré (#98) : en ligne de
+(voir extraction). Le passage reprend là où il s'est arrêté : un chapitre déjà
+extrait avec les mêmes versions et la même révision (ou une version gelée)
+n'est pas rappelé, un chapitre incomplet attend le passage suivant (voir
+resume). Le client HTTP n'est pas encore livré (#98) : en ligne de
 commande, seul `--dry-run` fonctionne. Il écrit, sans appeler le modèle,
 - data/event/prompt/system_vN.md et schema_vN.json : le prompt système et le
   schéma de base, communs à tous les chapitres ;
@@ -35,6 +38,7 @@ from pathlib import Path
 
 from guess_arc import paths
 
+from . import versions
 from .checks import ChapterChecks
 from .future_leaks import load_review, stale_decisions, write_candidates
 from .entities import Entities, EntitySelector
@@ -44,9 +48,9 @@ from .llm import LLMClient
 from .outputs import has_llm_events, write_output
 from .preparse import preparse
 from .prompt import system_prompt
+from .resume import is_frozen, is_up_to_date
 from .schema import base_schema, chapter_schema
 from .silver import read_chapter
-from .versions import PROMPT_VERSION, SCHEMA_VERSION
 from .wiki import wiki_events
 
 SILVER_NAME_RE = re.compile(r"^chapter_(\d+)\.md$")
@@ -74,9 +78,9 @@ def write_prompt(data_dir: Path) -> tuple[Path, Path]:
     """Prompt système et schéma de base, communs à tous les chapitres."""
     prompt_dir = paths.event_prompt_dir(data_dir)
     prompt_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = prompt_dir / f"system_{PROMPT_VERSION}.md"
+    prompt_path = prompt_dir / f"system_{versions.PROMPT_VERSION}.md"
     prompt_path.write_text(system_prompt(), encoding="utf-8")
-    schema_path = prompt_dir / f"schema_{SCHEMA_VERSION}.json"
+    schema_path = prompt_dir / f"schema_{versions.SCHEMA_VERSION}.json"
     write_json(base_schema(), schema_path)
     return prompt_path, schema_path
 
@@ -108,8 +112,9 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
     system = system_prompt()
     pacer = Pacer(pause_s)
     raw_dir, log_path = paths.event_raw_dir(data_dir), paths.event_run_log_path(data_dir)
+    frozen = not dry_run and is_frozen(data_dir, client.model)
     removed, candidates, chapters, sizes = Counter(), [], set(), []
-    extracted, kept, abandoned = 0, 0, []
+    extracted, kept, abandoned, incomplete = 0, 0, [], []
     for ch in history:
         selector.observe(ch)
         if first is not None and ch.number < first:
@@ -121,7 +126,13 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         schema = chapter_schema(block.allowed_names)
         write_json(schema, schema_dir / f"events_{p.number:04d}.json")
         user = render_user_prompt(p, block)
-        if dry_run:
+        if not dry_run and is_up_to_date(ch, out_dir, client.model, frozen):
+            kept += 1
+        elif dry_run or not ch.complete:
+            # Un chapitre incomplet attend le passage suivant : seule l'origine
+            # `wiki` est écrite, comme en --dry-run.
+            if not ch.complete:
+                incomplete.append(ch.number)
             if has_llm_events(out_dir, ch.number):
                 kept += 1
             else:
@@ -164,8 +175,13 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         print(f"Événements wiki : {out_dir}/ ({len(selected) - kept} fichiers écrits, "
               f"{kept} déjà extraits par le modèle laissés intacts)")
     else:
-        print(f"Événements wiki et llm : {out_dir}/ ({extracted} fichiers écrits) ; "
+        print(f"Événements wiki et llm : {out_dir}/ ({extracted} fichiers écrits, "
+              f"{kept} déjà à jour laissés intacts"
+              f"{', version gelée' if frozen else ''}) ; "
               f"réponses brutes : {raw_dir}/ ; journal : {log_path}")
+        if incomplete:
+            print(f"  {len(incomplete)} chapitres incomplets, à reprendre au passage "
+                  f"suivant : {', '.join(map(str, incomplete))}")
         if abandoned:
             print(f"  attention : {len(abandoned)} chapitres abandonnés après "
                   f"{max_attempts} essais : {', '.join(map(str, abandoned))}")

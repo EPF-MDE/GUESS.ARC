@@ -68,9 +68,11 @@ class LlmTestCase(unittest.TestCase):
         for ch in chapters:
             write_markdown(ch, paths.silver_dir(self.data_dir))
 
-    def extract(self, *responses, dry_run=False, max_attempts=3, pause_s=0):
-        self.client = FakeClient(list(responses), model="fake-gemma")
-        return run(data_dir=self.data_dir, dry_run=dry_run, client=self.client,
+    def extract(self, *responses, dry_run=False, max_attempts=3, pause_s=0,
+                first=None, last=None, model="fake-gemma"):
+        self.client = FakeClient(list(responses), model=model)
+        return run(data_dir=self.data_dir, first=first, last=last, dry_run=dry_run,
+                   client=self.client,
                    review_path=self.data_dir / "no_review.json", pause_s=pause_s,
                    max_attempts=max_attempts)
 
@@ -176,6 +178,7 @@ class TestRetries(LlmTestCase):
         for block in ("<think>\n</think>\n", "<|channel>thought\n<channel|>",
                       "<thought> </thought>"):
             with self.subTest(block=block):
+                self.out_path(1).unlink(missing_ok=True)
                 self.extract(block + response(1, llm_event()))
                 self.assertEqual(self.output(1)["meta"]["attempts"], 1)
 
@@ -215,6 +218,7 @@ class TestRawAndLog(LlmTestCase):
     def test_log_appends_across_runs(self):
         self.write_silver(chapter(1, char("Luffy"), char("Zoro")))
         self.extract(response(1))
+        self.write_silver(chapter(1, char("Luffy"), char("Zoro"), revision_id=1))
         self.extract(response(1))
         self.assertEqual(len(self.log()), 2)
 
@@ -266,12 +270,14 @@ class TestMerge(LlmTestCase):
     def test_ids_are_stable_and_unique(self):
         ids = [e["id"] for e in self.document["events"]]
         self.assertEqual(len(ids), len(set(ids)))
+        self.out_path(1).unlink()
         self.extract("not json", response(1, llm_event(), llm_event("defeat", ("Zoro",)),
                                           unlisted=["Kaido"]))
         self.assertEqual([e["id"] for e in self.output(1)["events"]], ids)
 
     def test_same_type_and_participants_twice_get_distinct_ids(self):
         # Les doublons sont l'affaire des contrôles : la fusion garde tout, sans collision.
+        self.out_path(1).unlink()
         self.extract(response(1, llm_event(), llm_event(description="Again.")))
         ids = [e["id"] for e in self.output(1)["events"] if e["origin"] == "llm"]
         self.assertEqual(len(ids), 2)

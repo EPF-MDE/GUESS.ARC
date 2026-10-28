@@ -18,8 +18,7 @@ from pathlib import Path
 from .checks import ChapterChecks, deduplicated
 from .extraction import Extraction
 from .silver import SilverChapter
-from .versions import (CHECKS_VERSION, ENTITIES_VERSION, PROMPT_VERSION, SCHEMA_VERSION,
-                       TAXONOMY_VERSION)
+from . import versions
 from .wiki import WikiEvent
 
 
@@ -78,17 +77,17 @@ def render_output(ch: SilverChapter, wiki: list[WikiEvent],
     """`checks` accompagne toujours `llm` : les contrôles du chapitre."""
     events = [wiki_record(ch.number, e) for e in wiki]
     meta = {"chapter": ch.number, "revision_id": ch.revision_id,
-            "taxonomy_version": TAXONOMY_VERSION, "entities_version": ENTITIES_VERSION,
+            "taxonomy_version": versions.TAXONOMY_VERSION,
+            "entities_version": versions.ENTITIES_VERSION,
             # Origines déjà passées sur ce fichier : tant que `llm` manque, le
             # chapitre reste à extraire par le modèle.
             "origins": ["wiki"]}
     document = {"meta": meta, "events": events}
     if llm is not None:
         unique, duplicates = deduplicated(llm.document["events"])
-        meta |= {"model": llm.model, "prompt_version": PROMPT_VERSION,
-                 "schema_version": SCHEMA_VERSION, "checks_version": CHECKS_VERSION,
-                 "attempts": llm.attempts,
-                 "duplicates_removed": duplicates, "origins": ["wiki", "llm"]}
+        meta |= versions.extractor_versions(llm.model) | {
+            "checks_version": versions.CHECKS_VERSION, "attempts": llm.attempts,
+            "duplicates_removed": duplicates, "origins": ["wiki", "llm"]}
         events.extend(llm_records(ch.number, unique, checks))
         unlisted = llm.document["unlisted_entities"]
         document["unlisted_entities"] = unlisted
@@ -100,17 +99,28 @@ def output_path(out_dir: Path, chapter: int) -> Path:
     return out_dir / f"events_{chapter:04d}.json"
 
 
+def read_meta(out_dir: Path, chapter: int) -> dict | None:
+    """Bloc `meta` de la sortie existante, ou None si elle manque ou ne se lit pas
+    (fichier tronqué par un arrêt : le chapitre est à refaire)."""
+    try:
+        return json.loads(output_path(out_dir, chapter).read_text(encoding="utf-8"))["meta"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def has_llm_events(out_dir: Path, chapter: int) -> bool:
     """La sortie existante porte déjà l'origine `llm` (un `--dry-run` ne l'écrase pas)."""
-    path = output_path(out_dir, chapter)
-    if not path.exists():
-        return False
-    return "llm" in json.loads(path.read_text(encoding="utf-8"))["meta"]["origins"]
+    meta = read_meta(out_dir, chapter)
+    return meta is not None and "llm" in meta["origins"]
 
 
 def write_output(ch: SilverChapter, wiki: list[WikiEvent], out_dir: Path,
                  llm: Extraction | None = None, checks: ChapterChecks | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = output_path(out_dir, ch.number)
-    path.write_text(render_output(ch, wiki, llm, checks), encoding="utf-8")
+    # Écrit à côté puis renommé : un arrêt en cours d'écriture ne laisse pas de
+    # sortie tronquée.
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(render_output(ch, wiki, llm, checks), encoding="utf-8")
+    tmp.replace(path)
     return path

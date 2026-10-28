@@ -64,6 +64,11 @@ def event_run_log_path(data_dir: Path = DATA_DIR) -> Path:
     return event_dir(data_dir) / "run.jsonl"
 
 
+def event_frozen_path(data_dir: Path = DATA_DIR) -> Path:
+    """Versions de l'extracteur gelées : la révision silver ne fait plus ré-extraire."""
+    return event_dir(data_dir) / "frozen.json"
+
+
 def event_leak_candidates_path(data_dir: Path = DATA_DIR) -> Path:
     """Fuites du futur repérées au dernier préparsing, avec leur décision de relecture."""
     return event_dir(data_dir) / "future_leak_candidates.json"

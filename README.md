@@ -173,6 +173,27 @@ est abandonné, sans fichier de sortie, et signalé dans le journal.
   de la taxonomie, des entités et des contrôles, `revision_id`, nombre
   d'essais, doublons retirés, origines).
 
+### Reprise et gel de version
+
+Le passage complet (10 à 25 h) peut être arrêté et relancé à tout moment, ou
+lancé par lots (`--from`, `--to`). Un chapitre n'est pas rappelé si sa sortie
+porte déjà l'origine `llm`, avec les mêmes versions de l'extracteur (modèle,
+prompt, schéma, taxonomie, entités) et la même `revision_id` de la silver. Un
+chapitre abandonné, ou dont la sortie manque, est donc repris au passage suivant.
+
+- un chapitre incomplet (`complete: false`) n'est pas envoyé au modèle : seule
+  l'origine `wiki` est écrite, et il est extrait à un passage suivant, une fois
+  complet ;
+- un chapitre dont la révision silver a changé est ré-extrait, sauf si la
+  version est gelée ;
+- un changement de modèle, de prompt, de schéma, de taxonomie ou d'entités fait
+  ré-extraire tous les chapitres, gel ou non (ADR 0002). Un changement des
+  seules règles de contrôle (`checks_version`) n'impose pas d'appel.
+
+Geler la version, c'est écrire ses versions dans `data/event/frozen.json`
+(`guess_arc.events.resume.freeze(data_dir, model)`). Le gel ne vaut que tant
+que les versions courantes sont celles du fichier.
+
 Chaque événement `llm` porte des `checks`, qui mesurent la qualité de
 l'extracteur ; un événement en échec est marqué, jamais supprimé, et le
 filtrage se fait au moment de consommer le dataset :
