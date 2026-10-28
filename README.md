@@ -10,13 +10,19 @@ dans un second temps. L'ancienne approche par taxonomie simple a été abandonn�
 
 ```
 src/guess_arc/
-├── paths.py              # emplacements data/bronze, data/silver, data/state.json
-└── ingestion/            # wiki Fandom EN -> bronze -> silver
-    ├── wiki_client.py    # appels à l'API MediaWiki
-    ├── parser.py         # wikitexte d'un chapitre -> Chapter
-    ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
-    ├── validation.py     # contrat de format bronze / silver
-    └── pipeline.py       # orchestration, état incrémental, CLI
+├── paths.py              # emplacements data/bronze, data/silver, data/event, data/state.json
+├── ingestion/            # wiki Fandom EN -> bronze -> silver
+│   ├── wiki_client.py    # appels à l'API MediaWiki
+│   ├── parser.py         # wikitexte d'un chapitre -> Chapter
+│   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
+│   ├── validation.py     # contrat de format bronze / silver
+│   └── pipeline.py       # orchestration, état incrémental, CLI
+└── events/               # silver -> data/event (extraction des événements)
+    ├── silver.py         # lecture d'un chapitre de la silver
+    ├── preparse.py       # notes éditoriales et de couverture retirées, texte normalisé
+    ├── inputs.py         # data/event/in/events_NNNN.md : le prompt utilisateur exact
+    ├── versions.py       # versions du prompt et des entités
+    └── pipeline.py       # orchestration, CLI
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
 ```
@@ -55,6 +61,25 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 - `data/silver/chapter_NNNN.md` : un fichier par chapitre, front-matter YAML (titre, arc, personnages avec faction, `on_panel` et `appearance`, la liste normalisée de leurs annotations parmi `cover`, `flashback`, `mentioned`, `dream`, `ko`, `image`, `other`) puis résumé court, résumé long et notes
 - `data/state.json` : les `revid` connus, pour les runs incrémentaux
 
+## Extraction des événements
+
+En cours (spec : issue #88). Seul le préparsing est livré pour l'instant :
+
+```bash
+# écrit data/event/in/events_NNNN.md pour chaque chapitre, sans appeler le modèle
+python -m guess_arc.events --dry-run
+
+# sur une plage de chapitres
+python -m guess_arc.events --dry-run --from 90 --to 100
+```
+
+Chaque fichier d'entrée porte un front-matter (`chapter`, `revision_id` de la
+silver, `entities_version`, `prompt_version`, `flags` : le décompte des notes
+retirées par catégorie), puis le prompt utilisateur exact : numéro, titre, arc,
+résumé court, résumé long et notes, sans notes éditoriales (début ou fin d'arc,
+anime, volume, SBS) ni notes de couverture, avec un texte normalisé (entités
+HTML, espaces insécables, restes de balisage wiki, espaces multiples).
+
 ## Tests
 
 ```bash
@@ -67,6 +92,8 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
   en parenthèses nues des anciens chapitres (`*[[Kalifa]] (cover)`) et
   en apostrophes des récents (`*[[King]] ''(cover)''`) ;
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
+- le préparsing de l'extraction des événements, à travers `--dry-run`, sur des
+  chapitres silver synthétiques dans un dossier de données temporaire ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 
