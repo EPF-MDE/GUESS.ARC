@@ -23,6 +23,10 @@ src/guess_arc/
     ├── future_leaks.py   # passages qui parlent de la suite, retirés après relecture
     ├── entities.py       # entités « sans futur » du chapitre et noms autorisés
     ├── inputs.py         # data/event/in/events_NNNN.md : le prompt utilisateur exact
+    ├── llm.py            # client LLM : (système, utilisateur, schéma) -> texte brut
+    ├── response.py       # bloc de réflexion retiré, JSON parsé et validé
+    ├── extraction.py     # essais, pause de 15 s, réponses brutes, run.jsonl
+    ├── outputs.py        # data/event/out/events_NNNN.json : fusion wiki + llm
     ├── versions.py       # versions du prompt et des entités
     └── pipeline.py       # orchestration, CLI
 tests/                    # tests sans réseau
@@ -66,7 +70,9 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 
 ## Extraction des événements
 
-En cours (spec : issue #88). L'appel au modèle n'est pas encore livré :
+En cours (spec : issue #88). L'appel au modèle tourne contre un client
+factice ; le client HTTP n'est pas encore livré (#98), donc en ligne de
+commande seul `--dry-run` fonctionne :
 
 ```bash
 # écrit les entrées, le prompt système et les schémas, sans appeler le modèle
@@ -149,6 +155,22 @@ définition des types et un exemple few-shot sur le chapitre 97 (prompt
 utilisateur figé et sortie rédigée à la main, qui montre la granularité et le
 piège de « Smoker is introduced »). Il fait environ 3 000 tokens.
 
+### Appel au modèle
+
+Chapitres traités dans l'ordre, un appel par chapitre, 15 s de pause entre deux
+appels, y compris entre deux essais, et 3 essais au plus. Une réponse est
+invalide si son JSON ne se lit pas, s'il ne respecte pas le schéma final du
+chapitre ou s'il porte un autre numéro de chapitre ; un bloc de réflexion vide
+en tête (`<think></think>`…) est d'abord retiré. Après 3 échecs, le chapitre
+est abandonné, sans fichier de sortie, et signalé dans le journal.
+
+- `data/event/raw/events_NNNN_attempt_N.json` : chaque réponse brute, hors git ;
+- `data/event/run.jsonl` : une ligne par appel (chapitre, essai, durée, tokens,
+  erreur, issue `ok` | `retry` | `abandoned`) ;
+- `data/event/out/events_NNNN.json` : les événements `wiki` puis `llm`, avec
+  `unlisted_entities` et un bloc `meta` (modèle, versions du prompt, du schéma,
+  de la taxonomie et des entités, `revision_id`, nombre d'essais, origines).
+
 ## Tests
 
 ```bash
@@ -170,6 +192,9 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - le prompt système et le schéma, à travers `--dry-run` : mots-clés permis,
   ordre des champs, enum des types et des noms autorisés, validité de la
   sortie attendue du ch. 97 contre son propre schéma ;
+- l'appel au modèle, à travers le pipeline avec un client factice : nouvel
+  essai puis abandon, bloc de réflexion retiré, réponses brutes et journal,
+  fusion des deux origines et `meta`, aucun appel en `--dry-run` ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

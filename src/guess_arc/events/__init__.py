@@ -9,6 +9,11 @@
     taxonomy  -> les 20 types d'événements que le modèle peut émettre (v1)
     prompt    -> prompt système versionné, exemple few-shot du ch. 97 (prompts/)
     schema    -> schéma JSON versionné de la réponse, noms autorisés injectés
+    llm       -> client LLM : (prompt système, prompt utilisateur, schéma) -> texte
+                 brut ; client factice pour les tests
+    response  -> bloc de réflexion retiré, JSON parsé et validé contre le schéma
+    extraction -> essais, pause entre deux appels, réponses brutes, run.jsonl
+    outputs   -> data/event/out/events_NNNN.json : fusion des origines wiki et llm
     versions  -> versions du prompt, du schéma, de la taxonomie et des
                  entités, notées dans chaque sortie
     pipeline  -> orchestration, CLI

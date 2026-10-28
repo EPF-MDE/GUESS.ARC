@@ -7,3 +7,5 @@ __pycache__/
 
 # Couches de données générées par `python -m guess_arc.ingestion`
 /data/
+# Réponses brutes du modèle : hors git, même le jour où data/event/ sera commité
+/data/event/raw/

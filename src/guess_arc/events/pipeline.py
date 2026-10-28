@@ -1,8 +1,11 @@
 """
 One Piece — extraction des événements, de la silver vers data/event/.
 
-Pour l'instant, l'appel au modèle n'est pas livré : `--dry-run` écrit, sans
-appeler le modèle,
+Avec un client LLM (`run(..., client=...)`), chaque chapitre est envoyé au
+modèle, dans l'ordre, et `out/` fusionne les événements `wiki` et `llm` ; les
+réponses brutes vont dans `raw/` (hors git) et le journal dans `run.jsonl`
+(voir extraction). Le client HTTP n'est pas encore livré (#98) : en ligne de
+commande, seul `--dry-run` fonctionne. Il écrit, sans appeler le modèle,
 - data/event/prompt/system_vN.md et schema_vN.json : le prompt système et le
   schéma de base, communs à tous les chapitres ;
 - pour chaque chapitre, data/event/in/events_NNNN.md (le prompt utilisateur
@@ -32,8 +35,10 @@ from guess_arc import paths
 
 from .future_leaks import load_review, stale_decisions, write_candidates
 from .entities import Entities, EntitySelector
+from .extraction import MAX_ATTEMPTS, PAUSE_S, Pacer, extract_chapter
 from .inputs import estimated_tokens, render_user_prompt, write_input
-from .outputs import write_output
+from .llm import LLMClient
+from .outputs import has_llm_events, write_output
 from .preparse import preparse
 from .prompt import system_prompt
 from .schema import base_schema, chapter_schema
@@ -75,9 +80,11 @@ def write_prompt(data_dir: Path) -> tuple[Path, Path]:
 
 def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         last: int | None = None, dry_run: bool = False,
-        review_path: Path = paths.FUTURE_LEAK_REVIEW_PATH) -> int:
-    if not dry_run:
-        raise NotImplementedError("extraction llm pas encore disponible : utiliser --dry-run")
+        review_path: Path = paths.FUTURE_LEAK_REVIEW_PATH,
+        client: LLMClient | None = None, pause_s: float = PAUSE_S,
+        max_attempts: int = MAX_ATTEMPTS) -> int:
+    if not dry_run and client is None:
+        raise ValueError("extraction llm sans client : passer `client` ou utiliser --dry-run")
     in_dir, out_dir = paths.event_in_dir(data_dir), paths.event_out_dir(data_dir)
     schema_dir = paths.event_schema_dir(data_dir)
     prompt_path, schema_path = write_prompt(data_dir)
@@ -95,7 +102,11 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
               "seuls les noms de la table des personnages sont envoyés")
     # Le filtre de temps lit aussi les chapitres qui précèdent la plage.
     selector = EntitySelector(entities)
+    system = system_prompt()
+    pacer = Pacer(pause_s)
+    raw_dir, log_path = paths.event_raw_dir(data_dir), paths.event_run_log_path(data_dir)
     removed, candidates, chapters, sizes = Counter(), [], set(), []
+    extracted, kept, abandoned = 0, 0, []
     for ch in history:
         selector.observe(ch)
         if first is not None and ch.number < first:
@@ -104,11 +115,25 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         block = selector.select(ch, p.text)
         chapters.add(p.number)
         write_input(p, block, in_dir)
-        write_json(chapter_schema(block.allowed_names), schema_dir / f"events_{p.number:04d}.json")
-        write_output(ch, wiki_by_chapter[ch.number], out_dir)
+        schema = chapter_schema(block.allowed_names)
+        write_json(schema, schema_dir / f"events_{p.number:04d}.json")
+        user = render_user_prompt(p, block)
+        if dry_run:
+            if has_llm_events(out_dir, ch.number):
+                kept += 1
+            else:
+                write_output(ch, wiki_by_chapter[ch.number], out_dir)
+        else:
+            llm = extract_chapter(client, ch.number, system, user, schema,
+                                  raw_dir, log_path, pacer, max_attempts)
+            if llm is None:
+                abandoned.append(ch.number)
+            else:
+                write_output(ch, wiki_by_chapter[ch.number], out_dir, llm)
+                extracted += 1
         candidates.extend(p.leak_candidates)
         removed.update(p.flags)
-        sizes.append(estimated_tokens(render_user_prompt(p, block)))
+        sizes.append(estimated_tokens(user))
     candidates_path = paths.event_leak_candidates_path(data_dir)
     write_candidates(candidates, candidates_path)
     print(f"Prompt système : {prompt_path} "
@@ -131,7 +156,15 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         print(f"  attention : {stale} décisions ne désignent plus aucun passage "
               "(texte de la silver modifié), à relire")
     counts = Counter(e.type for ch in selected for e in wiki_by_chapter[ch.number])
-    print(f"Événements wiki : {out_dir}/ ({len(selected)} fichiers écrits)")
+    if dry_run:
+        print(f"Événements wiki : {out_dir}/ ({len(selected) - kept} fichiers écrits, "
+              f"{kept} déjà extraits par le modèle laissés intacts)")
+    else:
+        print(f"Événements wiki et llm : {out_dir}/ ({extracted} fichiers écrits) ; "
+              f"réponses brutes : {raw_dir}/ ; journal : {log_path}")
+        if abandoned:
+            print(f"  attention : {len(abandoned)} chapitres abandonnés après "
+                  f"{max_attempts} essais : {', '.join(map(str, abandoned))}")
     for name, count in counts.items():
         print(f"  {name} : {count}")
     return len(selected)
@@ -154,7 +187,7 @@ def main(argv: list[str] | None = None) -> None:
                         "(défaut : review/future_leaks.json)")
     args = p.parse_args(argv)
     if not args.dry_run:
-        p.error("l'extraction llm n'est pas encore disponible : utiliser --dry-run")
+        p.error("le client HTTP n'est pas encore disponible (#98) : utiliser --dry-run")
     run(args.data_dir, args.first, args.last, dry_run=True, review_path=args.leak_review)
 
 
