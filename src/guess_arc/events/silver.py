@@ -10,6 +10,29 @@ FRONT_MATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 SECTION_RE = re.compile(r"^## (.+)$", re.MULTILINE)
 # Marqueurs écrits par guess_arc.ingestion.silver quand une section est vide.
 ABSENT = {"_(absent)_", "_(absentes)_"}
+CHARACTER_RE = re.compile(
+    r"^  - name: (.*)\n    faction: .*\n    on_panel: (true|false)\n    appearance: \[(.*)\]$",
+    re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class Appearance:
+    """Une ligne de la table des personnages : présent à l'image, annotations."""
+
+    name: str
+    on_panel: bool
+    annotations: tuple[str, ...] = ()
+
+    @property
+    def in_flashback(self) -> bool:
+        """Montré en flashback dans le récit ; un flashback en couverture ne compte pas."""
+        return "flashback" in self.annotations and "cover" not in self.annotations
+
+    @property
+    def presented(self) -> bool:
+        """Présent à l'image ou montré en flashback (ni mention, ni couverture, ni rêve)."""
+        return self.on_panel or self.in_flashback
 
 
 @dataclass
@@ -22,6 +45,7 @@ class SilverChapter:
     short_summary: str
     long_summary: str
     notes: list[str] = field(default_factory=list)
+    characters: list[Appearance] = field(default_factory=list)
 
 
 def _yaml_unescape(value: str) -> str:
@@ -53,6 +77,17 @@ def read_chapter(path: Path) -> SilverChapter:
     front = match.group(1)
     sections = _sections(text[match.end():])
     revision_id = _field(front, "revision_id")
+    characters = [
+        Appearance(_yaml_unescape(name), on_panel == "true",
+                   tuple(a.strip() for a in annotations.split(",") if a.strip()))
+        for name, on_panel, annotations in CHARACTER_RE.findall(front)
+    ]
+    # La table est lue au format exact de guess_arc.ingestion.silver : un
+    # changement de format ne doit pas vider la table en silence.
+    if str(len(characters)) != _field(front, "character_count"):
+        raise ValueError(f"{path.name} : table des personnages illisible "
+                         f"({len(characters)} lus, character_count "
+                         f"{_field(front, 'character_count')!r})")
     return SilverChapter(
         number=int(_field(front, "chapter")),
         title=_field(front, "title"),
@@ -63,4 +98,5 @@ def read_chapter(path: Path) -> SilverChapter:
         long_summary=sections.get("Long Summary", ""),
         notes=[line[2:] for line in sections.get("Chapter Notes", "").splitlines()
                if line.startswith("- ")],
+        characters=characters,
     )

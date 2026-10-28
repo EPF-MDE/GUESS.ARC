@@ -7,3 +7,4 @@ Changer l'une d'elles impose de relancer tous les chapitres : les entrées
 
 PROMPT_VERSION = "v1"
 ENTITIES_VERSION = "v0"
+TAXONOMY_VERSION = "v1"

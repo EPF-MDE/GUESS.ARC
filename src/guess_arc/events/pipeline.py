@@ -1,9 +1,11 @@
 """
 One Piece — extraction des événements, de la silver vers data/event/.
 
-Pour l'instant, seul le préparsing est livré : `--dry-run` écrit, pour chaque
-chapitre, data/event/in/events_NNNN.md (le prompt utilisateur exact), sans
-appeler le modèle.
+Pour l'instant, l'appel au modèle n'est pas livré : `--dry-run` écrit, pour
+chaque chapitre, data/event/in/events_NNNN.md (le prompt utilisateur exact) et
+data/event/out/events_NNNN.json (les événements d'origine `wiki`, déduits des
+apparitions), sans appeler le modèle. Les événements `wiki` d'une plage sont
+calculés sur toute la silver qui la précède.
 
 Usage :
     python -m guess_arc.events --dry-run                       # tous les chapitres
@@ -18,14 +20,17 @@ from __future__ import annotations
 
 import argparse
 import re
+from collections import Counter
 from pathlib import Path
 
 from guess_arc import paths
 
 from .future_leaks import load_review, stale_decisions, write_candidates
 from .inputs import write_input
+from .outputs import write_output
 from .preparse import preparse
 from .silver import read_chapter
+from .wiki import wiki_events
 
 SILVER_NAME_RE = re.compile(r"^chapter_(\d+)\.md$")
 
@@ -48,20 +53,25 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
         review_path: Path = paths.FUTURE_LEAK_REVIEW_PATH) -> int:
     if not dry_run:
         raise NotImplementedError("extraction llm pas encore disponible : utiliser --dry-run")
-    in_dir = paths.event_in_dir(data_dir)
-    files = silver_chapters(paths.silver_dir(data_dir), first, last)
+    in_dir, out_dir = paths.event_in_dir(data_dir), paths.event_out_dir(data_dir)
+    # Toute la silver jusqu'à la fin de la plage : les événements `wiki` dépendent
+    # des chapitres qui précèdent.
+    history = [read_chapter(path)
+               for path in silver_chapters(paths.silver_dir(data_dir), None, last)]
+    wiki_by_chapter = wiki_events(history)
+    selected = [ch for ch in history if first is None or ch.number >= first]
     decisions = load_review(review_path)
-    removed, candidates, chapters = {}, [], set()
-    for path in files:
-        p = preparse(read_chapter(path), decisions)
+    removed, candidates, chapters = Counter(), [], set()
+    for ch in selected:
+        p = preparse(ch, decisions)
         chapters.add(p.number)
         write_input(p, in_dir)
+        write_output(ch, wiki_by_chapter[ch.number], out_dir)
         candidates.extend(p.leak_candidates)
-        for name, count in p.flags.items():
-            removed[name] = removed.get(name, 0) + count
+        removed.update(p.flags)
     candidates_path = paths.event_leak_candidates_path(data_dir)
     write_candidates(candidates, candidates_path)
-    print(f"Entrées : {in_dir}/ ({len(files)} fichiers écrits)")
+    print(f"Entrées : {in_dir}/ ({len(selected)} fichiers écrits)")
     for name, count in removed.items():
         print(f"  {name} : {count}")
     pending = sum(c.decision is None for c in candidates)
@@ -71,7 +81,11 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
     if stale:
         print(f"  attention : {stale} décisions ne désignent plus aucun passage "
               "(texte de la silver modifié), à relire")
-    return len(files)
+    counts = Counter(e.type for ch in selected for e in wiki_by_chapter[ch.number])
+    print(f"Événements wiki : {out_dir}/ ({len(selected)} fichiers écrits)")
+    for name, count in counts.items():
+        print(f"  {name} : {count}")
+    return len(selected)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -80,7 +94,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--data-dir", type=Path, default=paths.DATA_DIR,
                    help="racine des couches silver/event (défaut : data/ à la racine du repo)")
     p.add_argument("--dry-run", action="store_true",
-                   help="écrit les fichiers d'entrée sans appeler le modèle")
+                   help="écrit les fichiers d'entrée et les événements wiki "
+                        "sans appeler le modèle")
     p.add_argument("--from", dest="first", type=int, default=None,
                    help="premier chapitre traité (défaut : le premier de la silver)")
     p.add_argument("--to", dest="last", type=int, default=None,
