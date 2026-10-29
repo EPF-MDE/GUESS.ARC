@@ -10,13 +10,16 @@ dans un second temps. L'ancienne approche par taxonomie simple a été abandonn�
 
 ```
 src/guess_arc/
-├── paths.py              # emplacements data/bronze, data/silver, data/state.json
-└── ingestion/            # wiki Fandom EN -> bronze -> silver
-    ├── wiki_client.py    # appels à l'API MediaWiki
-    ├── parser.py         # wikitexte d'un chapitre -> Chapter
-    ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
-    ├── validation.py     # contrat de format bronze / silver
-    └── pipeline.py       # orchestration, état incrémental, CLI
+├── paths.py              # emplacements data/bronze, data/silver, data/gold, data/state.json
+├── ingestion/            # wiki Fandom EN -> bronze -> silver
+│   ├── wiki_client.py    # appels à l'API MediaWiki
+│   ├── parser.py         # wikitexte d'un chapitre -> Chapter
+│   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
+│   ├── validation.py     # contrat de format bronze / silver
+│   └── pipeline.py       # orchestration, état incrémental, CLI
+└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) dans la gold
+    ├── extraction.py     # extract_entities(chapters, reference), pure, seul point d'entrée
+    └── pipeline.py       # lecture du bronze, écriture de la gold, CLI
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
 ```
@@ -55,6 +58,23 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 - `data/silver/chapter_NNNN.md` : un fichier par chapitre, front-matter YAML (titre, arc, personnages avec faction et `on_panel`) puis résumé court, résumé long et notes
 - `data/state.json` : les `revid` connus, pour les runs incrémentaux
 
+## Extraction des Entities
+
+```bash
+# tout le bronze -> Registry(t), sans réseau
+python -m guess_arc.entities
+```
+
+Chaque paragraphe du Long Summary est une Scene ; chaque lien `[[...]]` d'une
+Scene est une Mention de l'Entity dont le Canonical name est la page cible
+(`[[Page/Sous-page]]` et `[[Page#Section]]` comptent pour la page parente).
+Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
+
+- `data/gold/registry.jsonl` : Registry(t), une ligne par Entity et par changement,
+  valable de `valid_from` à `valid_to` inclus (`null` : encore valable), avec
+  premier et dernier chapitre vu et nombre de Mentions jusqu'à t
+- `data/gold/registry_quality.json` : rapport qualité (Scenes par chapitre)
+
 ## Tests
 
 ```bash
@@ -67,6 +87,8 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
   en parenthèses nues des anciens chapitres (`*[[Kalifa]] (cover)`) et
   en apostrophes des récents (`*[[King]] ''(cover)''`) ;
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
+- l'extraction des Entities via `extract_entities` seul, sur des extraits réels
+  du bronze (Scenes, Mentions, Registry(t) sur 3 chapitres) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

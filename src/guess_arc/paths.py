@@ -19,5 +19,9 @@ def silver_dir(data_dir: Path = DATA_DIR) -> Path:
     return data_dir / "silver"
 
 
+def gold_dir(data_dir: Path = DATA_DIR) -> Path:
+    return data_dir / "gold"
+
+
 def state_path(data_dir: Path = DATA_DIR) -> Path:
     return data_dir / "state.json"
