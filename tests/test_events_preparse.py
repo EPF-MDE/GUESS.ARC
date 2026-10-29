@@ -3,9 +3,11 @@
 Chapitres silver synthétiques écrits dans un dossier de données temporaire,
 puis lecture des fichiers `data/event/in/events_NNNN.md` produits. Sans réseau.
 """
+import io
 import re
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 
 from guess_arc import paths
@@ -75,10 +77,12 @@ class TestDryRunFiles(PreparseTestCase):
         written = [p.name for p in paths.event_in_dir(self.data_dir).iterdir()]
         self.assertEqual(written, ["events_0008.md"])
 
-    def test_cli_without_dry_run_is_refused_for_now(self):
+    def test_cli_without_env_file_is_refused_before_any_write(self):
         self.write_silver(chapter(1))
-        with self.assertRaises(SystemExit):
-            main(["--data-dir", str(self.data_dir)])
+        with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()) as err:
+            main(["--data-dir", str(self.data_dir)], env_path=self.data_dir / ".env")
+        self.assertIn(".env", err.getvalue())
+        self.assertFalse(paths.event_dir(self.data_dir).exists())
 
 
 class TestPrompt(PreparseTestCase):

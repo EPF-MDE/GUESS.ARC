@@ -9,3 +9,6 @@ __pycache__/
 /data/
 # Réponses brutes du modèle : hors git, même le jour où data/event/ sera commité
 /data/event/raw/
+
+# Résultat de scripts/llm/diagnostic_serveur.py
+/diagnostic_serveur.json

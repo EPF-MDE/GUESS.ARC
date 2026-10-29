@@ -4,8 +4,8 @@ Le texte est rendu tel que le serveur l'a écrit, avec un éventuel bloc de
 réflexion : c'est le pipeline qui le retire, le parse et le valide. Le client
 peut aussi rapporter les tokens consommés, notés dans le journal.
 
-Le client HTTP configuré par le `.env` viendra à côté (#98) ; `FakeClient`
-sert aux tests et renvoie des réponses écrites à l'avance.
+Le client réel est `http_client.HttpClient`, configuré par le `.env` ;
+`FakeClient` sert aux tests et renvoie des réponses écrites à l'avance.
 """
 
 from __future__ import annotations

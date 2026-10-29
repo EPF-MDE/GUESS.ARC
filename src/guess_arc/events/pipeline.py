@@ -8,8 +8,8 @@ réponses brutes vont dans `raw/` (hors git) et le journal dans `run.jsonl`
 (voir extraction). Le passage reprend là où il s'est arrêté : un chapitre déjà
 extrait avec les mêmes versions et la même révision (ou une version gelée)
 n'est pas rappelé, un chapitre incomplet attend le passage suivant (voir
-resume). Le client HTTP n'est pas encore livré (#98) : en ligne de
-commande, seul `--dry-run` fonctionne. Il écrit, sans appeler le modèle,
+resume). En ligne de commande, le client est le client HTTP configuré par
+le `.env` (voir http_client). `--dry-run` écrit, sans appeler le modèle,
 - data/event/prompt/system_vN.md et schema_vN.json : le prompt système et le
   schéma de base, communs à tous les chapitres ;
 - pour chaque chapitre, data/event/in/events_NNNN.md (le prompt utilisateur
@@ -19,6 +19,8 @@ commande, seul `--dry-run` fonctionne. Il écrit, sans appeler le modèle,
 calculés sur toute la silver qui la précède.
 
 Usage :
+    python -m guess_arc.events                                 # extraction, client du .env
+    python -m guess_arc.events --from 90 --to 100              # par lots
     python -m guess_arc.events --dry-run                       # tous les chapitres
     python -m guess_arc.events --dry-run --from 90 --to 100    # une plage
 
@@ -43,6 +45,7 @@ from .checks import ChapterChecks
 from .future_leaks import load_review, stale_decisions, write_candidates
 from .entities import Entities, EntitySelector
 from .extraction import MAX_ATTEMPTS, PAUSE_S, Pacer, extract_chapter
+from .http_client import ConfigError, HttpClient, LLMConfig
 from .inputs import estimated_tokens, render_user_prompt, write_input
 from .llm import LLMClient
 from .outputs import has_llm_events, write_output
@@ -190,7 +193,7 @@ def run(data_dir: Path = paths.DATA_DIR, first: int | None = None,
     return len(selected)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, env_path: Path = paths.ENV_PATH) -> None:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", type=Path, default=paths.DATA_DIR,
@@ -206,9 +209,14 @@ def main(argv: list[str] | None = None) -> None:
                    help="décisions de relecture des fuites du futur "
                         "(défaut : review/future_leaks.json)")
     args = p.parse_args(argv)
+    client = None
     if not args.dry_run:
-        p.error("le client HTTP n'est pas encore disponible (#98) : utiliser --dry-run")
-    run(args.data_dir, args.first, args.last, dry_run=True, review_path=args.leak_review)
+        try:
+            client = HttpClient(LLMConfig.from_env_file(env_path))
+        except ConfigError as e:
+            p.error(str(e))
+    run(args.data_dir, args.first, args.last, dry_run=args.dry_run,
+        review_path=args.leak_review, client=client)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ src/guess_arc/
     ├── entities.py       # entités « sans futur » du chapitre et noms autorisés
     ├── inputs.py         # data/event/in/events_NNNN.md : le prompt utilisateur exact
     ├── llm.py            # client LLM : (système, utilisateur, schéma) -> texte brut
+    ├── http_client.py    # client HTTP réel, configuré par le .env
     ├── response.py       # bloc de réflexion retiré, JSON parsé et validé
     ├── extraction.py     # essais, pause de 15 s, réponses brutes, run.jsonl
     ├── checks.py         # contrôles des événements llm : preuve, fuite, doublons
@@ -31,6 +32,7 @@ src/guess_arc/
     ├── versions.py       # versions du prompt et des entités
     └── pipeline.py       # orchestration, CLI
 tests/                    # tests sans réseau
+scripts/llm/              # diagnostic du serveur LLM, lancé à la main
 docs/adr/                 # décisions d'architecture
 review/future_leaks.json  # relecture humaine des fuites du futur (versionnée)
 ```
@@ -71,11 +73,15 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 
 ## Extraction des événements
 
-En cours (spec : issue #88). L'appel au modèle tourne contre un client
-factice ; le client HTTP n'est pas encore livré (#98), donc en ligne de
-commande seul `--dry-run` fonctionne :
+En cours (spec : issue #88). En ligne de commande, le modèle est appelé par le
+client HTTP configuré dans le `.env` (voir ci-dessous) ; `--dry-run` n'appelle
+pas le modèle :
 
 ```bash
+# extraction complète, ou par lots
+python -m guess_arc.events
+python -m guess_arc.events --from 1 --to 100
+
 # écrit les entrées, le prompt système et les schémas, sans appeler le modèle
 python -m guess_arc.events --dry-run
 
@@ -173,6 +179,38 @@ est abandonné, sans fichier de sortie, et signalé dans le journal.
   de la taxonomie, des entités et des contrôles, `revision_id`, nombre
   d'essais, doublons retirés, origines).
 
+### Client LLM et diagnostic du serveur
+
+Le client (`guess_arc/events/http_client.py`) lit sa configuration dans le
+`.env` à la racine du repo, et uniquement là : ni les variables du shell, ni
+aucune valeur par défaut dans le code. Copier `.env.example` en `.env` et
+remplir les cinq variables ; une variable manquante ou vide arrête la commande
+avec son nom.
+
+- `LLM_BASE_URL`, `LLM_API_KEY` : le serveur (celui de l'école :
+  `locallm.mde.epf.fr`) et la clé ;
+- `LLM_MODEL` : l'identifiant exact du modèle (Gemma 4 26B A4B) ;
+- `LLM_API` : `openai` (chat completions compatible OpenAI) ou `ollama` (API
+  native d'Ollama), et `LLM_CHAT_PATH` : le chemin de cette route.
+
+Paramètres fixes : température 0, graine 42, contexte de 16 384 tokens, réponse
+de 3 000 tokens au plus, expiration à 10 minutes, mode « thinking » désactivé.
+
+Le client réel n'a pas de test automatique : il est vérifié à la main, depuis le
+réseau de l'école (ou son VPN), avant un passage :
+
+1. remplir au moins `LLM_BASE_URL` et `LLM_API_KEY` dans le `.env` ;
+2. lancer `python scripts/llm/diagnostic_serveur.py` : il identifie le logiciel
+   du serveur et liste ses modèles ; si `LLM_MODEL` est vide, il s'arrête là,
+   recopier l'identifiant et relancer ;
+3. il essaie ensuite, avec le client du pipeline et ses paramètres, chaque route
+   connue (`/api/chat/completions`, `/ollama/api/chat`, `/v1/chat/completions`,
+   `/api/chat`) : le schéma JSON est-il vraiment appliqué, un appel d'environ
+   10 000 tokens passe-t-il sans être tronqué, un bloc de réflexion apparaît-il ;
+4. reporter dans le `.env` le `LLM_API` et le `LLM_CHAT_PATH` qu'il indique.
+
+Le détail est écrit dans `diagnostic_serveur.json` (sans la clé, hors git).
+
 ### Reprise et gel de version
 
 Le passage complet (10 à 25 h) peut être arrêté et relancé à tout moment, ou
@@ -229,6 +267,9 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - le prompt système et le schéma, à travers `--dry-run` : mots-clés permis,
   ordre des champs, enum des types et des noms autorisés, validité de la
   sortie attendue du ch. 97 contre son propre schéma ;
+- le client HTTP, sans réseau : lecture du `.env` (variables manquantes
+  nommées, route inconnue refusée, shell ignoré), requête construite pour
+  chaque route avec les paramètres fixes, lecture du texte et des tokens ;
 - l'appel au modèle, à travers le pipeline avec un client factice : nouvel
   essai puis abandon, bloc de réflexion retiré, réponses brutes et journal,
   fusion des deux origines et `meta`, aucun appel en `--dry-run` ;

@@ -11,6 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
 # Décisions de relecture des fuites du futur : versionnées, donc hors de data/.
 FUTURE_LEAK_REVIEW_PATH = REPO_ROOT / "review" / "future_leaks.json"
+# Configuration du client LLM (hors git), voir .env.example.
+ENV_PATH = REPO_ROOT / ".env"
 
 
 def bronze_dir(data_dir: Path = DATA_DIR) -> Path:

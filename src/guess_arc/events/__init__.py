@@ -11,6 +11,8 @@
     schema    -> schéma JSON versionné de la réponse, noms autorisés injectés
     llm       -> client LLM : (prompt système, prompt utilisateur, schéma) -> texte
                  brut ; client factice pour les tests
+    http_client -> client HTTP réel, configuré par le `.env` (routes OpenAI
+                 compatible ou Ollama native)
     response  -> bloc de réflexion retiré, JSON parsé et validé contre le schéma
     extraction -> essais, pause entre deux appels, réponses brutes, run.jsonl
     checks    -> contrôles des événements llm : preuve, fuite du futur, doublons
