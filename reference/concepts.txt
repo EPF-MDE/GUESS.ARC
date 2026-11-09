@@ -1,0 +1,50 @@
+# Canonical names des Concepts et des Titles (CONTEXT.md) : jamais des Entities,
+# exclus de Registry(t). Un nom par ligne, tel que le wiki titre la page.
+# Liste tirée des cibles de liens les plus fréquentes du corpus.
+
+## Concepts : notions génériques de l'univers
+Pirate
+Marine
+Devil Fruit
+Artificial Devil Fruit
+Paramecia
+Zoan
+Logia
+Haki
+Armament Haki
+Observation Haki
+Supreme King Haki
+Six Powers
+Will of D.
+Void Century
+Ancient Weapons
+Bounty
+Treasure
+Sword
+Ship
+Foods
+Doctor
+Samurai
+Okama
+Slavery
+Zombie
+Giants
+Fish-Men
+Merfolk
+Dwarves
+Lunarians
+Sea King
+Davy Back Fight
+
+## Titles : rangs et statuts portés par un Character
+Admiral
+Vice Admiral
+Fleet Admiral
+Marine Ranks
+Seven Warlords of the Sea
+Shichibukai
+Four Emperors
+Emperor
+World Noble
+Pirate King
+King (Title)

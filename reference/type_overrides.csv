@@ -1,0 +1,7 @@
+# Entity types fixés à la main : l'emportent sur les datasets et les catégories du wiki.
+# Cas limites tranchés selon le rôle principal dans l'histoire (CONTEXT.md, Entity type).
+canonical_name,entity_type
+Thriller Bark,Place
+Zunesha,Character
+Zou,Place
+Wano Country,Place

@@ -9,6 +9,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
+# Données de référence versionnées (datasets, listes tenues à la main), à part
+# des couches générées de data/.
+REFERENCE_DIR = REPO_ROOT / "reference"
 
 
 def bronze_dir(data_dir: Path = DATA_DIR) -> Path:
@@ -17,6 +20,10 @@ def bronze_dir(data_dir: Path = DATA_DIR) -> Path:
 
 def silver_dir(data_dir: Path = DATA_DIR) -> Path:
     return data_dir / "silver"
+
+
+def gold_dir(data_dir: Path = DATA_DIR) -> Path:
+    return data_dir / "gold"
 
 
 def state_path(data_dir: Path = DATA_DIR) -> Path:

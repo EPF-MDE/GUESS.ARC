@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 #   les notes.
 # ﻿ : un BOM traîne dans certains titres (===﻿Chapter Notes===, ch. 46).
 HEADING_RE = r"^(=+)[\s﻿]*{}\s*=+[ \t]*$"
-CHAR_LINE_RE = re.compile(r"^\*\s*\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]\s*(.*)$", re.M)
+CHAR_LINE_RE = re.compile(r"^\*\s*\[\[([^\]|]+?)(?:\|([^\]]*))?\]\]\s*(.*)$", re.M)
 GROUP_RE = re.compile(r"^;\s*\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]", re.M)
 ARC_RE = re.compile(r"\{\{\s*([A-Za-z0-9 '’\-]+ Arc)\s*\}\}")
 LINK_RE = re.compile(r"\[\[(?:[^\]|]+\|)?([^\]|]+)\]\]")
@@ -56,7 +56,7 @@ def parse_characters(char_section: str) -> list[dict]:
         if name in seen:
             continue
         seen.add(name)
-        annots = [a.strip().lower() for a in ANNOT_RE.findall(c.group(2))]
+        annots = [a.strip().lower() for a in ANNOT_RE.findall(c.group(3))]
         out.append({
             "name": name,
             "faction": current_group,
@@ -66,8 +66,22 @@ def parse_characters(char_section: str) -> list[dict]:
                 k in a for a in annots for k in ("cover", "flashback", "mentioned", "dream")
             ),
             "annotations": annots,
+            # Texte affiché d'un lien pipé ('*[[Denjiro|Kyoshiro]]' -> 'Kyoshiro') :
+            # le nom sous lequel le lecteur connaît le personnage à ce chapitre.
+            "label": c.group(2).strip() if c.group(2) else None,
         })
     return out
+
+
+def parse_groups(char_section: str) -> list[str]:
+    """Factions liées (';[[Faction]]') de la CharTable, dans l'ordre, sans doublon.
+    Les en-têtes sans lien (';Other', ';Citizens') ne désignent aucune page."""
+    groups: list[str] = []
+    for line in char_section.splitlines():
+        g = GROUP_RE.match(line.strip())
+        if g and (name := g.group(1).strip()) not in groups:
+            groups.append(name)
+    return groups
 
 
 def strip_markup(text: str) -> str:
