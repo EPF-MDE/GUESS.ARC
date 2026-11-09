@@ -22,6 +22,7 @@ from guess_arc import paths
 from guess_arc.ingestion.pipeline import load_bronze
 
 from .extraction import DisguiseCandidate, Extraction, Reference, extract_entities
+from .wiki_categories import load_category_cache, update_category_cache
 
 
 def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
@@ -67,19 +68,38 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
     def dataset(name: str) -> tuple[dict, ...]:
         return tuple(json.loads((reference_dir / f"{name}.json").read_text(encoding="utf-8")))
 
+    with (reference_dir / TYPE_OVERRIDES).open(encoding="utf-8", newline="") as fh:
+        overrides = {row["canonical_name"]: row["entity_type"] for row in csv.DictReader(
+            line for line in fh if not line.startswith("#")
+        )}
     return Reference(
         common_words=load_common_words(),
         characters=dataset("characters"),
         islands=dataset("islands"),
         devil_fruits=dataset("devil_fruits"),
         concepts=frozenset(_read_list(reference_dir / "concepts.txt")),
+        wiki_categories=load_category_cache(reference_dir / WIKI_CATEGORIES),
+        type_overrides=overrides,
     )
 
 
-def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
+WIKI_CATEGORIES = "wiki_categories.json"
+TYPE_OVERRIDES = "type_overrides.csv"
+
+
+def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
     archive = load_bronze(paths.bronze_dir(data_dir) / "chapters.jsonl")
-    reference = load_reference()
-    extraction = extract_entities(list(archive.values()), reference)
+    chapters = list(archive.values())
+    extraction = extract_entities(chapters, load_reference())
+
+    # Les catégories du wiki ne sont demandées que pour les Entities encore
+    # Unknown et absentes du cache ; un second run ne touche pas au réseau.
+    unknown = {r.canonical_name for r in extraction.registry if r.entity_type == "Unknown"}
+    if fetch:
+        fetched = update_category_cache(paths.REFERENCE_DIR / WIKI_CATEGORIES, unknown)
+        if fetched:
+            print(f"Catégories du wiki récupérées pour {fetched} Entities")
+            extraction = extract_entities(chapters, load_reference())
     registry_path = write_gold(extraction, paths.gold_dir(data_dir))
 
     scenes = extraction.quality.scenes_per_chapter
@@ -107,8 +127,10 @@ def main() -> None:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", type=Path, default=paths.DATA_DIR,
                    help="racine des couches bronze/gold (défaut : data/ à la racine du repo)")
+    p.add_argument("--offline", action="store_true",
+                   help="ne demande pas au wiki les catégories absentes du cache")
     args = p.parse_args()
-    run(args.data_dir)
+    run(args.data_dir, fetch=not args.offline)
 
 
 if __name__ == "__main__":

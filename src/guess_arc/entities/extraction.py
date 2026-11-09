@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from guess_arc.ingestion.parser import ARC_RE, parse_characters, parse_groups, section
 
@@ -47,12 +48,17 @@ class Reference:
     status, bounty, current_ruler...) décrivent la fin de l'histoire et n'entrent
     jamais dans Registry(t) (ADR 0002).
     concepts : Canonical names des Concepts et des Titles, exclus de Registry(t).
+    wiki_categories : Canonical name -> catégories de sa page sur le wiki (cache).
+    type_overrides : Canonical name -> Entity type, tenu à la main ; l'emporte
+    sur les datasets et les catégories.
     """
     common_words: frozenset[str] = frozenset()
     characters: tuple[dict, ...] = ()
     islands: tuple[dict, ...] = ()
     devil_fruits: tuple[dict, ...] = ()
     concepts: frozenset[str] = frozenset()
+    wiki_categories: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    type_overrides: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -82,6 +88,13 @@ class SuspiciousAlias:
 
 
 @dataclass(frozen=True)
+class TopEntity:
+    canonical_name: str
+    entity_type: str
+    mention_count: int
+
+
+@dataclass(frozen=True)
 class QualityReport:
     """recall_proxy : part des Characters ayant une Appearance dans la CharTable
     qui ont aussi au moins une Mention dans le Long Summary du même chapitre
@@ -91,6 +104,8 @@ class QualityReport:
     Character est dans le Cast du chapitre (Appearance, Recall ou Cover appearance).
     suspicious_aliases : les 20 formes qui tombent le plus souvent hors du Cast.
     unknown_mention_share : part des Mentions dont l'Entity est typée Unknown.
+    top_entities : les 50 Entities les plus mentionnées, avec leur type, pour une
+    vérification manuelle rapide.
     """
     scenes_per_chapter: dict[int, int]
     recall_proxy: float | None
@@ -99,6 +114,7 @@ class QualityReport:
     precision_proxy: float | None
     suspicious_aliases: list[SuspiciousAlias]
     unknown_mention_share: float | None
+    top_entities: list[TopEntity]
 
 
 @dataclass(frozen=True)
@@ -215,6 +231,59 @@ def _lexicon(reference: Reference) -> tuple[dict[str, str], dict[str, str]]:
     types = {n: ts.pop() for n, ts in epithets.items() if len(ts) == 1 and n not in primary}
     types.update({n: ts.pop() for n, ts in primary.items() if len(ts) == 1})
     return types, resolve
+
+
+ENTITY_TYPES = frozenset({"Character", "Group", "Place", "Ship", "Devil Fruit", "Weapon",
+                          "Object", UNKNOWN})
+# Catégories du wiki -> Entity type, dans l'ordre de priorité : une page porte
+# souvent plusieurs catégories, la première règle qui en reconnaît une l'emporte.
+# - Devil Fruit avant Character : "Devil Fruits with Multiple Users" (Gomu Gomu no Mi).
+# - Place avant Group : un pays est aussi un régime (Wano Country : Locations, Regimes).
+# - Character avant Group : une personne appartient à des groupes, l'inverse est rare.
+# Les catégories de notions (Fighting Styles, Races and Tribes, Events) ne donnent
+# aucun type : l'Entity reste Unknown.
+CATEGORY_RULES = (
+    ("Devil Fruit", re.compile(
+        r"^(Paramecia|Zoan|Logia|Mythical Zoan|Ancient Zoan|Shown Devil Fruits)$|\bDevil Fruits\b")),
+    ("Ship", re.compile(r"\bShips\b")),
+    ("Weapon", re.compile(r"\b(Swords|Blades|Weapons|Polearms|Guns)\b")),
+    ("Place", re.compile(
+        r"(Locations|Islands|Kingdoms|Towns and Cities|Villages|Landmarks|Buildings|Castles"
+        r"|Prisons|Oceans|Bases|Bars and Restaurants|Seas|Territories|Regions)$")),
+    ("Character", re.compile(
+        r"Characters$|^Characters Aged|^Humans$|Users$|Swordsmen$|^Talking Animals$|^Children$"
+        r"|(Captains|Officers|Ministers|Prisoners|Slaves|Residents|Cooks|Staff|Antagonists"
+        r"|Hybrids)$")),
+    ("Group", re.compile(
+        r"(Groups|Crews|Fleets|Families|Regimes|Organizations|Alliance|Military Forces)$")),
+    ("Object", re.compile(
+        r"(Technology|Artifacts|Literature|Substances|Minerals|Animal Species|Vehicles"
+        r"|Sea Trains|By-Products|Plants|Creations)$")),
+)
+
+
+def _category_type(categories: tuple[str, ...]) -> str | None:
+    for entity_type, rule in CATEGORY_RULES:
+        if any(rule.search(c) for c in categories):
+            return entity_type
+    return None
+
+
+def _entity_types(names: set[str], dataset_types: dict[str, str],
+                  reference: Reference) -> dict[str, str]:
+    """Un seul type par Entity : override > datasets > catégories du wiki > Unknown."""
+    bad = {n: t for n, t in reference.type_overrides.items() if t not in ENTITY_TYPES}
+    if bad:
+        raise ValueError(f"Entity type inconnu dans les overrides : {bad}")
+    types = {}
+    for name in names:
+        types[name] = (
+            reference.type_overrides.get(name)
+            or dataset_types.get(name)
+            or _category_type(reference.wiki_categories.get(name, ()))
+            or UNKNOWN
+        )
+    return types
 
 
 def _alias(target: str, canonical_name: str, text: str | None,
@@ -424,7 +493,7 @@ def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> 
 
 def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
-    types, resolve = _lexicon(reference)
+    dataset_types, resolve = _lexicon(reference)
 
     def keep(name: str) -> bool:
         # Concepts et Titles ne sont jamais des Entities.
@@ -459,6 +528,16 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         for m in _alias_matches(number, scenes, linked[number], alias_first_use)
     ]
 
+    types = _entity_types({m.canonical_name for m in mentions} | {e.canonical_name for e in cast},
+                          dataset_types, reference)
+    mention_totals: dict[str, int] = {}
+    for m in mentions:
+        mention_totals[m.canonical_name] = mention_totals.get(m.canonical_name, 0) + 1
+    top_entities = [
+        TopEntity(name, types[name], count)
+        for name, count in sorted(mention_totals.items(), key=lambda kv: (-kv[1], kv[0]))[:50]
+    ]
+
     recall_proxy, recall_proxy_per_arc = _recall_proxy(cast, mentions, arcs)
     precision_proxy, suspicious_aliases = _precision_proxy(mentions, cast)
     return Extraction(
@@ -474,9 +553,10 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
             precision_proxy=precision_proxy,
             suspicious_aliases=suspicious_aliases,
             unknown_mention_share=(
-                sum(types.get(m.canonical_name, UNKNOWN) == UNKNOWN for m in mentions) / len(mentions)
+                sum(types[m.canonical_name] == UNKNOWN for m in mentions) / len(mentions)
                 if mentions else None
             ),
+            top_entities=top_entities,
         ),
         disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )

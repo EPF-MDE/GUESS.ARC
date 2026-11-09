@@ -23,7 +23,9 @@ src/guess_arc/
     └── common_words.txt  # mots courants : un texte de lien qui commence par l'un d'eux n'est pas un Alias
 reference/                # données de référence versionnées
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
-└── concepts.txt          # Concepts et Titles, exclus de Registry(t)
+├── concepts.txt          # Concepts et Titles, exclus de Registry(t)
+├── wiki_categories.json  # cache des catégories du wiki (Entity types)
+└── type_overrides.csv    # Entity types fixés à la main
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
 ```
@@ -88,8 +90,13 @@ Chaque Entity reçoit un seul Entity type, fixe : Character, Place ou Devil Frui
 si son Canonical name est dans `reference/characters.json`, `islands.json` ou
 `devil_fruits.json` (nom sans l'épithète entre crochets ni la parenthèse finale,
 ou épithète entre crochets d'un Character : `Scien [Queen]` -> Queen ; nom anglais
-d'un Devil Fruit ramené au nom japonais), sinon Unknown. Un nom présent dans deux
-datasets reste Unknown. Seuls les noms des datasets servent : leurs attributs
+d'un Devil Fruit ramené au nom japonais). Sinon, les catégories de sa page sur
+le wiki donnent le type (`Pirate Crews` -> Group, `Ships` -> Ship, `Swords` ->
+Weapon, `Locations` -> Place...), selon un ordre de priorité documenté dans
+`extraction.py`. Faute de mieux, l'Entity est Unknown. `reference/type_overrides.csv`
+l'emporte sur tout le reste. Les catégories sont mises en cache dans
+`reference/wiki_categories.json` : seules les Entities encore Unknown et absentes
+du cache sont demandées au wiki, par lots de 50 (`--offline` pour ne rien demander). Seuls les noms des datasets servent : leurs attributs
 d'état ne sont jamais lus. Les Concepts et Titles de `reference/concepts.txt`
 (`Pirate`, `Haki`, `Admiral`...) sont exclus de Registry(t).
 Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
@@ -104,7 +111,7 @@ Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-re
   Mentions par source, lien ou Alias match ; precision proxy : part des Alias
   matches de Characters qui tombent dans le Cast du chapitre ; les 20 Aliases
   les plus suspects, ceux qui tombent le plus souvent hors du Cast ; part des
-  Mentions typées Unknown)
+  Mentions typées Unknown ; les 50 Entities les plus mentionnées avec leur type)
 - `data/gold/disguise_candidates.csv` : Disguises possibles, triés par nombre de
   liens. Un candidat est un Alias de Character qui ne partage aucun mot avec son
   Canonical name (`Kyoshiro` -> Denjiro), relevé dans le Long Summary, la CharTable
@@ -125,7 +132,8 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
 - l'extraction des Entities via `extract_entities` seul, sur des extraits réels
   du bronze (Scenes, Mentions, Aliases datés, Alias match, Cast de la
-  CharTable, recall et precision proxies, Entity types des datasets, Registry(t) sur 3 chapitres, Disguise candidates) ;
+  CharTable, recall et precision proxies, Entity types des datasets, des catégories du wiki et des overrides, cache des
+  catégories, Registry(t) sur 3 chapitres, Disguise candidates) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

@@ -1,8 +1,11 @@
 """Tests de l'extraction d'entités via son seul point d'entrée, sur des extraits réels du bronze. No network access."""
+import pathlib
+import tempfile
 import unittest
 from dataclasses import asdict
 
 from guess_arc.entities import Reference, extract_entities
+from guess_arc.entities.wiki_categories import load_category_cache, update_category_cache
 
 # Extrait réel du chapitre 552
 CH552_SCENE = (
@@ -698,6 +701,123 @@ class TestEntityTypesFromDatasets(unittest.TestCase):
         # Newgate typées.
         extraction = self.extract(bronze_record(552, CH552_SCENE))
         self.assertAlmostEqual(extraction.quality.unknown_mention_share, 5 / 7)
+
+
+# Catégories réelles du wiki (API MediaWiki, catégories cachées exclues)
+WIKI_CATEGORIES = {
+    "Straw Hat Pirates": ("East Blue Pirate Crews", "Four Emperors Groups", "Straw Hat Pirates",
+                          "Super Rookie Crews", "Worst Generation Crews"),
+    "Thousand Sunny": ("Four Emperors' Ships", "Straw Hat Pirates' Ships",
+                       "Worst Generation's Ships"),
+    "Enma": ("Great Grade Blades", "Straw Hat Pirates' Weapons", "Swords"),
+    "Marines": ("Antagonist Groups", "Fleets", "Marine", "Military Forces",
+                "World Government Groups"),
+    "Wano Country": ("Four Emperors Territories", "New World Locations", "Regimes"),
+    "Den Den Mushi": ("Animal Species", "Technology"),
+    "Gomu Gomu no Mi": ("Devil Fruits with Multiple Users", "Mythical Zoan", "Paramecia",
+                        "Shown Devil Fruits"),
+    "Sphinx": ("Impel Down Staff", "Summit War Saga Antagonists", "Talking Animals"),
+    "Three Sword Style": ("Fighting Styles",),
+    "Edward Newgate": ("Pirate Captains", "Fleets"),  # extrait fictif : le dataset l'emporte
+}
+# Phrase écrite pour le test, qui lie d'un coup les Entities ci-dessus
+CH1065_SCENE = (
+    "The [[Straw Hat Pirates]] arrive on the [[Thousand Sunny]], while [[Roronoa Zoro|Zoro]] "
+    "holds [[Enma]]; the [[Marines]] contact them by [[Den Den Mushi]] from [[Wano Country]]."
+)
+
+
+def typed_extraction(*records, overrides=None):
+    return extract_entities(list(records), Reference(
+        characters=CHARACTERS, islands=ISLANDS, devil_fruits=DEVIL_FRUITS, concepts=CONCEPTS,
+        wiki_categories=WIKI_CATEGORIES, type_overrides=overrides or {},
+    ))
+
+
+class TestEntityTypesFromWikiCategories(unittest.TestCase):
+
+    def test_categories_type_what_the_datasets_do_not_cover(self):
+        extraction = typed_extraction(bronze_record(1065, CH1065_SCENE))
+        expected = {"Straw Hat Pirates": "Group", "Thousand Sunny": "Ship", "Enma": "Weapon",
+                    "Marines": "Group", "Wano Country": "Place", "Den Den Mushi": "Object"}
+        for name, entity_type in expected.items():
+            self.assertEqual(type_of(extraction, name, 1065), entity_type, name)
+
+    def test_devil_fruit_categories_beat_the_users_category(self):
+        extraction = typed_extraction(bronze_record(1044, CH1044_SCENE))
+        self.assertEqual(type_of(extraction, "Gomu Gomu no Mi", 1044), "Devil Fruit")
+
+    def test_categories_settle_a_name_found_in_two_datasets(self):
+        extraction = typed_extraction(bronze_record(529, "[[Sphinx]] guards Level 2."))
+        self.assertEqual(type_of(extraction, "Sphinx", 529), "Character")
+
+    def test_datasets_beat_the_categories(self):
+        extraction = typed_extraction(bronze_record(552, CH552_SCENE))
+        self.assertEqual(type_of(extraction, "Edward Newgate", 552), "Character")
+
+    def test_unmapped_categories_leave_the_entity_unknown(self):
+        extraction = typed_extraction(bronze_record(
+            1, "[[Roronoa Zoro|Zoro]] uses [[Three Sword Style]]."
+        ))
+        self.assertEqual(type_of(extraction, "Three Sword Style", 1), "Unknown")
+
+    def test_override_beats_datasets_and_categories(self):
+        extraction = typed_extraction(
+            bronze_record(552, CH552_SCENE), bronze_record(1065, CH1065_SCENE),
+            overrides={"Edward Newgate": "Group", "Wano Country": "Group"},
+        )
+        self.assertEqual(type_of(extraction, "Edward Newgate", 552), "Group")
+        self.assertEqual(type_of(extraction, "Wano Country", 1065), "Group")
+
+    def test_override_with_an_unknown_type_is_refused(self):
+        with self.assertRaises(ValueError):
+            typed_extraction(bronze_record(552, CH552_SCENE), overrides={"Shanks": "Pirate"})
+
+    def test_each_entity_has_one_type_for_the_whole_story(self):
+        extraction = typed_extraction(
+            bronze_record(552, CH552_SCENE), bronze_record(1000, CH1000_LONG_SUMMARY),
+            bronze_record(1065, CH1065_SCENE),
+        )
+        types = {}
+        for row in extraction.registry:
+            types.setdefault(row.canonical_name, set()).add(row.entity_type)
+        self.assertTrue(all(len(t) == 1 for t in types.values()))
+
+    def test_quality_report_lists_the_top_entities_with_their_type(self):
+        extraction = typed_extraction(
+            bronze_record(552, CH552_SCENE), bronze_record(1000, CH1000_LONG_SUMMARY),
+        )
+        top = extraction.quality.top_entities
+        self.assertLessEqual(len(top), 50)
+        # 3 Mentions chacun ; à égalité, ordre alphabétique
+        self.assertEqual([(e.canonical_name, e.mention_count) for e in top[:3]],
+                         [("Edward Newgate", 3), ("Kouzuki Oden", 3), ("Yamato", 3)])
+        counts = [e.mention_count for e in top]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        self.assertEqual(next(e for e in top if e.canonical_name == "Edward Newgate").entity_type,
+                         "Character")
+
+
+class TestWikiCategoryCache(unittest.TestCase):
+
+    def test_categories_are_fetched_in_batches_then_read_from_the_cache(self):
+        calls = []
+
+        def fake_fetch(titles):
+            calls.append(list(titles))
+            return {t: ["Swords"] for t in titles}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = pathlib.Path(tmp) / "wiki_categories.json"
+            titles = [f"Sword {i}" for i in range(120)]
+            fetched = update_category_cache(cache, titles, fake_fetch, batch=50)
+            self.assertEqual(fetched, 120)
+            self.assertEqual([len(c) for c in calls], [50, 50, 20])
+            self.assertEqual(load_category_cache(cache)["Sword 7"], ("Swords",))
+
+            calls.clear()
+            self.assertEqual(update_category_cache(cache, titles, fake_fetch, batch=50), 0)
+            self.assertEqual(calls, [])
 
 
 class TestDisguiseCandidates(unittest.TestCase):
