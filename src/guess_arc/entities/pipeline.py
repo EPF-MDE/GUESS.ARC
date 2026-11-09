@@ -33,9 +33,18 @@ def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
     return registry_path
 
 
+COMMON_WORDS_PATH = Path(__file__).with_name("common_words.txt")
+
+
+def load_common_words(path: Path = COMMON_WORDS_PATH) -> frozenset[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    return frozenset(w.strip().lower() for w in lines if w.strip() and not w.startswith("#"))
+
+
 def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
     archive = load_bronze(paths.bronze_dir(data_dir) / "chapters.jsonl")
-    extraction = extract_entities(list(archive.values()), Reference())
+    reference = Reference(common_words=load_common_words())
+    extraction = extract_entities(list(archive.values()), reference)
     registry_path = write_gold(extraction, paths.gold_dir(data_dir))
 
     scenes = extraction.quality.scenes_per_chapter

@@ -1,0 +1,46 @@
+# Mots courants (pronoms, déterminants) : un texte de lien pipé qui commence
+# par l'un d'eux n'est pas un Alias ("[[Magnolia|Their mother]]").
+# Un mot par ligne, en minuscules. Lu par pipeline.py, passé dans Reference.
+a
+an
+the
+this
+that
+these
+those
+some
+any
+every
+each
+all
+both
+another
+other
+such
+he
+she
+it
+they
+we
+you
+i
+him
+her
+them
+us
+me
+his
+hers
+its
+their
+theirs
+our
+your
+my
+who
+whom
+whose
+what
+which
+there
+here

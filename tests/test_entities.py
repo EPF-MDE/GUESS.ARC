@@ -46,6 +46,62 @@ CH929_SCENE = (
     "[[Zoan]] fruits; Drake having the [[Ryu Ryu no Mi, Model: Allosaurus|allosaurus]] model."
 )
 
+# Extraits réels : liens pipés dont le texte n'est pas un nom
+CH223_SCENE = (
+    "Just as Nami decides then to ask some more questions from the owner, Luffy and a "
+    "[[Marshall D. Teach|man]] sitting next to him both suddenly make a remark about the "
+    "cherry pie being served to them."
+)
+CH973_SCENE = (
+    "After Oden returned from his travels, Oden spent time with his [[Kouzuki Family|family]], "
+    "told [[Nine Red Scabbards|his retainers]] about [[Zou]], and listened to "
+    "[[Kouzuki Hiyori|his daughter]] music."
+)
+CH1037_SCENE = (
+    "This concerns the Five Elders as according to them, “[[Gomu Gomu no Mi|that]]” "
+    "[[Devil Fruit]] hasn’t awakened in centuries and should only be a legend."
+)
+CH1159_SCENE = (
+    "[[Magnolia|Their mother]] asks Garling to live with her on God Valley, but he declares "
+    "that will not be possible as the island will disappear very soon."
+)
+
+# Extraits réels : texte de lien à nettoyer avant d'en faire un Alias
+CH75_SCENE = (
+    "Zoro explains that they have to hurry in order to save Usopp, who has been captured by "
+    "[[Arlong|Arlong,]] before he is killed."
+)
+CH498_SCENE = (
+    "Hatchan soon asks about the location of their friend "
+    "[[Silvers Rayleigh|\"Rayleigh the Bubble Coater\"]] to get the [[Thousand Sunny]] coated."
+)
+CH927_SCENE = (
+    "[[Nico Robin|Robin]], [[Franky]], and [[Usopp]] are each having a bowl while discussing "
+    "[[Monkey D. Luffy|Luffy's]] whereabouts."
+)
+CH1123_SCENE = (
+    "The [[Giants]] note that the burst was even stronger than [[Shanks|Shanks']] despite the "
+    "lack of hostility in the Haki."
+)
+CH1046_SCENE = (
+    "Usopp retorts that he feels he needs to do something as promised to [[Izou]] to save "
+    "[[Kin'emon|Kin’emon]] and [[Kikunojo]]."
+)
+
+# Extrait réel du chapitre 620 : lien non pipé vers Edward Newgate
+CH620_SCENE = (
+    "Jinbe cuts in, saying the one who saved them from that horror was the now deceased "
+    "[[Edward Newgate]]."
+)
+
+# Extrait réel du chapitre 1044 : Joy Boy est un Character distinct de Luffy
+CH1044_JOY_BOY_SCENE = (
+    "[[Kouzuki Momonosuke|Momonosuke]], meanwhile, has told [[Yamato]] what [[Zunesha]] told "
+    "him: Luffy is [[Joy Boy]]."
+)
+
+COMMON_WORDS = frozenset({"the", "a", "an", "his", "her", "their", "this", "that"})
+
 
 # Extrait réel du chapitre 590 (abrégé) : 3 paragraphes de récit, un titre en gras
 # isolé et deux sous-titres ===...=== collés à leur paragraphe.
@@ -81,6 +137,11 @@ def bronze_record(number, long_summary):
 
 def names_at(extraction, t):
     return {row.canonical_name for row in extraction.registry_at(t)}
+
+
+def aliases_at(extraction, name, t):
+    row = next(r for r in extraction.registry_at(t) if r.canonical_name == name)
+    return set(row.aliases)
 
 
 def state_at(extraction, name, t):
@@ -191,6 +252,74 @@ class TestRegistry(unittest.TestCase):
             if r.canonical_name == "Polo Marco"
         ]
         self.assertEqual(sorted(marco_rows, key=lambda v: v[0]), [(1, 2), (3, None)])
+
+
+class TestAliases(unittest.TestCase):
+
+    def extract(self, *records):
+        return extract_entities(list(records), Reference(common_words=COMMON_WORDS))
+
+    def test_piped_text_that_looks_like_a_name_is_an_alias(self):
+        extraction = self.extract(bronze_record(552, CH552_SCENE))
+        self.assertEqual(aliases_at(extraction, "Edward Newgate", 552), {"Whitebeard"})
+        self.assertEqual(aliases_at(extraction, "Polo Marco", 552), {"Marco"})
+
+    def test_lowercase_text_is_a_mention_but_not_an_alias(self):
+        extraction = self.extract(
+            bronze_record(223, CH223_SCENE),
+            bronze_record(973, CH973_SCENE),
+            bronze_record(1037, CH1037_SCENE),
+        )
+        for name, t in [("Marshall D. Teach", 223), ("Kouzuki Hiyori", 973), ("Gomu Gomu no Mi", 1037)]:
+            self.assertEqual(aliases_at(extraction, name, t), set())
+            self.assertEqual(state_at(extraction, name, t)[2], 1)
+
+    def test_text_starting_with_a_common_word_is_not_an_alias(self):
+        extraction = self.extract(bronze_record(1159, CH1159_SCENE))
+        self.assertEqual(aliases_at(extraction, "Magnolia", 1159), set())
+        self.assertEqual(state_at(extraction, "Magnolia", 1159)[2], 1)
+
+    def test_subpage_or_section_text_is_never_an_alias(self):
+        extraction = self.extract(bronze_record(1044, CH1044_SCENE), bronze_record(444, CH444_SCENE))
+        self.assertEqual(aliases_at(extraction, "Gomu Gomu no Mi", 1044), set())
+        self.assertEqual(aliases_at(extraction, "Haki", 1044), set())
+        self.assertEqual(aliases_at(extraction, "Thousand Sunny", 444), set())
+
+    def test_link_text_is_cleaned_before_becoming_an_alias(self):
+        extraction = self.extract(
+            bronze_record(75, CH75_SCENE),
+            bronze_record(498, CH498_SCENE),
+            bronze_record(927, CH927_SCENE),
+        )
+        self.assertEqual(aliases_at(extraction, "Arlong", 1193), set())
+        self.assertEqual(
+            aliases_at(extraction, "Silvers Rayleigh", 1193), {"Rayleigh the Bubble Coater"}
+        )
+        self.assertEqual(aliases_at(extraction, "Monkey D. Luffy", 1193), {"Luffy"})
+
+    def test_possessive_and_typographic_apostrophe_are_normalised(self):
+        extraction = self.extract(bronze_record(1123, CH1123_SCENE), bronze_record(1046, CH1046_SCENE))
+        self.assertEqual(aliases_at(extraction, "Shanks", 1123), set())
+        self.assertEqual(aliases_at(extraction, "Kin'emon", 1123), set())
+
+    def test_alias_is_absent_before_its_first_use(self):
+        extraction = self.extract(bronze_record(1, CH620_SCENE), bronze_record(2, CH552_SCENE))
+        self.assertEqual(aliases_at(extraction, "Edward Newgate", 1), set())
+        self.assertEqual(aliases_at(extraction, "Edward Newgate", 2), {"Whitebeard"})
+
+    def test_alias_keeps_the_date_of_its_first_use(self):
+        extraction = self.extract(
+            bronze_record(1, CH552_SCENE), bronze_record(2, CH620_SCENE), bronze_record(3, CH552_SCENE)
+        )
+        rows = [r for r in extraction.registry if r.canonical_name == "Edward Newgate"]
+        self.assertTrue(all(r.aliases == ("Whitebeard",) for r in rows))
+
+    def test_joy_boy_and_nika_are_not_aliases_of_luffy(self):
+        extraction = self.extract(
+            bronze_record(927, CH927_SCENE), bronze_record(1044, CH1044_JOY_BOY_SCENE)
+        )
+        self.assertIn("Joy Boy", names_at(extraction, 1044))
+        self.assertTrue(aliases_at(extraction, "Monkey D. Luffy", 1044).isdisjoint({"Joy Boy", "Nika"}))
 
 
 if __name__ == "__main__":

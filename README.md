@@ -19,7 +19,8 @@ src/guess_arc/
 │   └── pipeline.py       # orchestration, état incrémental, CLI
 └── entities/             # bronze -> Scenes -> Mentions -> Registry(t) dans la gold
     ├── extraction.py     # extract_entities(chapters, reference), pure, seul point d'entrée
-    └── pipeline.py       # lecture du bronze, écriture de la gold, CLI
+    ├── pipeline.py       # lecture du bronze, écriture de la gold, CLI
+    └── common_words.txt  # mots courants : un texte de lien qui commence par l'un d'eux n'est pas un Alias
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
 ```
@@ -68,11 +69,15 @@ python -m guess_arc.entities
 Chaque paragraphe du Long Summary est une Scene ; chaque lien `[[...]]` d'une
 Scene est une Mention de l'Entity dont le Canonical name est la page cible
 (`[[Page/Sous-page]]` et `[[Page#Section]]` comptent pour la page parente).
+Le texte d'un lien pipé (`[[Edward Newgate|Whitebeard]]`) devient un Alias s'il
+ressemble à un nom : majuscule initiale, premier mot absent de
+`common_words.txt`, lien ni vers une sous-page ni vers une section. Chaque Alias
+est daté par le chapitre de sa première utilisation.
 Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
 
 - `data/gold/registry.jsonl` : Registry(t), une ligne par Entity et par changement,
   valable de `valid_from` à `valid_to` inclus (`null` : encore valable), avec
-  premier et dernier chapitre vu et nombre de Mentions jusqu'à t
+  Aliases déjà utilisés, premier et dernier chapitre vu et nombre de Mentions jusqu'à t
 - `data/gold/registry_quality.json` : rapport qualité (Scenes par chapitre)
 
 ## Tests
@@ -88,7 +93,7 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
   en apostrophes des récents (`*[[King]] ''(cover)''`) ;
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
 - l'extraction des Entities via `extract_entities` seul, sur des extraits réels
-  du bronze (Scenes, Mentions, Registry(t) sur 3 chapitres) ;
+  du bronze (Scenes, Mentions, Aliases datés, Registry(t) sur 3 chapitres) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

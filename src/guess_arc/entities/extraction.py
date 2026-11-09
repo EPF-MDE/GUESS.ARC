@@ -11,7 +11,13 @@ from dataclasses import dataclass
 
 from guess_arc.ingestion.parser import section
 
-LINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|[^\[\]]*)?\]\]")
+LINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]")
+# Texte de lien à nettoyer avant d'en faire un Alias : gras/italique, guillemets
+# englobants, apostrophe typographique, ponctuation finale et possessif
+# ("Luffy's" -> "Luffy", "Shanks'" -> "Shanks").
+WIKI_EMPHASIS_RE = re.compile(r"'{2,}")
+QUOTES = {'"': '"', "“": "”"}
+POSSESSIVE_RE = re.compile(r"(?:'s|(?<=s)')$")
 # Lignes d'un paragraphe qui ne sont pas du récit : sous-titres (===Day 1===),
 # titres en gras isolés ('''Level 2, the Beast Hell''') et images seules.
 NON_PROSE_LINE_RE = re.compile(
@@ -24,10 +30,15 @@ NON_ARTICLE_PREFIXES = {"file", "image", "category", "template", "wikipedia", "w
 @dataclass(frozen=True)
 class Reference:
     """Tout ce qui vient de l'extérieur, déjà chargé (datasets, catégories du
-    wiki, Disguises, overrides de type, mots communs). Vide tant que l'extraction
-    ne repose que sur les liens : d'ici là, tout lien d'article est une Mention,
-    Concepts compris, un Disguise est résolu dès le premier chapitre (ADR 0002)
-    et une redirection reste un Canonical name distinct de sa page cible."""
+    wiki, Disguises, overrides de type, mots communs). Tant que l'extraction
+    ne repose que sur les liens, tout lien d'article est une Mention, Concepts
+    compris, un Disguise est résolu dès le premier chapitre (ADR 0002) et une
+    redirection reste un Canonical name distinct de sa page cible.
+
+    common_words : mots en minuscules (pronoms, déterminants) ; un texte de lien
+    qui commence par l'un d'eux n'est pas un Alias ("Their mother").
+    """
+    common_words: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -35,8 +46,10 @@ class RegistryRow:
     """État d'une Entity dans Registry(t) pour valid_from <= t <= valid_to.
 
     valid_to à None : l'état vaut encore au dernier chapitre extrait.
+    aliases : Aliases déjà utilisés au chapitre valid_from, triés (ADR 0002).
     """
     canonical_name: str
+    aliases: tuple[str, ...]
     valid_from: int
     valid_to: int | None
     first_chapter_seen: int
@@ -71,6 +84,7 @@ class _Scene:
 class _Mention:
     canonical_name: str
     chapter: int
+    alias: str | None
 
 
 def _canonical_name(target: str) -> str | None:
@@ -88,6 +102,24 @@ def _canonical_name(target: str) -> str | None:
     return title[0].upper() + title[1:]
 
 
+def _alias(target: str, canonical_name: str, text: str | None,
+           common_words: frozenset[str]) -> str | None:
+    """Texte d'un lien pipé -> Alias de l'Entity, s'il ressemble à un nom."""
+    # Le texte d'un lien vers une sous-page ou une section nomme cette partie
+    # ("Gear 5"), pas l'Entity parente.
+    if text is None or "#" in target or "/" in target:
+        return None
+    text = WIKI_EMPHASIS_RE.sub("", text).replace("’", "'").strip()
+    if text[:1] in QUOTES and text.endswith(QUOTES[text[0]]):
+        text = text[1:-1].strip()
+    text = POSSESSIVE_RE.sub("", text.rstrip(",;:")).strip()
+    if not text or not text[0].isupper() or text == canonical_name:
+        return None
+    if text.split()[0].strip(".,;:").lower() in common_words:
+        return None
+    return text
+
+
 def _scenes(chapter: int, long_summary: str) -> list[_Scene]:
     """Un paragraphe du Long Summary = une Scene, une fois ôtées les lignes hors récit."""
     scenes = []
@@ -100,9 +132,10 @@ def _scenes(chapter: int, long_summary: str) -> list[_Scene]:
     return scenes
 
 
-def _mentions(scene: _Scene) -> list[_Mention]:
+def _mentions(scene: _Scene, common_words: frozenset[str]) -> list[_Mention]:
+    # Le lien reste une Mention même quand son texte n'est pas un Alias.
     return [
-        _Mention(name, scene.chapter)
+        _Mention(name, scene.chapter, _alias(m.group(1), name, m.group(2), common_words))
         for m in LINK_RE.finditer(scene.wikitext)
         if (name := _canonical_name(m.group(1))) is not None
     ]
@@ -112,18 +145,26 @@ def _registry(mentions: list[_Mention]) -> list[RegistryRow]:
     # Une ligne par Entity et par chapitre où elle est mentionnée : c'est là
     # que last_chapter_seen et mention_count changent.
     counts: dict[str, dict[int, int]] = {}
+    alias_first_use: dict[str, dict[str, int]] = {}
     for m in mentions:
         per_chapter = counts.setdefault(m.canonical_name, {})
         per_chapter[m.chapter] = per_chapter.get(m.chapter, 0) + 1
+        if m.alias is not None:
+            first_use = alias_first_use.setdefault(m.canonical_name, {})
+            first_use[m.alias] = min(first_use.get(m.alias, m.chapter), m.chapter)
 
     rows = []
     for name, per_chapter in sorted(counts.items()):
+        first_use = alias_first_use.get(name, {})
         chapters = sorted(per_chapter)
         total = 0
         for i, ch in enumerate(chapters):
             total += per_chapter[ch]
+            # Un Alias commence toujours sur une ligne : sa première utilisation
+            # est une Mention, donc un chapitre où l'état de l'Entity change.
             rows.append(RegistryRow(
                 canonical_name=name,
+                aliases=tuple(sorted(a for a, first in first_use.items() if first <= ch)),
                 valid_from=ch,
                 valid_to=chapters[i + 1] - 1 if i + 1 < len(chapters) else None,
                 first_chapter_seen=chapters[0],
@@ -140,7 +181,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     for rec in sorted(chapters, key=lambda r: r["number"]):
         scenes = _scenes(rec["number"], section(rec["wikitext"], "Long Summary"))
         scenes_per_chapter[rec["number"]] = len(scenes)
-        mentions += [m for scene in scenes for m in _mentions(scene)]
+        mentions += [m for scene in scenes for m in _mentions(scene, reference.common_words)]
     return Extraction(
         registry=_registry(mentions),
         quality=QualityReport(scenes_per_chapter=scenes_per_chapter),
