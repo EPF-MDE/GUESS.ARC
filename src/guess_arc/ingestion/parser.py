@@ -70,6 +70,17 @@ def parse_characters(char_section: str) -> list[dict]:
     return out
 
 
+def parse_groups(char_section: str) -> list[str]:
+    """Factions liées (';[[Faction]]') de la CharTable, dans l'ordre, sans doublon.
+    Les en-têtes sans lien (';Other', ';Citizens') ne désignent aucune page."""
+    groups: list[str] = []
+    for line in char_section.splitlines():
+        g = GROUP_RE.match(line.strip())
+        if g and (name := g.group(1).strip()) not in groups:
+            groups.append(name)
+    return groups
+
+
 def strip_markup(text: str) -> str:
     """Wikitexte -> texte lisible, en gardant les noms des liens."""
     text = LINK_RE.sub(r"\1", text)

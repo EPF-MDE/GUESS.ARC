@@ -67,6 +67,8 @@ def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
     entities = {row.canonical_name for row in extraction.registry}
     print(f"Bronze : {len(archive)} chapitres, {sum(scenes.values())} Scenes")
     print(f"Gold   : {registry_path} ({len(entities)} Entities, {len(extraction.registry)} lignes)")
+    if extraction.quality.recall_proxy is not None:
+        print(f"Recall proxy : {extraction.quality.recall_proxy:.1%} des Appearances ont une Mention")
     print(f"Disguise candidates à relire : {len(extraction.disguise_candidates)}")
     empty = [n for n, count in scenes.items() if count == 0]
     if empty:

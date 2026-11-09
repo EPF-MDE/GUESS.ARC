@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from guess_arc.ingestion.parser import parse_characters, section
+from guess_arc.ingestion.parser import ARC_RE, parse_characters, parse_groups, section
 
 LINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]")
 # Texte de lien à nettoyer avant d'en faire un Alias : gras/italique, guillemets
@@ -63,7 +63,12 @@ class RegistryRow:
 
 @dataclass(frozen=True)
 class QualityReport:
+    """recall_proxy : part des Characters ayant une Appearance dans la CharTable
+    qui ont aussi au moins une Mention dans le Long Summary du même chapitre
+    (None sans aucune Appearance). Ratio global, et par arc."""
     scenes_per_chapter: dict[int, int]
+    recall_proxy: float | None
+    recall_proxy_per_arc: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,15 @@ class _Mention:
     canonical_name: str
     chapter: int
     alias: str | None
+
+
+@dataclass(frozen=True)
+class _CastEntry:
+    """Présence d'un Character (Appearance, Recall ou Cover appearance) ou d'un
+    Group (en-tête de faction lié) dans la CharTable d'un chapitre. Pas une Mention."""
+    canonical_name: str
+    chapter: int
+    appearance: bool
 
 
 def _canonical_name(target: str) -> str | None:
@@ -161,9 +175,40 @@ def _mentions(scene: _Scene, common_words: frozenset[str]) -> list[_Mention]:
     ]
 
 
-def _registry(mentions: list[_Mention]) -> list[RegistryRow]:
-    # Une ligne par Entity et par chapitre où elle est mentionnée : c'est là
-    # que last_chapter_seen et mention_count changent.
+def _cast(chapter: int, char_section: str) -> list[_CastEntry]:
+    """CharTable -> Characters présents et Groups des en-têtes liés."""
+    entries = []
+    for c in parse_characters(char_section):
+        name = _canonical_name(c["name"])
+        annotations = " ".join(c["annotations"])
+        # Une présence "mentioned" ou "dream" n'est ni une Appearance, ni un
+        # Recall, ni une Cover appearance.
+        if name is not None and (c["on_panel"] or "flashback" in annotations
+                                 or "cover" in annotations):
+            entries.append(_CastEntry(name, chapter, appearance=c["on_panel"]))
+    entries += [
+        _CastEntry(name, chapter, appearance=False)
+        for group in parse_groups(char_section)
+        if (name := _canonical_name(group)) is not None
+    ]
+    return entries
+
+
+def _recall_proxy(cast: list[_CastEntry], mentions: list[_Mention],
+                  arcs: dict[int, str]) -> tuple[float | None, dict[str, float]]:
+    mentioned = {(m.canonical_name, m.chapter) for m in mentions}
+    hits: dict[str, list[bool]] = {}
+    for e in cast:
+        if e.appearance:
+            hits.setdefault(arcs[e.chapter], []).append((e.canonical_name, e.chapter) in mentioned)
+    every = [hit for arc_hits in hits.values() for hit in arc_hits]
+    overall = sum(every) / len(every) if every else None
+    return overall, {arc: sum(h) / len(h) for arc, h in sorted(hits.items())}
+
+
+def _registry(mentions: list[_Mention], cast: list[_CastEntry]) -> list[RegistryRow]:
+    # Une ligne par Entity et par chapitre où elle est vue (Mention ou CharTable) :
+    # c'est là que last_chapter_seen et mention_count changent.
     counts: dict[str, dict[int, int]] = {}
     alias_first_use: dict[str, dict[str, int]] = {}
     for m in mentions:
@@ -172,6 +217,8 @@ def _registry(mentions: list[_Mention]) -> list[RegistryRow]:
         if m.alias is not None:
             first_use = alias_first_use.setdefault(m.canonical_name, {})
             first_use[m.alias] = min(first_use.get(m.alias, m.chapter), m.chapter)
+    for e in cast:
+        counts.setdefault(e.canonical_name, {}).setdefault(e.chapter, 0)
 
     rows = []
     for name, per_chapter in sorted(counts.items()):
@@ -234,13 +281,24 @@ def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> 
 def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
     scenes_per_chapter = {}
+    arcs = {}
     mentions = []
+    cast = []
     for rec in sorted(chapters, key=lambda r: r["number"]):
-        scenes = _scenes(rec["number"], section(rec["wikitext"], "Long Summary"))
-        scenes_per_chapter[rec["number"]] = len(scenes)
+        number, wikitext = rec["number"], rec["wikitext"]
+        scenes = _scenes(number, section(wikitext, "Long Summary"))
+        scenes_per_chapter[number] = len(scenes)
+        arc = ARC_RE.search(wikitext)
+        arcs[number] = arc.group(1) if arc else "Unknown"
         mentions += [m for scene in scenes for m in _mentions(scene, reference.common_words)]
+        cast += _cast(number, section(wikitext, "Characters"))
+    recall_proxy, recall_proxy_per_arc = _recall_proxy(cast, mentions, arcs)
     return Extraction(
-        registry=_registry(mentions),
-        quality=QualityReport(scenes_per_chapter=scenes_per_chapter),
+        registry=_registry(mentions, cast),
+        quality=QualityReport(
+            scenes_per_chapter=scenes_per_chapter,
+            recall_proxy=recall_proxy,
+            recall_proxy_per_arc=recall_proxy_per_arc,
+        ),
         disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )

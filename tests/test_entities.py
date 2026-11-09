@@ -131,6 +131,68 @@ CH436_SCENE = (
     "nicknames the \"[[Thousand Sunny|King of All Beasts]]\"."
 )
 
+# Extrait réel du chapitre 1027 (Wano Country Arc) : CharTable complète et les deux
+# premiers paragraphes du Long Summary.
+CH1027_CHARACTERS = """{| class="CharTable"
+! colspan="2" |[[Pirates]]
+! Citizens
+|-
+|
+;[[Straw Hat Pirates]]
+*[[Monkey D. Luffy]]
+*[[Roronoa Zoro]]
+*[[Franky]]
+----
+;[[Roger Pirates]]
+*[[Gol D. Roger]] ''(cover)''
+*[[Shanks]] ''(cover)''
+*[[Buggy]] ''(cover)''
+|
+;[[Beasts Pirates]]
+*[[Kaidou]]
+*[[King]]
+*[[Queen]]
+----
+;[[Big Mom Pirates]]
+*[[Charlotte Perospero]]
+----
+;Other
+*[[Yamato]]
+|
+;[[Wano Country]]
+*[[Kouzuki Momonosuke]]
+*[[Kin'emon]] ''(flashback)''
+----
+;[[Mokomo Dukedom]]
+*[[Nekomamushi]]
+*[[Shishilian]]
+*[[Wanda]]
+*[[Carrot]]
+|}"""
+CH1027_LONG_SUMMARY = (
+    "Following his victory, [[Nekomamushi]] covers his eyes to return to his normal form as "
+    "[[Carrot]] hugs him in delight. He advises her and [[Wanda]] not to look at the moon or "
+    "they will transform, just as he wonders how the skies parted and allowed the moon to "
+    "return.\n\n"
+    "On the roof, [[Yamato]] and [[Kouzuki Momonosuke|Momonosuke]] watch in awe at "
+    "[[Monkey D. Luffy|Luffy]] and [[Kaidou]]'s clash, and Yamato and Momonosuke remember "
+    "[[Kouzuki Oden|Oden]] writing about how [[Gol D. Roger|Roger]] and "
+    "[[Edward Newgate|Whitebeard]]'s clash split the heavens."
+)
+# Extrait réel de la CharTable du chapitre 552 (Marineford Arc), abrégé
+CH552_CHARACTERS = """;[[Straw Hat Pirates]]
+*[[Monkey D. Luffy]]
+*[[Tony Tony Chopper]] ''(cover)''
+----
+;[[Whitebeard Pirates]]
+*[[Edward Newgate]]
+*[[Portgas D. Ace]]
+*[[Polo Marco|Marco]]
+*[[Thatch]] ''(flashback)''
+----
+;[[Red Hair Pirates]]
+*[[Shanks]] ''(flashback)''"""
+
 COMMON_WORDS = frozenset({"the", "a", "an", "his", "her", "their", "this", "that"})
 
 
@@ -155,14 +217,17 @@ CH528_LONG_SUMMARY = """The Basilisk tries to bite Luffy, at which Luffy jumps, 
 [[Boa Hancock]] comments about the heat in Impel Down, saying it was too hot. [[Domino]] points out that beyond the walls of the Chief Warden's office, was an inferno."""
 
 
-def bronze_record(number, long_summary, notes="*Note.", characters=""):
+def bronze_record(number, long_summary, notes="*Note.", characters="", arc="Test Arc"):
     """Enregistrement bronze minimal, tel que lu depuis chapters.jsonl."""
+    if not characters.startswith("{|"):
+        characters = f'{{|class="CharTable"\n|-\n|\n{characters}\n|}}'
     wikitext = (
         "{{Chapter Box\n| title = Test\n}}\n"
         "==Short Summary==\nCourt résumé.\n\n"
         f"==Long Summary==\n{long_summary}\n\n"
         f"==Quick References==\n===Chapter Notes===\n{notes}\n"
-        f'===Characters===\n{{|class="CharTable"\n|-\n|\n{characters}\n|}}\n'
+        f"===Characters===\n{characters}\n\n"
+        f"==Site Navigation==\n{{{{{arc}}}}}\n"
     )
     return {"number": number, "revid": 1, "timestamp": "2026-01-01T00:00:00Z", "wikitext": wikitext}
 
@@ -352,6 +417,55 @@ class TestAliases(unittest.TestCase):
         )
         self.assertIn("Joy Boy", names_at(extraction, 1044))
         self.assertTrue(aliases_at(extraction, "Monkey D. Luffy", 1044).isdisjoint({"Joy Boy", "Nika"}))
+
+
+class TestCast(unittest.TestCase):
+    """Chapitre 1027 (Wano) et 552 (Marineford) avec leur CharTable."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.extraction = extract_entities([
+            bronze_record(1027, CH1027_LONG_SUMMARY, characters=CH1027_CHARACTERS,
+                          arc="Wano Country Arc"),
+            bronze_record(552, CH552_SCENE, characters=CH552_CHARACTERS, arc="Marineford Arc"),
+        ], Reference())
+
+    def test_character_only_in_the_char_table_enters_the_registry(self):
+        self.assertIn("Roronoa Zoro", names_at(self.extraction, 1027))
+        self.assertIn("Shishilian", names_at(self.extraction, 1027))
+        self.assertNotIn("Roronoa Zoro", names_at(self.extraction, 552))
+        self.assertEqual(state_at(self.extraction, "Roronoa Zoro", 1027), (1027, 1027, 0))
+
+    def test_recall_and_cover_appearance_enter_the_registry(self):
+        self.assertIn("Kin'emon", names_at(self.extraction, 1027))      # (flashback)
+        self.assertIn("Buggy", names_at(self.extraction, 1027))         # (cover)
+        self.assertIn("Tony Tony Chopper", names_at(self.extraction, 552))  # (cover)
+
+    def test_char_table_presence_updates_last_chapter_seen(self):
+        # Shanks : Mention au 552, puis seulement une Cover appearance au 1027.
+        self.assertEqual(state_at(self.extraction, "Shanks", 1027), (552, 1027, 1))
+
+    def test_linked_faction_header_adds_its_group_without_a_mention(self):
+        names = names_at(self.extraction, 1027)
+        self.assertIn("Beasts Pirates", names)
+        self.assertIn("Mokomo Dukedom", names)
+        self.assertEqual(state_at(self.extraction, "Beasts Pirates", 1027)[2], 0)
+        self.assertEqual(state_at(self.extraction, "Straw Hat Pirates", 1027), (552, 1027, 0))
+
+    def test_unlinked_headers_and_column_titles_add_nothing(self):
+        names = names_at(self.extraction, 1027)
+        self.assertNotIn("Other", names)
+        self.assertNotIn("Pirates", names)
+        self.assertNotIn("Citizens", names)
+
+    def test_recall_proxy_overall_and_per_arc(self):
+        # 1027 : 13 Appearances, 7 avec une Mention (Nekomamushi, Carrot, Wanda, Yamato,
+        # Momonosuke, Luffy, Kaidou). 552 : 4 Appearances (Luffy, Newgate, Ace, Marco),
+        # 2 avec une Mention (Newgate, Marco).
+        quality = self.extraction.quality
+        self.assertAlmostEqual(quality.recall_proxy, 9 / 17)
+        self.assertEqual(quality.recall_proxy_per_arc,
+                         {"Marineford Arc": 2 / 4, "Wano Country Arc": 7 / 13})
 
 
 class TestDisguiseCandidates(unittest.TestCase):
