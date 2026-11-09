@@ -193,6 +193,57 @@ CH552_CHARACTERS = """;[[Straw Hat Pirates]]
 ;[[Red Hair Pirates]]
 *[[Shanks]] ''(flashback)''"""
 
+# Extrait réel du chapitre 1000 : deux premiers paragraphes du Long Summary (le second
+# abrégé). Le wiki ne lie Luffy, Yamato, Oden, Momonosuke qu'à leur première occurrence.
+CH1000_LONG_SUMMARY = (
+    "Finally reaching the fifth floor, [[Monkey D. Luffy|Luffy]] comes across the "
+    "[[Inuarashi Musketeer Squad]], who have cleared the way to the roof and ask him to continue "
+    "onwards. Luffy thanks [[Shishilian]] and makes his way to the roof, while also telling all "
+    "of them that he remembers how they defended [[Raizo]] with their lives, which causes "
+    "Shishilian to tear up. On the Live Floor, [[Polo Marco|Marco]] uses his flames to hold "
+    "[[Queen]] (who is shown to have a mechanical elongated neck) and [[King]] back while he "
+    "throws [[Roronoa Zoro|Zoro]] up to the roof, much to his chagrin though.\n\n"
+    "In the storage room, [[Yamato]] returns [[Kouzuki Oden|Oden]]'s journal to "
+    "[[Kouzuki Momonosuke|Momonosuke]], revealing he had believed he had died twenty years ago, "
+    "and he never expected a day he could meet him. Yamato also reveals he found the journal "
+    "near the river at the foot of Oden's Castle that day long ago and says that someone must "
+    "have protected it, since it has written about his life and time traveling the world. "
+    "Yamato asks if Momonosuke was born on [[Edward Newgate|Whitebeard]]'s ship and he even "
+    "sailed on [[Gol D. Roger|Roger]]'s ship and explains that Oden and the [[Roger Pirates]] "
+    "predicted that a little over twenty years in the future, a new generation of pirates would "
+    "advance to the [[New World]], and he believe they were talking about this very moment."
+)
+# Extrait réel de la CharTable du chapitre 1000, abrégé : Oden n'y est pas.
+CH1000_CHARACTERS = """;[[Straw Hat Pirates]]
+*[[Monkey D. Luffy]]
+*[[Roronoa Zoro]]
+----
+;Other
+*[[Yamato]]
+|
+;[[Beasts Pirates]]
+*[[King]]
+*[[Queen]]
+----
+;[[Whitebeard Pirates]]
+*[[Polo Marco|Marco]]
+|
+;[[Wano Country]]
+*[[Kouzuki Momonosuke]]
+*[[Raizo]]
+----
+;[[Mokomo Dukedom]]
+*[[Shishilian]]"""
+# Extraits réels : "queen" en minuscule (ch. 593), "Queen" non lié (ch. 991)
+CH593_LOWERCASE_QUEEN = (
+    "After arguing with the queen and getting beaten up by him, Sanji manages to learn the news "
+    "regarding Luffy in a newspaper, being astonished by it."
+)
+CH991_UNLINKED_QUEEN = (
+    "However, bullets suddenly come flying down onto the Live Floor from above, and Queen calls "
+    "out to Drake from the Live Stage while holding a Gatling gun."
+)
+
 COMMON_WORDS = frozenset({"the", "a", "an", "his", "her", "their", "this", "that"})
 
 
@@ -442,8 +493,9 @@ class TestCast(unittest.TestCase):
         self.assertIn("Tony Tony Chopper", names_at(self.extraction, 552))  # (cover)
 
     def test_char_table_presence_updates_last_chapter_seen(self):
-        # Shanks : Mention au 552, puis seulement une Cover appearance au 1027.
-        self.assertEqual(state_at(self.extraction, "Shanks", 1027), (552, 1027, 1))
+        # Shanks : 2 Mentions au 552 (le lien et "Shanks is coming"), puis seulement
+        # une Cover appearance au 1027.
+        self.assertEqual(state_at(self.extraction, "Shanks", 1027), (552, 1027, 2))
 
     def test_linked_faction_header_adds_its_group_without_a_mention(self):
         names = names_at(self.extraction, 1027)
@@ -466,6 +518,65 @@ class TestCast(unittest.TestCase):
         self.assertAlmostEqual(quality.recall_proxy, 9 / 17)
         self.assertEqual(quality.recall_proxy_per_arc,
                          {"Marineford Arc": 2 / 4, "Wano Country Arc": 7 / 13})
+
+
+def mention_count(extraction, name, t):
+    return state_at(extraction, name, t)[2]
+
+
+class TestAliasMatch(unittest.TestCase):
+
+    def test_unlinked_occurrences_of_linked_entities_are_mentions(self):
+        extraction = extract_entities([bronze_record(1000, CH1000_LONG_SUMMARY)], Reference())
+        self.assertEqual(mention_count(extraction, "Monkey D. Luffy", 1000), 2)
+        self.assertEqual(mention_count(extraction, "Shishilian", 1000), 2)
+        self.assertEqual(mention_count(extraction, "Yamato", 1000), 3)
+        self.assertEqual(mention_count(extraction, "Kouzuki Oden", 1000), 3)
+        self.assertEqual(mention_count(extraction, "Kouzuki Momonosuke", 1000), 2)
+
+    def test_each_mention_carries_its_source(self):
+        extraction = extract_entities([bronze_record(1000, CH1000_LONG_SUMMARY)], Reference())
+        # 15 liens d'articles ; Luffy, Shishilian, Momonosuke x1, Yamato, Oden x2 non liés.
+        self.assertEqual(extraction.quality.mentions_by_source, {"link": 15, "alias_match": 7})
+
+    def test_match_is_case_sensitive(self):
+        extraction = extract_entities([bronze_record(
+            1000, CH1000_LONG_SUMMARY + "\n\n" + CH593_LOWERCASE_QUEEN + " " + CH991_UNLINKED_QUEEN
+        )], Reference())
+        self.assertEqual(mention_count(extraction, "Queen", 1000), 2)  # le lien + "Queen calls"
+
+    def test_entity_not_linked_in_the_chapter_is_not_matched(self):
+        extraction = extract_entities([
+            bronze_record(1000, CH1000_LONG_SUMMARY),
+            bronze_record(991, CH991_UNLINKED_QUEEN),
+        ], Reference())
+        self.assertNotIn("Queen", names_at(extraction, 991))
+
+    def test_alias_not_yet_dated_is_not_matched(self):
+        # ch. 1 : [[Edward Newgate]] lié, "Whitebeard" écrit sans lien, pas encore un Alias.
+        # ch. 2 : [[Edward Newgate|Whitebeard]] date l'Alias ; ses occurrences non liées comptent.
+        ch1 = CH620_SCENE + "\n\n" + CH590_LONG_SUMMARY
+        ch2 = CH552_SCENE + "\n\n" + CH590_LONG_SUMMARY
+        extraction = extract_entities([bronze_record(1, ch1), bronze_record(2, ch2)], Reference())
+        # ch. 1 : le lien + "Edward Newgate" en clair (Canonical name), pas "Whitebeard".
+        self.assertEqual(mention_count(extraction, "Edward Newgate", 1), 2)
+        # ch. 2 : le lien, "Whitebeard's men", "The Whitebeard and..." et "Edward Newgate".
+        self.assertEqual(mention_count(extraction, "Edward Newgate", 2), 6)
+
+    def test_precision_proxy_and_suspicious_aliases(self):
+        extraction = extract_entities([
+            bronze_record(1000, CH1000_LONG_SUMMARY, characters=CH1000_CHARACTERS),
+            # Oden est un Character : il figure dans une autre CharTable.
+            bronze_record(960, CH620_SCENE, characters="*[[Kouzuki Oden]]"),
+        ], Reference())
+        quality = extraction.quality
+        # 7 Mentions par Alias match de Characters, dont 5 dans le Cast du 1000
+        # (Oden x2 n'y est pas).
+        self.assertAlmostEqual(quality.precision_proxy, 5 / 7)
+        top = quality.suspicious_aliases[0]
+        self.assertEqual((top.alias, top.canonical_name, top.matches, top.outside_cast),
+                         ("Oden", "Kouzuki Oden", 2, 2))
+        self.assertTrue(all(s.outside_cast > 0 for s in quality.suspicious_aliases))
 
 
 class TestDisguiseCandidates(unittest.TestCase):

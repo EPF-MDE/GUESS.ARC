@@ -73,6 +73,10 @@ Le texte d'un lien pipé (`[[Edward Newgate|Whitebeard]]`) devient un Alias s'il
 ressemble à un nom : majuscule initiale, premier mot absent de
 `common_words.txt`, lien ni vers une sous-page ni vers une section. Chaque Alias
 est daté par le chapitre de sa première utilisation.
+Le wiki ne liant une Entity qu'à sa première occurrence dans la page, ses
+occurrences non liées sont retrouvées par Alias match : dans chaque Scene, on
+cherche (sensible à la casse) le Canonical name et les Aliases déjà datés des
+Entities liées dans le même chapitre.
 Le Cast vient de la CharTable : un Character avec une Appearance, un Recall ou
 une Cover appearance entre dans Registry(t) à ce chapitre, même sans Mention ;
 un en-tête de faction lié (`;[[Straw Hat Pirates]]`) y ajoute son Group, sans
@@ -84,7 +88,10 @@ Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-re
   Aliases déjà utilisés, premier et dernier chapitre vu et nombre de Mentions jusqu'à t
 - `data/gold/registry_quality.json` : rapport qualité (Scenes par chapitre ;
   recall proxy, global et par arc : part des Characters avec une Appearance dans
-  la CharTable qui ont au moins une Mention dans le Long Summary du chapitre)
+  la CharTable qui ont au moins une Mention dans le Long Summary du chapitre ;
+  Mentions par source, lien ou Alias match ; precision proxy : part des Alias
+  matches de Characters qui tombent dans le Cast du chapitre ; les 20 Aliases
+  les plus suspects, ceux qui tombent le plus souvent hors du Cast)
 - `data/gold/disguise_candidates.csv` : Disguises possibles, triés par nombre de
   liens. Un candidat est un Alias de Character qui ne partage aucun mot avec son
   Canonical name (`Kyoshiro` -> Denjiro), relevé dans le Long Summary, la CharTable
@@ -104,8 +111,8 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
   en apostrophes des récents (`*[[King]] ''(cover)''`) ;
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
 - l'extraction des Entities via `extract_entities` seul, sur des extraits réels
-  du bronze (Scenes, Mentions, Aliases datés, Cast de la CharTable, recall
-  proxy, Registry(t) sur 3 chapitres, Disguise candidates) ;
+  du bronze (Scenes, Mentions, Aliases datés, Alias match, Cast de la
+  CharTable, recall et precision proxies, Registry(t) sur 3 chapitres, Disguise candidates) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

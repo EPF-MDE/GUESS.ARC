@@ -62,13 +62,30 @@ class RegistryRow:
 
 
 @dataclass(frozen=True)
+class SuspiciousAlias:
+    """Forme de surface dont les Alias matches tombent sur un Character hors du Cast."""
+    alias: str
+    canonical_name: str
+    matches: int
+    outside_cast: int
+
+
+@dataclass(frozen=True)
 class QualityReport:
     """recall_proxy : part des Characters ayant une Appearance dans la CharTable
     qui ont aussi au moins une Mention dans le Long Summary du même chapitre
-    (None sans aucune Appearance). Ratio global, et par arc."""
+    (None sans aucune Appearance). Ratio global, et par arc.
+
+    precision_proxy : part des Mentions par Alias match de Characters dont le
+    Character est dans le Cast du chapitre (Appearance, Recall ou Cover appearance).
+    suspicious_aliases : les 20 formes qui tombent le plus souvent hors du Cast.
+    """
     scenes_per_chapter: dict[int, int]
     recall_proxy: float | None
     recall_proxy_per_arc: dict[str, float]
+    mentions_by_source: dict[str, int]
+    precision_proxy: float | None
+    suspicious_aliases: list[SuspiciousAlias]
 
 
 @dataclass(frozen=True)
@@ -107,9 +124,13 @@ class _Scene:
 
 @dataclass(frozen=True)
 class _Mention:
+    """source : "link" (lien du wiki) ou "alias_match" (occurrence non liée).
+    alias : Alias fourni par un lien pipé ; surface : texte trouvé par Alias match."""
     canonical_name: str
     chapter: int
     alias: str | None
+    source: str = "link"
+    surface: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +140,7 @@ class _CastEntry:
     canonical_name: str
     chapter: int
     appearance: bool
+    group: bool = False
 
 
 def _canonical_name(target: str) -> str | None:
@@ -187,7 +209,7 @@ def _cast(chapter: int, char_section: str) -> list[_CastEntry]:
                                  or "cover" in annotations):
             entries.append(_CastEntry(name, chapter, appearance=c["on_panel"]))
     entries += [
-        _CastEntry(name, chapter, appearance=False)
+        _CastEntry(name, chapter, appearance=False, group=True)
         for group in parse_groups(char_section)
         if (name := _canonical_name(group)) is not None
     ]
@@ -206,17 +228,77 @@ def _recall_proxy(cast: list[_CastEntry], mentions: list[_Mention],
     return overall, {arc: sum(h) / len(h) for arc, h in sorted(hits.items())}
 
 
-def _registry(mentions: list[_Mention], cast: list[_CastEntry]) -> list[RegistryRow]:
+def _alias_first_use(mentions: list[_Mention]) -> dict[str, dict[str, int]]:
+    """Canonical name -> {Alias: chapitre de sa première utilisation}."""
+    first_use: dict[str, dict[str, int]] = {}
+    for m in mentions:
+        if m.alias is not None:
+            per_alias = first_use.setdefault(m.canonical_name, {})
+            per_alias[m.alias] = min(per_alias.get(m.alias, m.chapter), m.chapter)
+    return first_use
+
+
+def _alias_matches(chapter: int, scenes: list[_Scene], linked: list[_Mention],
+                   alias_first_use: dict[str, dict[str, int]]) -> list[_Mention]:
+    """Occurrences non liées des Entities liées dans ce chapitre.
+
+    Le wiki ne lie une Entity qu'à sa première occurrence dans la page. On cherche
+    donc, sensible à la casse, le Canonical name et les Aliases déjà datés au
+    chapitre (ADR 0002) de chaque Entity liée dans le même chapitre.
+    """
+    owners: dict[str, set[str]] = {}
+    for name in {m.canonical_name for m in linked}:
+        dated = [a for a, first in alias_first_use.get(name, {}).items() if first <= chapter]
+        for form in [name, *dated]:
+            owners.setdefault(form, set()).add(name)
+    # Une forme partagée par deux Entities liées ("Lucy") ne désigne personne de sûr.
+    forms = {form: names.pop() for form, names in owners.items() if len(names) == 1}
+    if not forms:
+        return []
+    # Formes longues d'abord : "Monkey D. Luffy" avant "Luffy".
+    pattern = re.compile(
+        r"(?<!\w)(?:" + "|".join(map(re.escape, sorted(forms, key=len, reverse=True))) + r")(?!\w)"
+    )
+    matches = []
+    for scene in scenes:
+        # Les liens sont déjà des Mentions : on les blanchit, longueur conservée.
+        text = LINK_RE.sub(lambda m: " " * len(m.group(0)), scene.wikitext).replace("’", "'")
+        matches += [
+            _Mention(forms[m.group(0)], chapter, alias=None, source="alias_match",
+                     surface=m.group(0))
+            for m in pattern.finditer(text)
+        ]
+    return matches
+
+
+def _precision_proxy(mentions: list[_Mention], cast: list[_CastEntry]
+                     ) -> tuple[float | None, list[SuspiciousAlias]]:
+    characters = {e.canonical_name for e in cast if not e.group}
+    in_cast = {(e.canonical_name, e.chapter) for e in cast if not e.group}
+    per_form: dict[tuple[str, str], list[bool]] = {}
+    for m in mentions:
+        if m.source == "alias_match" and m.canonical_name in characters:
+            per_form.setdefault((m.surface, m.canonical_name), []).append(
+                (m.canonical_name, m.chapter) in in_cast
+            )
+    every = [hit for hits in per_form.values() for hit in hits]
+    precision = sum(every) / len(every) if every else None
+    suspicious = [
+        SuspiciousAlias(form, name, len(hits), hits.count(False))
+        for (form, name), hits in per_form.items() if not all(hits)
+    ]
+    suspicious.sort(key=lambda s: (-s.outside_cast, -s.outside_cast / s.matches, s.alias))
+    return precision, suspicious[:20]
+
+
+def _registry(mentions: list[_Mention], cast: list[_CastEntry],
+              alias_first_use: dict[str, dict[str, int]]) -> list[RegistryRow]:
     # Une ligne par Entity et par chapitre où elle est vue (Mention ou CharTable) :
     # c'est là que last_chapter_seen et mention_count changent.
     counts: dict[str, dict[int, int]] = {}
-    alias_first_use: dict[str, dict[str, int]] = {}
     for m in mentions:
         per_chapter = counts.setdefault(m.canonical_name, {})
         per_chapter[m.chapter] = per_chapter.get(m.chapter, 0) + 1
-        if m.alias is not None:
-            first_use = alias_first_use.setdefault(m.canonical_name, {})
-            first_use[m.alias] = min(first_use.get(m.alias, m.chapter), m.chapter)
     for e in cast:
         counts.setdefault(e.canonical_name, {}).setdefault(e.chapter, 0)
 
@@ -280,25 +362,41 @@ def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> 
 
 def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
-    scenes_per_chapter = {}
+    scenes_by_chapter = {}
     arcs = {}
-    mentions = []
+    linked: dict[int, list[_Mention]] = {}
     cast = []
     for rec in sorted(chapters, key=lambda r: r["number"]):
         number, wikitext = rec["number"], rec["wikitext"]
         scenes = _scenes(number, section(wikitext, "Long Summary"))
-        scenes_per_chapter[number] = len(scenes)
+        scenes_by_chapter[number] = scenes
         arc = ARC_RE.search(wikitext)
         arcs[number] = arc.group(1) if arc else "Unknown"
-        mentions += [m for scene in scenes for m in _mentions(scene, reference.common_words)]
+        linked[number] = [m for s in scenes for m in _mentions(s, reference.common_words)]
         cast += _cast(number, section(wikitext, "Characters"))
+
+    # Les Aliases sont datés sur tous les liens avant de servir à l'Alias match.
+    link_mentions = [m for ms in linked.values() for m in ms]
+    alias_first_use = _alias_first_use(link_mentions)
+    mentions = link_mentions + [
+        m for number, scenes in scenes_by_chapter.items()
+        for m in _alias_matches(number, scenes, linked[number], alias_first_use)
+    ]
+
     recall_proxy, recall_proxy_per_arc = _recall_proxy(cast, mentions, arcs)
+    precision_proxy, suspicious_aliases = _precision_proxy(mentions, cast)
     return Extraction(
-        registry=_registry(mentions, cast),
+        registry=_registry(mentions, cast, alias_first_use),
         quality=QualityReport(
-            scenes_per_chapter=scenes_per_chapter,
+            scenes_per_chapter={n: len(s) for n, s in scenes_by_chapter.items()},
             recall_proxy=recall_proxy,
             recall_proxy_per_arc=recall_proxy_per_arc,
+            mentions_by_source={
+                source: sum(m.source == source for m in mentions)
+                for source in ("link", "alias_match")
+            },
+            precision_proxy=precision_proxy,
+            suspicious_aliases=suspicious_aliases,
         ),
         disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )

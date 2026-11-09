@@ -69,6 +69,11 @@ def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
     print(f"Gold   : {registry_path} ({len(entities)} Entities, {len(extraction.registry)} lignes)")
     if extraction.quality.recall_proxy is not None:
         print(f"Recall proxy : {extraction.quality.recall_proxy:.1%} des Appearances ont une Mention")
+    by_source = extraction.quality.mentions_by_source
+    print(f"Mentions : {by_source['link']} par lien, {by_source['alias_match']} par Alias match")
+    if extraction.quality.precision_proxy is not None:
+        print(f"Precision proxy : {extraction.quality.precision_proxy:.1%} des Alias matches "
+              "de Characters tombent dans le Cast")
     print(f"Disguise candidates à relire : {len(extraction.disguise_candidates)}")
     empty = [n for n, count in scenes.items() if count == 0]
     if empty:
