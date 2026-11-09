@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -147,6 +148,10 @@ def rebuild_silver(data_dir: Path = paths.DATA_DIR) -> int:
 
 
 def main() -> None:
+    # La console Windows n'est pas en UTF-8 par défaut : sans ça, les accents
+    # des messages (et de --help) s'affichent mal.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--max-chapter", type=int, default=1193)
