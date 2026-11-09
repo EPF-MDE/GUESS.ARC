@@ -2,31 +2,33 @@
 
 [![tests](https://github.com/EPF-MDE/GUESS.ARC/actions/workflows/tests.yml/badge.svg)](https://github.com/EPF-MDE/GUESS.ARC/actions/workflows/tests.yml)
 
-Prédire le contenu du chapitre n+1 de *One Piece* à partir des chapitres 1 à n.
+Predict the content of *One Piece* chapter n+1 from chapters 1 to n.
 
-Le dépôt contient aujourd'hui la chaîne de données jusqu'à la couche **silver**.
-La modélisation (architecture séquentielle à base de GRU) viendra s'y brancher
-dans un second temps. L'ancienne approche par taxonomie simple a été abandonnée.
+The repository currently holds the data pipeline up to the **silver** layer.
+Modelling (a sequential, GRU-based architecture) will plug into it in a later
+step. The earlier simple-taxonomy approach has been dropped.
 
-## Structure
+## Layout
 
 ```
 src/guess_arc/
-├── paths.py              # emplacements data/bronze, data/silver, data/state.json
-└── ingestion/            # wiki Fandom EN -> bronze -> silver
-    ├── wiki_client.py    # appels à l'API MediaWiki
-    ├── parser.py         # wikitexte d'un chapitre -> Chapter
+├── paths.py              # locations of data/bronze, data/silver, data/state.json
+└── ingestion/            # English Fandom wiki -> bronze -> silver
+    ├── wiki_client.py    # MediaWiki API calls
+    ├── parser.py         # a chapter's wikitext -> Chapter
     ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
-    ├── validation.py     # contrat de format bronze / silver
-    └── pipeline.py       # orchestration, état incrémental, CLI
-tests/                    # tests sans réseau
-docs/adr/                 # décisions d'architecture
+    ├── validation.py     # bronze / silver format contract
+    └── pipeline.py       # orchestration, incremental state, CLI
+scripts/quality/          # corpus quality checks (see QUALITY.md)
+tests/                    # network-free tests
+docs/adr/                 # architecture decision records
+QUALITY.md                # quality requirements, evidence and client validation
 ```
 
-Les futures étapes (features, modèle) seront ajoutées comme sous-packages de
-`guess_arc`, à côté d'`ingestion`. Elles liront la silver via `guess_arc.paths`.
+Future stages (features, model) will be added as sub-packages of `guess_arc`,
+next to `ingestion`. They will read the silver layer through `guess_arc.paths`.
 
-## Environnement
+## Setup
 
 ```bash
 python -m venv .venv
@@ -35,27 +37,41 @@ python -m venv .venv
 # macOS / Linux
 source .venv/bin/activate
 
-pip install -r requirements.txt   # installe guess_arc en mode éditable + pytest
+pip install -r requirements.txt   # installs guess_arc in editable mode + pytest
 ```
 
 ## Ingestion
 
 ```bash
-# run complet : tous les chapitres, ~24 requêtes, moins d'une minute
-python -m guess_arc.ingestion --max-chapter 1194
+# full run: every chapter, ~24 requests, under a minute
+python -m guess_arc.ingestion --max-chapter 1193
 
-# mise à jour hebdomadaire : ne retraite que les pages dont la révision a changé
+# weekly update: only reprocesses pages whose revision has changed
 python -m guess_arc.ingestion --max-chapter 1200 --incremental
 
-# après une modification du parseur : régénère la silver depuis le bronze, sans réseau
+# after a parser change: rebuild silver from bronze, no network
 python -m guess_arc.ingestion --rebuild-silver
 ```
 
-Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir`) :
+Outputs always go under `data/` at the repo root (override with `--data-dir`):
 
-- `data/bronze/chapters.jsonl` : le wikitexte brut archivé, une ligne par chapitre
-- `data/silver/chapter_NNNN.md` : un fichier par chapitre, front-matter YAML (titre, arc, personnages avec faction et `on_panel`) puis résumé court, résumé long et notes
-- `data/state.json` : les `revid` connus, pour les runs incrémentaux
+- `data/bronze/chapters.jsonl`: the archived raw wikitext, one line per chapter
+- `data/silver/chapter_NNNN.md`: one file per chapter, a YAML front-matter (title,
+  arc, characters with their faction and `on_panel`) followed by the short summary,
+  the long summary and the notes
+- `data/state.json`: the known `revid`s, for incremental runs
+
+## Quality checks
+
+```bash
+python scripts/quality/check_silver.py [--silver data/silver] [--expected 1193]
+```
+
+Checks that the silver corpus is a sound input for the next stages: no missing
+chapters, a valid front-matter in every file, a non-empty long summary, and a
+`character_count` that matches the listed characters. Standard library only, no
+network; exits with code 1 if anything fails. The requirements it covers
+(REQ-5 to REQ-8) and the results are tracked in [QUALITY.md](QUALITY.md).
 
 ## Tests
 
@@ -63,23 +79,23 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 pytest
 ```
 
-Aucun accès réseau n'est nécessaire. La CI GitHub Actions (`.github/workflows/tests.yml`)
-lance la même commande à chaque PR et à chaque push sur `main`, sous Ubuntu et Windows,
-en Python 3.10 et 3.12 ; `data/` n'y existe pas, donc les contrôles du corpus réel sont
-ignorés (`pytest -rs` affiche pourquoi). Les tests couvrent :
+No network access is needed. GitHub Actions CI (`.github/workflows/tests.yml`)
+runs the same command on every PR and every push to `main`, on Ubuntu and Windows,
+with Python 3.10 and 3.12. `data/` doesn't exist there, so the checks on the real
+corpus are skipped (`pytest -rs` shows why). The tests cover:
 
-- le parseur, sur des extraits réels des chapitres 500 et 1193 : annotations
-  en parenthèses nues des anciens chapitres (`*[[Kalifa]] (cover)`) et
-  en apostrophes des récents (`*[[King]] ''(cover)''`) ;
-- le contrat de format bronze et silver, sur des fixtures synthétiques ;
-- le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
-  (ignoré si les données n'ont pas encore été générées).
+- the parser, on real excerpts from chapters 500 and 1193: bare-parenthesis
+  annotations in older chapters (`*[[Kalifa]] (cover)`) and quoted ones in
+  recent chapters (`*[[King]] ''(cover)''`);
+- the bronze and silver format contract, on synthetic fixtures;
+- a check of every file in `data/bronze/` and `data/silver/`
+  (skipped if the data hasn't been generated yet).
 
-## Source de données
+## Data source
 
-Wiki One Piece anglais uniquement. Les sources françaises et japonaises sont
-écartées, voir [ADR 0001](docs/adr/0001-source-wiki-fandom-anglais.md).
+English One Piece wiki only. French and Japanese sources are ruled out, see
+[ADR 0001](docs/adr/0001-source-wiki-fandom-anglais.md).
 
-Le contenu du wiki Fandom est sous licence CC BY-SA : usage académique avec
-attribution. Le client envoie un `User-Agent` identifiant le projet et limite
-son débit.
+Fandom wiki content is licensed under CC BY-SA: academic use with attribution.
+The client sends a `User-Agent` identifying the project and rate-limits its
+requests.

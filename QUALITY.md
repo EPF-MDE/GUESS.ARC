@@ -164,7 +164,7 @@ rerun for this report.
 
 | Document | For whom | Status |
 |---|---|---|
-| `README.md` | Anyone cloning the repo: setup, ingestion, running the checks | Exists; "Vérifications qualité" section added this week. POC usage to be added (REQ-17). |
+| `README.md` | Anyone cloning the repo: setup, ingestion, running the checks | Exists; "Quality checks" section added this week. POC usage to be added (REQ-17). |
 | `CONTEXT.md` | Everyone: the project's vocabulary | On `search/taxonomy`; to bring to `main`. |
 | `docs/adr/` | Future maintainers: why the structure is what it is | ADRs 0001–0006 (taxonomy) on `search/taxonomy`; ADR 0001 (wiki source) on `architecture`. To bring to `main`. |
 | `docs/taxonomy-schema.md` | Reference for the taxonomy shown on 2026-10-23 | On `search/taxonomy`; no longer extended, since the taxonomy route was dropped. |
