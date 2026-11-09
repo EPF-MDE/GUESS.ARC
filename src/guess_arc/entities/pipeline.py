@@ -2,7 +2,8 @@
 One Piece — extraction des Entities, du bronze à Registry(t) dans la gold.
 
 Gold : registry.jsonl (une ligne par Entity et par changement, datée par
-valid_from / valid_to) et registry_quality.json (rapport qualité).
+valid_from / valid_to), registry_quality.json (rapport qualité) et
+disguise_candidates.csv (Disguises possibles, à relire par un humain).
 
 Usage :
     python -m guess_arc.entities
@@ -11,6 +12,8 @@ Usage :
 from __future__ import annotations
 
 import argparse
+import csv
+import dataclasses
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -18,7 +21,7 @@ from pathlib import Path
 from guess_arc import paths
 from guess_arc.ingestion.pipeline import load_bronze
 
-from .extraction import Extraction, Reference, extract_entities
+from .extraction import DisguiseCandidate, Extraction, Reference, extract_entities
 
 
 def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
@@ -30,7 +33,20 @@ def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
     (gold_dir / "registry_quality.json").write_text(
         json.dumps(asdict(extraction.quality), indent=2), encoding="utf-8"
     )
+    write_disguise_candidates(extraction, gold_dir / "disguise_candidates.csv")
     return registry_path
+
+
+def write_disguise_candidates(extraction: Extraction, path: Path) -> None:
+    """Liste à relire : régénérée à chaque run, donc à ne pas éditer en place.
+    Les Disguises confirmés sont recopiés ailleurs, avec leur Revelation (ENT-08)."""
+    fields = [f.name for f in dataclasses.fields(DisguiseCandidate)]
+    # utf-8-sig : le CSV s'ouvre avec les bons accents dans Excel.
+    with path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for candidate in extraction.disguise_candidates:
+            writer.writerow(asdict(candidate))
 
 
 COMMON_WORDS_PATH = Path(__file__).with_name("common_words.txt")
@@ -51,6 +67,7 @@ def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
     entities = {row.canonical_name for row in extraction.registry}
     print(f"Bronze : {len(archive)} chapitres, {sum(scenes.values())} Scenes")
     print(f"Gold   : {registry_path} ({len(entities)} Entities, {len(extraction.registry)} lignes)")
+    print(f"Disguise candidates à relire : {len(extraction.disguise_candidates)}")
     empty = [n for n, count in scenes.items() if count == 0]
     if empty:
         print(f"Chapitres sans Scene : {empty}")

@@ -100,6 +100,37 @@ CH1044_JOY_BOY_SCENE = (
     "him: Luffy is [[Joy Boy]]."
 )
 
+# Extraits réels de Disguises, dans les trois sections lues pour les candidats
+CH919_SCENE = (
+    "Meanwhile, the money changer [[Denjiro|Kyoshiro]], while intoxicated, starts to laugh as "
+    "he recalls a situation that Orochi has found himself in."
+)
+CH919_CHARACTERS = "*[[Denjiro|Kyoshiro]]"
+CH927_SCENE_KOMURASAKI = (
+    "She goes on to talk about the most famous courtesan in the country, "
+    "[[Kouzuki Hiyori|Komurasaki]]."
+)
+CH927_NOTES = "**She works as a kamuro for the courtesan [[Kouzuki Hiyori|Komurasaki]]."
+CH909_CHARACTERS = "*[[Kouzuki Hiyori|Komurasaki]]"
+CH929_NOTES = (
+    "*[[Nico Robin|Robin]], [[Kouzuki Hiyori|Komurasaki]], and [[Denjiro|Kyoshiro]] are at "
+    "Orochi's banquet."
+)
+CH114_SCENE = (
+    "The person is the mysterious figure that came out of explosion and is "
+    "[[Nico Robin|Miss All Sunday]]."
+)
+CH114_NOTES = "*[[Nico Robin|Miss All Sunday]] is introduced."
+CH114_CHARACTERS = "*[[Nico Robin|Miss All Sunday]]"
+CH731_CHARACTERS = '*[[Sabo|"Lucy"]]'
+CH735_NOTES = '*[[Sabo|"Lucy"]] enters the next match of the tournament.'
+CH234_CHARACTERS = "*[[Polo Marco|Marco]]"
+# Extrait réel du chapitre 436 (début abrégé) : surnom d'un navire, pas d'un Character
+CH436_SCENE = (
+    "[[Iceburg]] instead wakes, introducing the Straw Hats to their new ship, which he "
+    "nicknames the \"[[Thousand Sunny|King of All Beasts]]\"."
+)
+
 COMMON_WORDS = frozenset({"the", "a", "an", "his", "her", "their", "this", "that"})
 
 
@@ -124,13 +155,14 @@ CH528_LONG_SUMMARY = """The Basilisk tries to bite Luffy, at which Luffy jumps, 
 [[Boa Hancock]] comments about the heat in Impel Down, saying it was too hot. [[Domino]] points out that beyond the walls of the Chief Warden's office, was an inferno."""
 
 
-def bronze_record(number, long_summary):
+def bronze_record(number, long_summary, notes="*Note.", characters=""):
     """Enregistrement bronze minimal, tel que lu depuis chapters.jsonl."""
     wikitext = (
         "{{Chapter Box\n| title = Test\n}}\n"
         "==Short Summary==\nCourt résumé.\n\n"
         f"==Long Summary==\n{long_summary}\n\n"
-        "==Quick References==\n===Chapter Notes===\n*Note.\n"
+        f"==Quick References==\n===Chapter Notes===\n{notes}\n"
+        f'===Characters===\n{{|class="CharTable"\n|-\n|\n{characters}\n|}}\n'
     )
     return {"number": number, "revid": 1, "timestamp": "2026-01-01T00:00:00Z", "wikitext": wikitext}
 
@@ -320,6 +352,57 @@ class TestAliases(unittest.TestCase):
         )
         self.assertIn("Joy Boy", names_at(extraction, 1044))
         self.assertTrue(aliases_at(extraction, "Monkey D. Luffy", 1044).isdisjoint({"Joy Boy", "Nika"}))
+
+
+class TestDisguiseCandidates(unittest.TestCase):
+    """Chapitres réels où les liens du wiki résolvent des Disguises."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.extraction = extract_entities([
+            bronze_record(114, CH114_SCENE, notes=CH114_NOTES, characters=CH114_CHARACTERS),
+            bronze_record(234, CH552_SCENE, characters=CH234_CHARACTERS),
+            bronze_record(436, CH436_SCENE),
+            bronze_record(731, CH620_SCENE, characters=CH731_CHARACTERS),
+            bronze_record(735, CH620_SCENE, notes=CH735_NOTES),
+            bronze_record(909, CH620_SCENE, characters=CH909_CHARACTERS),
+            bronze_record(919, CH919_SCENE, characters=CH919_CHARACTERS),
+            bronze_record(927, CH927_SCENE_KOMURASAKI, notes=CH927_NOTES),
+            bronze_record(929, CH620_SCENE, notes=CH929_NOTES),
+        ], Reference(common_words=COMMON_WORDS))
+        cls.candidates = {
+            (c.alias, c.canonical_name): c for c in cls.extraction.disguise_candidates
+        }
+
+    def test_hidden_identities_are_candidates(self):
+        for pair in [("Kyoshiro", "Denjiro"), ("Komurasaki", "Kouzuki Hiyori"),
+                     ("Lucy", "Sabo"), ("Miss All Sunday", "Nico Robin")]:
+            self.assertIn(pair, self.candidates)
+
+    def test_plain_aliases_are_not_candidates(self):
+        self.assertNotIn(("Marco", "Polo Marco"), self.candidates)
+        self.assertNotIn(("Robin", "Nico Robin"), self.candidates)
+
+    def test_only_characters_are_candidates(self):
+        # Thousand Sunny n'est dans aucune CharTable : ce n'est pas un Character.
+        self.assertNotIn(("King of All Beasts", "Thousand Sunny"), self.candidates)
+
+    def test_links_are_counted_in_long_summary_char_table_and_notes(self):
+        kyoshiro = self.candidates[("Kyoshiro", "Denjiro")]
+        self.assertEqual(
+            (kyoshiro.link_count, kyoshiro.first_chapter, kyoshiro.last_chapter), (3, 919, 929)
+        )
+        lucy = self.candidates[("Lucy", "Sabo")]
+        self.assertEqual((lucy.link_count, lucy.first_chapter, lucy.last_chapter), (2, 731, 735))
+
+    def test_revelation_is_left_empty_for_a_human(self):
+        self.assertTrue(all(c.revelation is None for c in self.extraction.disguise_candidates))
+
+    def test_candidates_are_sorted_by_link_count(self):
+        counts = [c.link_count for c in self.extraction.disguise_candidates]
+        self.assertEqual(counts, sorted(counts, reverse=True))
+        # Komurasaki : CharTable du 909, Long Summary et note du 927, note du 929
+        self.assertEqual(self.extraction.disguise_candidates[0].alias, "Komurasaki")
 
 
 if __name__ == "__main__":

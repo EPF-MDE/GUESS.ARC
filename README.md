@@ -79,6 +79,11 @@ Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-re
   valable de `valid_from` à `valid_to` inclus (`null` : encore valable), avec
   Aliases déjà utilisés, premier et dernier chapitre vu et nombre de Mentions jusqu'à t
 - `data/gold/registry_quality.json` : rapport qualité (Scenes par chapitre)
+- `data/gold/disguise_candidates.csv` : Disguises possibles, triés par nombre de
+  liens. Un candidat est un Alias de Character qui ne partage aucun mot avec son
+  Canonical name (`Kyoshiro` -> Denjiro), relevé dans le Long Summary, la CharTable
+  et les Chapter Notes. Régénéré à chaque run : on y confirme les vrais Disguises
+  à la main, avec leur chapitre de Revelation, avant de les recopier ailleurs.
 
 ## Tests
 
@@ -93,7 +98,8 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
   en apostrophes des récents (`*[[King]] ''(cover)''`) ;
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
 - l'extraction des Entities via `extract_entities` seul, sur des extraits réels
-  du bronze (Scenes, Mentions, Aliases datés, Registry(t) sur 3 chapitres) ;
+  du bronze (Scenes, Mentions, Aliases datés, Registry(t) sur 3 chapitres,
+  Disguise candidates) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from guess_arc.ingestion.parser import section
+from guess_arc.ingestion.parser import parse_characters, section
 
 LINK_RE = re.compile(r"\[\[([^\[\]|]+)(?:\|([^\[\]]*))?\]\]")
 # Texte de lien à nettoyer avant d'en faire un Alias : gras/italique, guillemets
@@ -25,6 +25,10 @@ NON_PROSE_LINE_RE = re.compile(
 )
 # Liens qui ne pointent pas vers un article du wiki (images, catégories, Wikipédia).
 NON_ARTICLE_PREFIXES = {"file", "image", "category", "template", "wikipedia", "w"}
+# Sections dont les liens pipés sont lus pour les Disguise candidates : la CharTable
+# et les notes nomment souvent un Disguise que le Long Summary ne lie jamais
+# (["Lucy"] -> Sabo n'apparaît que là).
+DISGUISE_SECTIONS = ("Long Summary", "Characters", "Chapter Notes")
 
 
 @dataclass(frozen=True)
@@ -63,9 +67,25 @@ class QualityReport:
 
 
 @dataclass(frozen=True)
+class DisguiseCandidate:
+    """Alias qui ressemble au nom d'une autre personne que son Character.
+
+    Liste à relire par un humain : il confirme les vrais Disguises et remplit
+    revelation, le chapitre où le lecteur apprend la vraie identité.
+    """
+    alias: str
+    canonical_name: str
+    link_count: int
+    first_chapter: int
+    last_chapter: int
+    revelation: int | None = None
+
+
+@dataclass(frozen=True)
 class Extraction:
     registry: list[RegistryRow]
     quality: QualityReport
+    disguise_candidates: list[DisguiseCandidate]
 
     def registry_at(self, t: int) -> list[RegistryRow]:
         return [
@@ -174,8 +194,45 @@ def _registry(mentions: list[_Mention]) -> list[RegistryRow]:
     return rows
 
 
+def _name_tokens(name: str) -> set[str]:
+    return set(re.findall(r"\w+", name.lower()))
+
+
+def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> list[DisguiseCandidate]:
+    """Aliases sans aucun mot commun avec leur Canonical name, Characters seulement.
+
+    Liste de relecture hors ligne, pas Registry(t) : elle lit tout le corpus d'un
+    coup, d'où un Character reconnu à sa présence dans n'importe quelle CharTable.
+    """
+    characters: set[str] = set()
+    link_chapters: dict[tuple[str, str], list[int]] = {}
+    for rec in chapters:
+        wikitext = rec["wikitext"]
+        characters |= {
+            name for c in parse_characters(section(wikitext, "Characters"))
+            if (name := _canonical_name(c["name"])) is not None
+        }
+        for heading in DISGUISE_SECTIONS:
+            for m in LINK_RE.finditer(section(wikitext, heading)):
+                name = _canonical_name(m.group(1))
+                if name is None:
+                    continue
+                alias = _alias(m.group(1), name, m.group(2), common_words)
+                # "Robin" -> Nico Robin est un simple Alias ; "Miss All Sunday" ne
+                # partage aucun mot avec Nico Robin.
+                if alias and _name_tokens(alias).isdisjoint(_name_tokens(name)):
+                    link_chapters.setdefault((alias, name), []).append(rec["number"])
+
+    candidates = [
+        DisguiseCandidate(alias, name, len(chs), min(chs), max(chs))
+        for (alias, name), chs in link_chapters.items()
+        if name in characters
+    ]
+    return sorted(candidates, key=lambda c: (-c.link_count, c.alias, c.canonical_name))
+
+
 def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
-    """Bronze déjà en mémoire -> Registry(t) publiable."""
+    """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
     scenes_per_chapter = {}
     mentions = []
     for rec in sorted(chapters, key=lambda r: r["number"]):
@@ -185,4 +242,5 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     return Extraction(
         registry=_registry(mentions),
         quality=QualityReport(scenes_per_chapter=scenes_per_chapter),
+        disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )
