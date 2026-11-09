@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from dataclasses import asdict
 
-from guess_arc.entities import Reference, extract_entities
+from guess_arc.entities import Disguise, Reference, extract_entities
 from guess_arc.entities.wiki_categories import load_category_cache, update_category_cache
 
 # Extrait réel du chapitre 552
@@ -818,6 +818,83 @@ class TestWikiCategoryCache(unittest.TestCase):
             calls.clear()
             self.assertEqual(update_category_cache(cache, titles, fake_fetch, batch=50), 0)
             self.assertEqual(calls, [])
+
+
+# Extraits réels autour du Disguise Kyoshiro -> Denjiro.
+# ch. 919 : Kyoshiro lié une fois dans le Long Summary, puis cité sans lien.
+CH919_KYOSHIRO = (
+    CH919_SCENE + " Kyoshiro mocks Orochi for believing this and living in fear now that 20 "
+    "years have passed, as there should be no Kouzuki Family member still alive and able to "
+    "take revenge."
+)
+# ch. 972 (flashback) : Denjiro sous son vrai nom, que le lecteur ne relie pas à Kyoshiro.
+CH972_DENJIRO = (
+    "As [[Denjiro]] starts to comment, he is stopped by [[Raizo]], who speaks on behalf of the "
+    "Scabbards, saying they would make Oden's dream their own."
+)
+CH974_DENJIRO = (
+    "After a time in which [[Kouzuki Hiyori|Hiyori]] gave [[Denjiro]] money she acquired while "
+    "working as Komurasaki, for him to give to the poor, he warned her about her actions."
+)
+# Revelation fixée à 974 pour le test.
+KYOSHIRO = Disguise(alias="Kyoshiro", canonical_name="Denjiro", revelation=974)
+
+
+class TestConfirmedDisguises(unittest.TestCase):
+
+    def extract(self, disguises=(KYOSHIRO,), *extra):
+        return extract_entities([
+            bronze_record(919, CH919_KYOSHIRO, characters=CH919_CHARACTERS),
+            bronze_record(972, CH972_DENJIRO),
+            bronze_record(974, CH974_DENJIRO),
+            # Lien après la Revelation (texte réel du ch. 919 réutilisé)
+            bronze_record(980, CH919_SCENE),
+            *extra,
+        ], Reference(disguises=tuple(disguises)))
+
+    def test_before_revelation_the_disguise_is_an_entity_of_its_own(self):
+        extraction = self.extract()
+        self.assertIn("Kyoshiro", names_at(extraction, 919))
+        self.assertNotIn("Denjiro", names_at(extraction, 919))  # ni lien, ni CharTable
+        self.assertIn("Kyoshiro", names_at(extraction, 973))
+
+    def test_alias_matched_mentions_before_revelation_go_to_the_disguise(self):
+        extraction = self.extract()
+        self.assertEqual(state_at(extraction, "Kyoshiro", 919), (919, 919, 2))
+
+    def test_denjiro_counts_before_revelation_exclude_the_disguise(self):
+        extraction = self.extract()
+        self.assertEqual(state_at(extraction, "Denjiro", 973), (972, 972, 1))
+        self.assertNotIn("Kyoshiro", aliases_at(extraction, "Denjiro", 973))
+
+    def test_from_revelation_both_are_one_entity_with_a_dated_alias(self):
+        extraction = self.extract()
+        self.assertNotIn("Kyoshiro", names_at(extraction, 974))
+        self.assertIn("Kyoshiro", aliases_at(extraction, "Denjiro", 974))
+        # 2 Mentions de Kyoshiro (919) + [[Denjiro]] (972) + [[Denjiro]] (974)
+        self.assertEqual(state_at(extraction, "Denjiro", 974), (919, 974, 4))
+        kyoshiro_rows = [r for r in extraction.registry if r.canonical_name == "Kyoshiro"]
+        self.assertEqual(max(r.valid_to for r in kyoshiro_rows), 973)
+
+    def test_after_revelation_disguise_links_count_for_the_canonical_name(self):
+        extraction = self.extract()
+        self.assertEqual(state_at(extraction, "Denjiro", 980), (919, 980, 5))
+
+    def test_two_disguises_revealed_together_both_join_the_entity(self):
+        # Ushimitsu Kozo, autre identité de Denjiro, révélée au même chapitre.
+        ushimitsu = Disguise(alias="Ushimitsu Kozo", canonical_name="Denjiro", revelation=974)
+        extraction = self.extract((KYOSHIRO, ushimitsu), bronze_record(
+            926, "[[Denjiro|Ushimitsu Kozo]] steals from the rich."
+        ))
+        self.assertEqual(state_at(extraction, "Ushimitsu Kozo", 926), (926, 926, 1))
+        self.assertEqual(state_at(extraction, "Denjiro", 974), (919, 974, 5))
+        self.assertTrue({"Kyoshiro", "Ushimitsu Kozo"} <= aliases_at(extraction, "Denjiro", 974))
+
+    def test_empty_disguise_list_keeps_the_previous_output(self):
+        extraction = self.extract(disguises=())
+        self.assertNotIn("Kyoshiro", {r.canonical_name for r in extraction.registry})
+        self.assertEqual(state_at(extraction, "Denjiro", 919), (919, 919, 2))
+        self.assertIn("Kyoshiro", aliases_at(extraction, "Denjiro", 919))
 
 
 class TestDisguiseCandidates(unittest.TestCase):

@@ -1,0 +1,5 @@
+# Disguises confirmés à la main (ENT-08), à partir de data/gold/disguise_candidates.csv.
+# alias : le nom du Disguise tel qu'il apparaît dans les liens ([[Denjiro|Kyoshiro]] -> Kyoshiro)
+# canonical_name : la vraie identité (titre de la page du wiki)
+# revelation : chapitre où le lecteur apprend que le Disguise est canonical_name
+alias,canonical_name,revelation

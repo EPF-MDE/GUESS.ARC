@@ -21,7 +21,7 @@ from pathlib import Path
 from guess_arc import paths
 from guess_arc.ingestion.pipeline import load_bronze
 
-from .extraction import DisguiseCandidate, Extraction, Reference, extract_entities
+from .extraction import Disguise, DisguiseCandidate, Extraction, Reference, extract_entities
 from .wiki_categories import load_category_cache, update_category_cache
 
 
@@ -68,10 +68,12 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
     def dataset(name: str) -> tuple[dict, ...]:
         return tuple(json.loads((reference_dir / f"{name}.json").read_text(encoding="utf-8")))
 
-    with (reference_dir / TYPE_OVERRIDES).open(encoding="utf-8", newline="") as fh:
-        overrides = {row["canonical_name"]: row["entity_type"] for row in csv.DictReader(
-            line for line in fh if not line.startswith("#")
-        )}
+    overrides = {row["canonical_name"]: row["entity_type"]
+                 for row in _read_csv(reference_dir / TYPE_OVERRIDES)}
+    disguises = tuple(
+        Disguise(row["alias"], row["canonical_name"], int(row["revelation"]))
+        for row in _read_csv(reference_dir / DISGUISES)
+    )
     return Reference(
         common_words=load_common_words(),
         characters=dataset("characters"),
@@ -80,11 +82,19 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
         concepts=frozenset(_read_list(reference_dir / "concepts.txt")),
         wiki_categories=load_category_cache(reference_dir / WIKI_CATEGORIES),
         type_overrides=overrides,
+        disguises=disguises,
     )
 
 
 WIKI_CATEGORIES = "wiki_categories.json"
 TYPE_OVERRIDES = "type_overrides.csv"
+DISGUISES = "disguises.csv"
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    """CSV avec en-tête ; lignes de commentaire (#) ignorées."""
+    with path.open(encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(line for line in fh if not line.startswith("#")))
 
 
 def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:

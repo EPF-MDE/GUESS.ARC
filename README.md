@@ -25,7 +25,8 @@ reference/                # données de référence versionnées
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
 ├── concepts.txt          # Concepts et Titles, exclus de Registry(t)
 ├── wiki_categories.json  # cache des catégories du wiki (Entity types)
-└── type_overrides.csv    # Entity types fixés à la main
+├── type_overrides.csv    # Entity types fixés à la main
+└── disguises.csv         # Disguises confirmés à la main, avec leur Revelation
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
 ```
@@ -99,6 +100,12 @@ l'emporte sur tout le reste. Les catégories sont mises en cache dans
 du cache sont demandées au wiki, par lots de 50 (`--offline` pour ne rien demander). Seuls les noms des datasets servent : leurs attributs
 d'état ne sont jamais lus. Les Concepts et Titles de `reference/concepts.txt`
 (`Pirate`, `Haki`, `Admiral`...) sont exclus de Registry(t).
+Les Disguises confirmés dans `reference/disguises.csv` (alias, Canonical name,
+chapitre de Revelation) sont appliqués : avant la Revelation, le Disguise est une
+Entity à part entière (Kyoshiro a ses propres Mentions, liées ou par Alias match,
+et sa présence dans la CharTable) ; à partir de la Revelation, il rejoint son
+Canonical name, qui reprend ses Mentions et l'a pour Alias daté de ce chapitre.
+Liste vide : sortie inchangée.
 Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
 
 - `data/gold/registry.jsonl` : Registry(t), une ligne par Entity et par changement,
@@ -116,7 +123,8 @@ Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-re
   liens. Un candidat est un Alias de Character qui ne partage aucun mot avec son
   Canonical name (`Kyoshiro` -> Denjiro), relevé dans le Long Summary, la CharTable
   et les Chapter Notes. Régénéré à chaque run : on y confirme les vrais Disguises
-  à la main, avec leur chapitre de Revelation, avant de les recopier ailleurs.
+  à la main, avec leur chapitre de Revelation, avant de les recopier dans
+  `reference/disguises.csv`.
 
 ## Tests
 
@@ -133,7 +141,7 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - l'extraction des Entities via `extract_entities` seul, sur des extraits réels
   du bronze (Scenes, Mentions, Aliases datés, Alias match, Cast de la
   CharTable, recall et precision proxies, Entity types des datasets, des catégories du wiki et des overrides, cache des
-  catégories, Registry(t) sur 3 chapitres, Disguise candidates) ;
+  catégories, Disguises confirmés, Registry(t) sur 3 chapitres, Disguise candidates) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

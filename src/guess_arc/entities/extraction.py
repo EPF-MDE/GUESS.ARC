@@ -48,6 +48,7 @@ class Reference:
     status, bounty, current_ruler...) décrivent la fin de l'histoire et n'entrent
     jamais dans Registry(t) (ADR 0002).
     concepts : Canonical names des Concepts et des Titles, exclus de Registry(t).
+    disguises : Disguises confirmés à la main, avec leur chapitre de Revelation.
     wiki_categories : Canonical name -> catégories de sa page sur le wiki (cache).
     type_overrides : Canonical name -> Entity type, tenu à la main ; l'emporte
     sur les datasets et les catégories.
@@ -59,6 +60,16 @@ class Reference:
     concepts: frozenset[str] = frozenset()
     wiki_categories: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     type_overrides: Mapping[str, str] = field(default_factory=dict)
+    disguises: tuple[Disguise, ...] = ()
+
+
+@dataclass(frozen=True)
+class Disguise:
+    """Disguise confirmé à la main : avant revelation, alias est une Entity à part
+    entière ; à partir de revelation, il devient un Alias de canonical_name."""
+    alias: str
+    canonical_name: str
+    revelation: int
 
 
 @dataclass(frozen=True)
@@ -170,6 +181,7 @@ class _CastEntry:
     chapter: int
     appearance: bool
     group: bool = False
+    alias: str | None = None  # texte affiché ('*[[Denjiro|Kyoshiro]]' -> Kyoshiro)
 
 
 def _canonical_name(target: str) -> str | None:
@@ -335,7 +347,8 @@ def _cast(chapter: int, char_section: str) -> list[_CastEntry]:
         # Recall, ni une Cover appearance.
         if name is not None and (c["on_panel"] or "flashback" in annotations
                                  or "cover" in annotations):
-            entries.append(_CastEntry(name, chapter, appearance=c["on_panel"]))
+            alias = _alias(c["name"], name, c["label"], frozenset())
+            entries.append(_CastEntry(name, chapter, appearance=c["on_panel"], alias=alias))
     entries += [
         _CastEntry(name, chapter, appearance=False, group=True)
         for group in parse_groups(char_section)
@@ -420,10 +433,10 @@ def _precision_proxy(mentions: list[_Mention], cast: list[_CastEntry]
 
 
 def _registry(mentions: list[_Mention], cast: list[_CastEntry],
-              alias_first_use: dict[str, dict[str, int]],
-              types: dict[str, str]) -> list[RegistryRow]:
-    # Une ligne par Entity et par chapitre où elle est vue (Mention ou CharTable) :
-    # c'est là que last_chapter_seen et mention_count changent.
+              alias_first_use: dict[str, dict[str, int]], types: dict[str, str],
+              disguises: tuple[Disguise, ...]) -> list[RegistryRow]:
+    # Une ligne par Entity et par chapitre où son état change : chapitre où elle
+    # est vue (Mention ou CharTable), et Revelation d'un de ses Disguises.
     counts: dict[str, dict[int, int]] = {}
     for m in mentions:
         per_chapter = counts.setdefault(m.canonical_name, {})
@@ -431,24 +444,43 @@ def _registry(mentions: list[_Mention], cast: list[_CastEntry],
     for e in cast:
         counts.setdefault(e.canonical_name, {}).setdefault(e.chapter, 0)
 
+    # À sa Revelation, un Disguise s'arrête et rejoint son Canonical name :
+    # Mentions et chapitres vus du Disguise s'ajoutent alors à l'Entity.
+    ends = {d.alias: d.revelation - 1 for d in disguises}
+    merges: dict[str, dict[int, dict[int, int]]] = {}
+    for d in disguises:
+        # Plusieurs Disguises peuvent rejoindre la même Entity au même chapitre.
+        at_revelation = merges.setdefault(d.canonical_name, {}).setdefault(d.revelation, {})
+        for ch, n in counts.get(d.alias, {}).items():
+            at_revelation[ch] = at_revelation.get(ch, 0) + n
+    merges = {name: {r: c for r, c in by_r.items() if c} for name, by_r in merges.items()}
+
     rows = []
-    for name, per_chapter in sorted(counts.items()):
-        first_use = alias_first_use.get(name, {})
-        chapters = sorted(per_chapter)
-        total = 0
-        for i, ch in enumerate(chapters):
-            total += per_chapter[ch]
-            # Un Alias commence toujours sur une ligne : sa première utilisation
-            # est une Mention, donc un chapitre où l'état de l'Entity change.
+    for name in sorted(set(counts) | set(merges)):
+        own = counts.get(name, {})
+        merged = merges.get(name, {})
+        steps = sorted(set(own) | set(merged))
+        total, first, last = 0, None, None
+        for i, ch in enumerate(steps):
+            seen = [ch] if ch in own else []
+            total += own.get(ch, 0)
+            if ch in merged:
+                total += sum(merged[ch].values())
+                seen += list(merged[ch])
+            first = min(seen) if first is None else min(first, *seen)
+            last = max(seen) if last is None else max(last, *seen)
             rows.append(RegistryRow(
                 canonical_name=name,
                 # Un seul type, fixe pour toute l'histoire (ADR 0002).
                 entity_type=types.get(name, UNKNOWN),
-                aliases=tuple(sorted(a for a, first in first_use.items() if first <= ch)),
+                # Un Alias commence toujours sur une ligne : sa première utilisation
+                # est une Mention, ou la Revelation pour un Disguise.
+                aliases=tuple(sorted(a for a, f in alias_first_use.get(name, {}).items()
+                                     if f <= ch)),
                 valid_from=ch,
-                valid_to=chapters[i + 1] - 1 if i + 1 < len(chapters) else None,
-                first_chapter_seen=chapters[0],
-                last_chapter_seen=ch,
+                valid_to=steps[i + 1] - 1 if i + 1 < len(steps) else ends.get(name),
+                first_chapter_seen=first,
+                last_chapter_seen=last,
                 mention_count=total,
             ))
     return rows
@@ -499,9 +531,17 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         # Concepts et Titles ne sont jamais des Entities.
         return name not in reference.concepts
 
+    revelations = {(d.canonical_name, d.alias): d.revelation for d in reference.disguises}
+
     def resolved(item):
         name = resolve.get(item.canonical_name)
-        return dataclasses.replace(item, canonical_name=name) if name else item
+        item = dataclasses.replace(item, canonical_name=name) if name else item
+        # Avant sa Revelation, un lien [[Denjiro|Kyoshiro]] désigne Kyoshiro : le
+        # lecteur ne sait pas encore que c'est Denjiro (ADR 0002).
+        revelation = revelations.get((item.canonical_name, item.alias))
+        if revelation is not None and item.chapter < revelation:
+            item = dataclasses.replace(item, canonical_name=item.alias, alias=None)
+        return item
 
     scenes_by_chapter = {}
     arcs = {}
@@ -523,6 +563,9 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     # Les Aliases sont datés sur tous les liens avant de servir à l'Alias match.
     link_mentions = [m for ms in linked.values() for m in ms]
     alias_first_use = _alias_first_use(link_mentions)
+    # Un Disguise devient un Alias de son Canonical name à sa Revelation.
+    for d in reference.disguises:
+        alias_first_use.setdefault(d.canonical_name, {})[d.alias] = d.revelation
     mentions = link_mentions + [
         m for number, scenes in scenes_by_chapter.items()
         for m in _alias_matches(number, scenes, linked[number], alias_first_use)
@@ -530,6 +573,9 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
 
     types = _entity_types({m.canonical_name for m in mentions} | {e.canonical_name for e in cast},
                           dataset_types, reference)
+    for d in reference.disguises:  # les Disguises ne concernent que des Characters
+        if d.alias in types:
+            types[d.alias] = "Character"
     mention_totals: dict[str, int] = {}
     for m in mentions:
         mention_totals[m.canonical_name] = mention_totals.get(m.canonical_name, 0) + 1
@@ -541,7 +587,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     recall_proxy, recall_proxy_per_arc = _recall_proxy(cast, mentions, arcs)
     precision_proxy, suspicious_aliases = _precision_proxy(mentions, cast)
     return Extraction(
-        registry=_registry(mentions, cast, alias_first_use, types),
+        registry=_registry(mentions, cast, alias_first_use, types, reference.disguises),
         quality=QualityReport(
             scenes_per_chapter={n: len(s) for n, s in scenes_by_chapter.items()},
             recall_proxy=recall_proxy,

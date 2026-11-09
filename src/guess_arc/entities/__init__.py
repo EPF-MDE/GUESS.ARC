@@ -4,6 +4,6 @@
     pipeline   -> lecture du bronze, écriture de la gold, CLI
 """
 
-from .extraction import DisguiseCandidate, Extraction, Reference, RegistryRow, extract_entities
+from .extraction import Disguise, DisguiseCandidate, Extraction, Reference, RegistryRow, extract_entities
 
-__all__ = ["DisguiseCandidate", "Extraction", "Reference", "RegistryRow", "extract_entities"]
+__all__ = ["Disguise", "DisguiseCandidate", "Extraction", "Reference", "RegistryRow", "extract_entities"]
