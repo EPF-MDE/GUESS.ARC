@@ -1,5 +1,7 @@
 # GUESS.ARC
 
+[![tests](https://github.com/EPF-MDE/GUESS.ARC/actions/workflows/tests.yml/badge.svg)](https://github.com/EPF-MDE/GUESS.ARC/actions/workflows/tests.yml)
+
 Prédire le contenu du chapitre n+1 de *One Piece* à partir des chapitres 1 à n.
 
 Le dépôt contient aujourd'hui la chaîne de données jusqu'à la couche **silver**.
@@ -61,7 +63,10 @@ Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir
 pytest
 ```
 
-Aucun accès réseau n'est nécessaire. Les tests couvrent :
+Aucun accès réseau n'est nécessaire. La CI GitHub Actions (`.github/workflows/tests.yml`)
+lance la même commande à chaque PR et à chaque push sur `main`, sous Ubuntu et Windows,
+en Python 3.10 et 3.12 ; `data/` n'y existe pas, donc les contrôles du corpus réel sont
+ignorés (`pytest -rs` affiche pourquoi). Les tests couvrent :
 
 - le parseur, sur des extraits réels des chapitres 500 et 1193 : annotations
   en parenthèses nues des anciens chapitres (`*[[Kalifa]] (cover)`) et
