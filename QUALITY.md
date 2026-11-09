@@ -87,7 +87,7 @@ Status: ⏳ not run yet · ✅ pass · ⚠️ partial · ❌ fail (what we do ab
 | REQ-8 | Same script. | 0 mismatches | Each sprint | Team | ✅ | Same run: `character_count` matches in all 1193 files. |
 | REQ-15 | A teammate reviews the design document against the four points. | All four covered | Before demo | Team | ✅ | `GRU.md` (delivered to Konrad on Teams; also on branch `data_event`): inputs (§0, §3), prediction of chapter n+1 (§4.5), baselines "persistance" and global frequency (§3.4), metrics F1 and Precision@K. |
 | REQ-16 | Review of the design; leakage-guard test once the split code exists. | Chronological split, fitting on training chapters only | Before demo | Team | ✅ | `GRU.md` §2.7: train 1..N, validation N+1..M, test M+1..T, never mixed; §3.4: sliding origins; §4.5: decision threshold tuned on validation, never on test. |
-| REQ-12, REQ-13 | Entity extraction compared with the Silver header. | See 2026-11-12 | Before demo | Team | ❌ | Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open). Carried over to 2026-11-12. |
+| REQ-12, REQ-13 | Entity extraction compared with the Silver header. | See 2026-11-12 | Before demo | Team | ⚠️ | Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open). Carried over to 2026-11-12. |
 
 Output of the run behind REQ-5 to REQ-8:
 
@@ -123,7 +123,7 @@ emptied and `--expected 3`. It reported `Chapitres manquants : [3]` and
 
 ### Week of 26/10 (delivery Fri 30/10)
 - Added: REQ-15, REQ-16 (GRU design); REQ-12, REQ-13 (entities).
-- Checked: REQ-5–8 ✅ (Silver corpus, 2026-10-26); REQ-15, REQ-16 ✅ (`GRU.md`); REQ-12, REQ-13 ❌, entities not finished.
+- Checked: REQ-5–8 ✅ (Silver corpus, 2026-10-26); REQ-15, REQ-16 ✅ (`GRU.md`); REQ-12, REQ-13 ⚠️, entities not finished.
 - Shown to client: the presentation of how the GRU works (`GRU.md`, delivered on Teams). The entity dataset wasn't finished. Events: work started, nothing promised.
 - Client said: satisfied, but disappointed about the entities.
 - Decision: continue with the GRU pipeline; finish the entities first, then benchmark an API solution with an Anthropic model.
