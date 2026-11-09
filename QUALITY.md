@@ -65,6 +65,13 @@ Kept here so the IDs stay reserved. Each comes back into a delivery when a sprin
 
 Status: ⏳ not run yet · ✅ pass · ⚠️ partial · ❌ fail (what we do about it is in §3)
 
+**Automatic checks (CI).** Since PR #101 (merged 2026-11-09), GitHub Actions
+(`.github/workflows/tests.yml`) runs `pytest -rs` on every PR and every push to `main`, on
+Ubuntu and Windows with Python 3.10 and 3.12. "Automatic (test suite)" in the tables below
+means this run. `data/` is never committed, so the two tests that read the real bronze/silver
+corpus are skipped in CI; REQ-5–8 on the real corpus are still checked locally with
+`scripts/quality/check_silver.py`.
+
 ### Delivery Thu 2026-11-12 and Fri 2026-11-13
 
 | ID | Verification method | Pass criterion | When | Owner | Result | Evidence |
@@ -117,7 +124,7 @@ emptied and `--expected 3`. It reported `Chapitres manquants : [3]` and
 
 ### Weeks of 02/11 & 09/11 (entities Thu 12/11, mid-term defense Fri 13/11)
 - Added: REQ-19, REQ-20, REQ-21. REQ-12 and REQ-13 carried over with measurable thresholds. REQ-9–11 and REQ-14 moved to the backlog: they were never committed.
-- Checked: nothing yet (all ⏳).
+- Checked: nothing yet (all ⏳). Tooling: CI now runs the test suite on every PR and push to `main` (PR #101, 2026-11-09: 32 passed, 2 skipped, the `data/` checks, on all 4 jobs).
 - Planned to show: the finished entity dataset (`Registry(t)`) with its recall/precision (REQ-12, REQ-13, REQ-19, REQ-20), then the mid-term defense on 13/11.
 - Next: once the entities are done, benchmark an API solution with an Anthropic model for the following sprints.
 
