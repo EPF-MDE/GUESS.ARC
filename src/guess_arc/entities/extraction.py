@@ -6,6 +6,7 @@ est public ; Scenes et Mentions restent internes.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 
@@ -41,8 +42,17 @@ class Reference:
 
     common_words : mots en minuscules (pronoms, déterminants) ; un texte de lien
     qui commence par l'un d'eux n'est pas un Alias ("Their mother").
+    characters, islands, devil_fruits : entrées brutes des datasets de reference/.
+    Seuls leurs noms servent (Entity type) ; leurs attributs d'état (affiliation,
+    status, bounty, current_ruler...) décrivent la fin de l'histoire et n'entrent
+    jamais dans Registry(t) (ADR 0002).
+    concepts : Canonical names des Concepts et des Titles, exclus de Registry(t).
     """
     common_words: frozenset[str] = frozenset()
+    characters: tuple[dict, ...] = ()
+    islands: tuple[dict, ...] = ()
+    devil_fruits: tuple[dict, ...] = ()
+    concepts: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -53,6 +63,7 @@ class RegistryRow:
     aliases : Aliases déjà utilisés au chapitre valid_from, triés (ADR 0002).
     """
     canonical_name: str
+    entity_type: str
     aliases: tuple[str, ...]
     valid_from: int
     valid_to: int | None
@@ -79,6 +90,7 @@ class QualityReport:
     precision_proxy : part des Mentions par Alias match de Characters dont le
     Character est dans le Cast du chapitre (Appearance, Recall ou Cover appearance).
     suspicious_aliases : les 20 formes qui tombent le plus souvent hors du Cast.
+    unknown_mention_share : part des Mentions dont l'Entity est typée Unknown.
     """
     scenes_per_chapter: dict[int, int]
     recall_proxy: float | None
@@ -86,6 +98,7 @@ class QualityReport:
     mentions_by_source: dict[str, int]
     precision_proxy: float | None
     suspicious_aliases: list[SuspiciousAlias]
+    unknown_mention_share: float | None
 
 
 @dataclass(frozen=True)
@@ -156,6 +169,52 @@ def _canonical_name(target: str) -> str | None:
         return None
     # Le wiki ignore la casse de la première lettre : [[pirate]] -> Pirate.
     return title[0].upper() + title[1:]
+
+
+UNKNOWN = "Unknown"
+
+
+def _dataset_names(raw: str) -> tuple[set[str], set[str]]:
+    """Nom d'un dataset -> (noms principaux, épithète entre crochets).
+
+    "Edward Newgate [Whitebeard]" -> ({"Edward Newgate"}, {"Whitebeard"})
+    "Bentham (Bon Clay) [Mr. 2]"  -> ({"Bentham (Bon Clay)", "Bentham"}, {"Mr. 2"})
+    " Ope Ope no Mi (Awakened)"   -> ({"Ope Ope no Mi (Awakened)", "Ope Ope no Mi"}, set())
+    """
+    name = raw.strip()
+    bracket = re.search(r"\s*\[([^\]]*)\]\s*$", name)
+    if bracket:
+        name = name[:bracket.start()].strip()
+    names = {name, re.sub(r"\s*\([^)]*\)\s*$", "", name).strip()}
+    return names - {""}, ({bracket.group(1).strip()} - {""}) if bracket else set()
+
+
+def _lexicon(reference: Reference) -> tuple[dict[str, str], dict[str, str]]:
+    """Datasets -> (Canonical name -> Entity type, nom anglais -> Canonical name).
+
+    Un nom présent dans deux datasets avec deux types différents ("Sphinx",
+    Character et île) reste Unknown. L'épithète entre crochets d'un Character
+    ("Scien [Queen]") ne sert que si aucun dataset n'a ce nom en principal.
+    """
+    primary: dict[str, set[str]] = {}
+    epithets: dict[str, set[str]] = {}
+    resolve: dict[str, str] = {}
+    for entity_type, entries in (("Character", reference.characters),
+                                 ("Place", reference.islands),
+                                 ("Devil Fruit", reference.devil_fruits)):
+        for entry in entries:
+            names, bracketed = _dataset_names(entry["name"])
+            for name in names:
+                primary.setdefault(name, set()).add(entity_type)
+            for name in bracketed:
+                epithets.setdefault(name, set()).add(entity_type)
+            # Un Devil Fruit est aussi désigné par son nom anglais (Chop-Chop Fruit).
+            english = (entry.get("english") or "").strip()
+            if entity_type == "Devil Fruit" and english:
+                resolve[english] = min(names, key=len)
+    types = {n: ts.pop() for n, ts in epithets.items() if len(ts) == 1 and n not in primary}
+    types.update({n: ts.pop() for n, ts in primary.items() if len(ts) == 1})
+    return types, resolve
 
 
 def _alias(target: str, canonical_name: str, text: str | None,
@@ -292,7 +351,8 @@ def _precision_proxy(mentions: list[_Mention], cast: list[_CastEntry]
 
 
 def _registry(mentions: list[_Mention], cast: list[_CastEntry],
-              alias_first_use: dict[str, dict[str, int]]) -> list[RegistryRow]:
+              alias_first_use: dict[str, dict[str, int]],
+              types: dict[str, str]) -> list[RegistryRow]:
     # Une ligne par Entity et par chapitre où elle est vue (Mention ou CharTable) :
     # c'est là que last_chapter_seen et mention_count changent.
     counts: dict[str, dict[int, int]] = {}
@@ -313,6 +373,8 @@ def _registry(mentions: list[_Mention], cast: list[_CastEntry],
             # est une Mention, donc un chapitre où l'état de l'Entity change.
             rows.append(RegistryRow(
                 canonical_name=name,
+                # Un seul type, fixe pour toute l'histoire (ADR 0002).
+                entity_type=types.get(name, UNKNOWN),
                 aliases=tuple(sorted(a for a, first in first_use.items() if first <= ch)),
                 valid_from=ch,
                 valid_to=chapters[i + 1] - 1 if i + 1 < len(chapters) else None,
@@ -362,6 +424,16 @@ def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> 
 
 def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
+    types, resolve = _lexicon(reference)
+
+    def keep(name: str) -> bool:
+        # Concepts et Titles ne sont jamais des Entities.
+        return name not in reference.concepts
+
+    def resolved(item):
+        name = resolve.get(item.canonical_name)
+        return dataclasses.replace(item, canonical_name=name) if name else item
+
     scenes_by_chapter = {}
     arcs = {}
     linked: dict[int, list[_Mention]] = {}
@@ -372,8 +444,12 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         scenes_by_chapter[number] = scenes
         arc = ARC_RE.search(wikitext)
         arcs[number] = arc.group(1) if arc else "Unknown"
-        linked[number] = [m for s in scenes for m in _mentions(s, reference.common_words)]
-        cast += _cast(number, section(wikitext, "Characters"))
+        linked[number] = [
+            m for s in scenes for m in map(resolved, _mentions(s, reference.common_words))
+            if keep(m.canonical_name)
+        ]
+        cast += [e for e in map(resolved, _cast(number, section(wikitext, "Characters")))
+                 if keep(e.canonical_name)]
 
     # Les Aliases sont datés sur tous les liens avant de servir à l'Alias match.
     link_mentions = [m for ms in linked.values() for m in ms]
@@ -386,7 +462,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     recall_proxy, recall_proxy_per_arc = _recall_proxy(cast, mentions, arcs)
     precision_proxy, suspicious_aliases = _precision_proxy(mentions, cast)
     return Extraction(
-        registry=_registry(mentions, cast, alias_first_use),
+        registry=_registry(mentions, cast, alias_first_use, types),
         quality=QualityReport(
             scenes_per_chapter={n: len(s) for n, s in scenes_by_chapter.items()},
             recall_proxy=recall_proxy,
@@ -397,6 +473,10 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
             },
             precision_proxy=precision_proxy,
             suspicious_aliases=suspicious_aliases,
+            unknown_mention_share=(
+                sum(types.get(m.canonical_name, UNKNOWN) == UNKNOWN for m in mentions) / len(mentions)
+                if mentions else None
+            ),
         ),
         disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )

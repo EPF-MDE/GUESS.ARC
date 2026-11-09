@@ -21,6 +21,9 @@ src/guess_arc/
     ├── extraction.py     # extract_entities(chapters, reference), pure, seul point d'entrée
     ├── pipeline.py       # lecture du bronze, écriture de la gold, CLI
     └── common_words.txt  # mots courants : un texte de lien qui commence par l'un d'eux n'est pas un Alias
+reference/                # données de référence versionnées
+├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
+└── concepts.txt          # Concepts et Titles, exclus de Registry(t)
 tests/                    # tests sans réseau
 docs/adr/                 # décisions d'architecture
 ```
@@ -81,17 +84,27 @@ Le Cast vient de la CharTable : un Character avec une Appearance, un Recall ou
 une Cover appearance entre dans Registry(t) à ce chapitre, même sans Mention ;
 un en-tête de faction lié (`;[[Straw Hat Pirates]]`) y ajoute son Group, sans
 compter de Mention.
+Chaque Entity reçoit un seul Entity type, fixe : Character, Place ou Devil Fruit
+si son Canonical name est dans `reference/characters.json`, `islands.json` ou
+`devil_fruits.json` (nom sans l'épithète entre crochets ni la parenthèse finale,
+ou épithète entre crochets d'un Character : `Scien [Queen]` -> Queen ; nom anglais
+d'un Devil Fruit ramené au nom japonais), sinon Unknown. Un nom présent dans deux
+datasets reste Unknown. Seuls les noms des datasets servent : leurs attributs
+d'état ne sont jamais lus. Les Concepts et Titles de `reference/concepts.txt`
+(`Pirate`, `Haki`, `Admiral`...) sont exclus de Registry(t).
 Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
 
 - `data/gold/registry.jsonl` : Registry(t), une ligne par Entity et par changement,
   valable de `valid_from` à `valid_to` inclus (`null` : encore valable), avec
-  Aliases déjà utilisés, premier et dernier chapitre vu et nombre de Mentions jusqu'à t
+  Entity type, Aliases déjà utilisés, premier et dernier chapitre vu et nombre
+  de Mentions jusqu'à t
 - `data/gold/registry_quality.json` : rapport qualité (Scenes par chapitre ;
   recall proxy, global et par arc : part des Characters avec une Appearance dans
   la CharTable qui ont au moins une Mention dans le Long Summary du chapitre ;
   Mentions par source, lien ou Alias match ; precision proxy : part des Alias
   matches de Characters qui tombent dans le Cast du chapitre ; les 20 Aliases
-  les plus suspects, ceux qui tombent le plus souvent hors du Cast)
+  les plus suspects, ceux qui tombent le plus souvent hors du Cast ; part des
+  Mentions typées Unknown)
 - `data/gold/disguise_candidates.csv` : Disguises possibles, triés par nombre de
   liens. Un candidat est un Alias de Character qui ne partage aucun mot avec son
   Canonical name (`Kyoshiro` -> Denjiro), relevé dans le Long Summary, la CharTable
@@ -112,7 +125,7 @@ Aucun accès réseau n'est nécessaire. Les tests couvrent :
 - le contrat de format bronze et silver, sur des fixtures synthétiques ;
 - l'extraction des Entities via `extract_entities` seul, sur des extraits réels
   du bronze (Scenes, Mentions, Aliases datés, Alias match, Cast de la
-  CharTable, recall et precision proxies, Registry(t) sur 3 chapitres, Disguise candidates) ;
+  CharTable, recall et precision proxies, Entity types des datasets, Registry(t) sur 3 chapitres, Disguise candidates) ;
 - le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
   (ignoré si les données n'ont pas encore été générées).
 

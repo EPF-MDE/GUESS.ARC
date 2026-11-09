@@ -52,14 +52,33 @@ def write_disguise_candidates(extraction: Extraction, path: Path) -> None:
 COMMON_WORDS_PATH = Path(__file__).with_name("common_words.txt")
 
 
-def load_common_words(path: Path = COMMON_WORDS_PATH) -> frozenset[str]:
+def _read_list(path: Path) -> list[str]:
+    """Un élément par ligne ; lignes vides et commentaires (#) ignorés."""
     lines = path.read_text(encoding="utf-8").splitlines()
-    return frozenset(w.strip().lower() for w in lines if w.strip() and not w.startswith("#"))
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
+
+
+def load_common_words(path: Path = COMMON_WORDS_PATH) -> frozenset[str]:
+    return frozenset(w.lower() for w in _read_list(path))
+
+
+def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
+    """Tout ce qui vient de l'extérieur de la bronze, chargé une fois pour le seam."""
+    def dataset(name: str) -> tuple[dict, ...]:
+        return tuple(json.loads((reference_dir / f"{name}.json").read_text(encoding="utf-8")))
+
+    return Reference(
+        common_words=load_common_words(),
+        characters=dataset("characters"),
+        islands=dataset("islands"),
+        devil_fruits=dataset("devil_fruits"),
+        concepts=frozenset(_read_list(reference_dir / "concepts.txt")),
+    )
 
 
 def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
     archive = load_bronze(paths.bronze_dir(data_dir) / "chapters.jsonl")
-    reference = Reference(common_words=load_common_words())
+    reference = load_reference()
     extraction = extract_entities(list(archive.values()), reference)
     registry_path = write_gold(extraction, paths.gold_dir(data_dir))
 
@@ -74,6 +93,8 @@ def run(data_dir: Path = paths.DATA_DIR) -> Extraction:
     if extraction.quality.precision_proxy is not None:
         print(f"Precision proxy : {extraction.quality.precision_proxy:.1%} des Alias matches "
               "de Characters tombent dans le Cast")
+    if extraction.quality.unknown_mention_share is not None:
+        print(f"Mentions typées Unknown : {extraction.quality.unknown_mention_share:.1%}")
     print(f"Disguise candidates à relire : {len(extraction.disguise_candidates)}")
     empty = [n for n, count in scenes.items() if count == 0]
     if empty:

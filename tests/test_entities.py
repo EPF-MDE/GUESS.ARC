@@ -1,5 +1,6 @@
 """Tests de l'extraction d'entités via son seul point d'entrée, sur des extraits réels du bronze. No network access."""
 import unittest
+from dataclasses import asdict
 
 from guess_arc.entities import Reference, extract_entities
 
@@ -243,6 +244,42 @@ CH991_UNLINKED_QUEEN = (
     "However, bullets suddenly come flying down onto the Live Floor from above, and Queen calls "
     "out to Drake from the Live Stage while holding a Gatling gun."
 )
+
+# Extrait réel du chapitre 11 : un Devil Fruit précis et le Concept générique
+CH11_SCENE = (
+    "Buggy floats behind Zoro as he finds himself fighting the hand and boasts about his "
+    "[[Devil Fruit]] powers, the [[Bara Bara no Mi]]."
+)
+
+# Entrées réelles des datasets de reference/ (champs image, description, journey et
+# relationships ôtés). Les attributs d'état (affiliation, status, bounty, ruler)
+# sont gardés : ils ne doivent pas entrer dans Registry(t).
+CHARACTERS = (
+    {"name": "Edward Newgate [Whitebeard]", "epithet": "the Strongest Man in the World",
+     "affiliation": "Whitebeard Pirates", "devil_fruit": "Gura Gura no Mi", "bounty": 5046000000,
+     "origin": "Grand Line (Sphinx)", "first_appearance_arc": "Chapter 234", "race": "Human",
+     "status": "Deceased"},
+    {"name": "Scien [Queen]", "epithet": "the Plague", "affiliation": "Beasts Pirates",
+     "bounty": 1320000000, "first_appearance_arc": "Chapter 920", "race": "Human",
+     "status": "Alive"},
+    {"name": "Sphinx", "affiliation": "Impel Down", "first_appearance_arc": "Chapter 529",
+     "race": "Human", "status": "Alive"},
+    {"name": "Bentham (Bon Clay) [Mr. 2]", "affiliation": "Baroque Works", "status": "Alive"},
+)
+ISLANDS = (
+    {"name": "Dawn Island", "location": "East Blue", "current_ruler": "Sterry (Goa Kingdom)",
+     "notable_members": ["Makino", "Woop Slap", "Sterry", "Curly Dadan", "Outlook III"]},
+    {"name": "Sphinx", "location": "New World", "current_ruler": "Unknown",
+     "notable_members": ["Marco", "Oide", "Tama"]},
+)
+DEVIL_FRUITS = (
+    {"name": " Bara Bara no Mi", "english": "Chop-Chop Fruit", "type": "Paramecia",
+     "user": "Buggy"},
+    {"name": " Ope Ope no Mi (Awakened)", "english": "Op-Op Fruit", "type": "Paramecia",
+     "user": "Trafalgar D. Water Law"},
+)
+CONCEPTS = frozenset({"Pirate", "Haki", "Devil Fruit", "Admiral", "Marine Ranks",
+                      "Seven Warlords of the Sea"})
 
 COMMON_WORDS = frozenset({"the", "a", "an", "his", "her", "their", "this", "that"})
 
@@ -577,6 +614,90 @@ class TestAliasMatch(unittest.TestCase):
         self.assertEqual((top.alias, top.canonical_name, top.matches, top.outside_cast),
                          ("Oden", "Kouzuki Oden", 2, 2))
         self.assertTrue(all(s.outside_cast > 0 for s in quality.suspicious_aliases))
+
+
+def type_of(extraction, name, t):
+    return next(r for r in extraction.registry_at(t) if r.canonical_name == name).entity_type
+
+
+class TestEntityTypesFromDatasets(unittest.TestCase):
+
+    def extract(self, *records):
+        return extract_entities(list(records), Reference(
+            characters=CHARACTERS, islands=ISLANDS, devil_fruits=DEVIL_FRUITS, concepts=CONCEPTS,
+        ))
+
+    def test_character_is_typed_without_its_bracketed_epithet(self):
+        extraction = self.extract(bronze_record(552, CH552_SCENE))
+        self.assertEqual(type_of(extraction, "Edward Newgate", 552), "Character")
+
+    def test_bracketed_epithet_also_names_the_character(self):
+        # Le wiki titre la page "Queen" ; le dataset écrit "Scien [Queen]".
+        extraction = self.extract(bronze_record(1000, CH1000_LONG_SUMMARY))
+        self.assertEqual(type_of(extraction, "Queen", 1000), "Character")
+
+    def test_trailing_parenthesis_of_a_dataset_name_is_dropped(self):
+        # "Bentham (Bon Clay) [Mr. 2]" et " Ope Ope no Mi (Awakened)" dans les datasets
+        extraction = self.extract(
+            bronze_record(534, "[[Bentham]] pleads with Luffy to get away from Magellan, "
+                               "revealing that the Warden ate the [[Doku Doku no Mi]]."),
+            bronze_record(661, "Smoker flies at Law, saying the [[Ope Ope no Mi]] allows the "
+                               "consumer to make a space they can modify at will."),
+        )
+        self.assertEqual(type_of(extraction, "Bentham", 534), "Character")
+        self.assertEqual(type_of(extraction, "Ope Ope no Mi", 661), "Devil Fruit")
+
+    def test_devil_fruit_and_its_english_name_are_one_entity(self):
+        # Le bronze ne lie jamais un fruit par son nom anglais : 2e phrase écrite pour le test.
+        extraction = self.extract(
+            bronze_record(11, CH11_SCENE),
+            bronze_record(12, "Buggy has eaten the [[Chop-Chop Fruit]]."),
+        )
+        self.assertNotIn("Chop-Chop Fruit", names_at(extraction, 12))
+        self.assertEqual(type_of(extraction, "Bara Bara no Mi", 12), "Devil Fruit")
+        self.assertEqual(mention_count(extraction, "Bara Bara no Mi", 12), 2)
+
+    def test_island_is_typed_place(self):
+        extraction = self.extract(bronze_record(
+            956, "On the way back to [[Dawn Island]], [[Sterry]] is also shocked by the fact "
+                 "that Sabo was at [[Mary Geoise]]."
+        ))
+        self.assertEqual(type_of(extraction, "Dawn Island", 956), "Place")
+
+    def test_name_in_two_datasets_stays_unknown(self):
+        # "Sphinx" est à la fois un Character (Impel Down) et une île dans les datasets.
+        # Phrase écrite pour le test.
+        extraction = self.extract(bronze_record(529, "[[Sphinx]] guards Level 2."))
+        self.assertEqual(type_of(extraction, "Sphinx", 529), "Unknown")
+
+    def test_untyped_entity_is_unknown(self):
+        extraction = self.extract(bronze_record(552, CH552_SCENE))
+        self.assertEqual(type_of(extraction, "Marineford", 552), "Unknown")
+
+    def test_concepts_and_titles_are_not_in_the_registry(self):
+        extraction = self.extract(
+            bronze_record(4, CH4_SCENE),
+            bronze_record(11, CH11_SCENE),
+            bronze_record(552, CH552_SCENE, characters=";[[Admiral]]s\n*[[Borsalino|Kizaru]]"),
+        )
+        names = {r.canonical_name for r in extraction.registry}
+        for concept in ("Pirate", "Devil Fruit", "Admiral"):
+            self.assertNotIn(concept, names)
+        self.assertIn("Borsalino", names_at(extraction, 552))
+
+    def test_no_dataset_state_attribute_enters_the_registry(self):
+        extraction = self.extract(bronze_record(552, CH552_SCENE))
+        row = next(r for r in extraction.registry if r.canonical_name == "Edward Newgate")
+        published = " ".join(str(v) for v in asdict(row).values())
+        for value in ("Whitebeard Pirates", "Deceased", "5046000000", "Gura Gura no Mi", "Human"):
+            self.assertNotIn(value, published)
+
+    def test_quality_report_has_the_unknown_share_of_mentions(self):
+        # CH552 : Marineford, Marines, Shanks, Edward Newgate, Polo Marco ([[pirate]] exclu),
+        # plus "Whitebeard's men" et "Shanks is coming" : 7 Mentions, dont les 2 d'Edward
+        # Newgate typées.
+        extraction = self.extract(bronze_record(552, CH552_SCENE))
+        self.assertAlmostEqual(extraction.quality.unknown_mention_share, 5 / 7)
 
 
 class TestDisguiseCandidates(unittest.TestCase):
