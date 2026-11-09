@@ -1,92 +1,100 @@
-# QUALITY.md
+# Quality requirements & test policy
 
-Quality requirements for what we deliver to the client (Konrad), how we check them, the
-evidence that we did, and what the client validated. Updated every week and attached to
-that week's client commitment (see §3 Log).
+Quality requirements for what we deliver to the client (Konrad), how we check them, and the
+evidence that we did. Updated every project week. Requirement IDs are `REQ-n`, so they aren't
+confused with the grid criteria Q1–Q3. IDs are never reused.
 
-Requirement IDs are `REQ-n`, so they aren't confused with the grid criteria Q1–Q3.
-Each requirement belongs to one delivery (column **Delivery**), and IDs are never reused.
-
-## §1 Requirements and how we check them
-
-### Delivery 2026-10-23: Taxonomy Gold research and POC
-
-| ID | Requirement | How we check it |
+| Grid | What it asks | Where it lives in this file |
 |---|---|---|
-| REQ-1 | The taxonomy is defined in a documented schema, and each structural decision is recorded with its rationale. | `docs/taxonomy-schema.md` exists and every structural choice has an ADR (`docs/adr/0001`–`0006`). |
-| REQ-2 | A POC tags real chapters into that schema with an LLM: about 10 chapters. | Run `API/taxonomy_client.py` on the POC chapters and count the valid tagged files it writes. |
-| REQ-3 | The research concludes, with evidence, whether the LLM route can produce the Taxonomy Gold for all 1193 chapters. | The conclusion cites measured limits (quotas, tokens per chapter, chapters actually tagged) rather than opinion. |
-| REQ-4 | If the route doesn't scale, an alternative pipeline is proposed, with why it's more likely to work. | An alternative is presented to the client with its inputs, outputs and trade-offs. |
+| **Q1** | You questioned and specified the quality requirements of your product | §1 Requirements |
+| **Q2** | You defined how you'll know each requirement is met | §2 Verification |
+| **Q3** | You actually ran those checks | §2 *Result* and *Evidence* columns + §3 Log |
 
-### Delivery 2026-10-30: GRU pipeline research and POC (vectorisation and extraction)
+---
 
-The POC runs on **10 chapters at most**.
+## 1. Requirements (Q1)
 
-**Input data: the Silver Files**
+### Delivery Thu 2026-11-12 (entities) and Fri 2026-11-13 (mid-term defense)
 
-| ID | Requirement | How we check it |
-|---|---|---|
-| REQ-5 | The corpus covers every published chapter, 1 to 1193, with no gaps. | `scripts/quality/check_silver.py` counts the files and lists missing numbers. |
-| REQ-6 | Every Silver File has a front-matter whose `chapter` matches its file name, `complete: true` and a `revision_id`. | Same script, per file. |
-| REQ-7 | Every Silver File has a non-empty Long Summary, plus its Short Summary and Chapter Notes sections. | Same script; also reports the min/median/max Long Summary length. |
-| REQ-8 | The header's `character_count` matches the Characters actually listed. This list is our reference for entity extraction (REQ-12). | Same script. |
+| ID | Requirement | Characteristic | Metric & threshold | Why it matters (client need) | Validated by client? |
+|---|---|---|---|---|---|
+| REQ-12 | The entity extraction finds the Characters of each chapter in its Long Summary, and doesn't invent extra ones. *(Carried over from 2026-10-30.)* | Functional suitability | The two proxies from the extraction's quality report (ENT-02 #81, ENT-04 #83). **Recall proxy**: share of Characters with an Appearance in the chapter's CharTable that have ≥ 1 Mention in the same chapter's Long Summary; ≥ 0.95 overall, ≥ 0.80 in every chapter. **Precision proxy**: share of Alias-matched Mentions of Characters whose Character is in that chapter's Cast (Appearance, Recall or Cover appearance); ≥ 0.80 overall, ≥ 0.50 in every chapter. | A missed or invented Character feeds the GRU a wrong history, so Konrad's forecasts get worse. | ☐ |
+| REQ-13 | Name variants resolve to one Entity ("Luffy" = "Monkey D. Luffy"), and different Entities stay distinct ("Fake Luffy" ≠ "Luffy"). *(Carried over from 2026-10-30.)* | Functional suitability | ≥ 95 % of extracted names resolve to a Canonical name; 0 wrong merges in a manual review of 20 random Aliases. | One Character split across several names, or two merged, corrupts the GRU's inputs and targets. | ☐ |
+| REQ-17 | Someone else can rerun the entity extraction from the README alone. | Maintainability | A teammate on a fresh clone gets the same `registry.jsonl` with 0 undocumented steps. | Konrad must be able to run the pipeline after we leave. | ☐ |
+| REQ-18 | Every number shown at the defense is traceable to a run or a document. | Reliability | 100 % of the numbers on the slides point to a commit, config and chapter list, or to a document. | Konrad and the jury must be able to check every result we claim. | ☐ |
+| REQ-19 | The entity dataset covers the whole corpus. | Functional suitability | `data/gold/registry.jsonl` covers chapters 1–1193, and every chapter has ≥ 1 Scene. | The GRU trains on the whole story, not on a sample. | ☐ |
+| REQ-20 | The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`). | Reliability | 0 Entities in `Registry(t)` before their first Mention or Appearance. | Any future information in the inputs would leak the answer and inflate the scores. | ☐ |
+| REQ-21 | The mid-term defense fits its slot (2026-11-13, 11:15–12:45: 20 min talk, 45 min questions, then debrief). | Usability | The talk lasts ≤ 20 min in a full timed rehearsal before 2026-11-13. | The questions are where the jury evaluates the work; running over cuts them short. | ☐ |
 
-**Vectorisation**
+### Delivery Fri 2026-10-30: GRU presentation and entity dataset
 
-| ID | Requirement | How we check it |
-|---|---|---|
-| REQ-9 | Each POC chapter gets exactly one Chapter Embedding, built from its Long Summary only: no header, no Short Summary, no Chapter Notes, so the cast can't leak into the vector. | Test: the vector count matches the chapter count; a header marker word never reaches the embedded text. |
-| REQ-10 | Every set of vectors comes with a manifest (model, chunking rule, chapter list, silver `revision_id`s), so vectors from different settings can't be mixed. | Test: the manifest exists and matches the vectors; loading with a different config fails. |
-| REQ-11 | Re-running vectorisation on the same input gives identical vectors. | Run it twice and compare hashes. |
+Committed: a presentation of how the GRU works and the entity dataset. For the events, we only
+committed to start looking into them. Vectorisation wasn't part of this delivery.
 
-**Extraction of entities and events**
+| ID | Requirement | Characteristic | Metric & threshold | Why it matters (client need) | Validated by client? |
+|---|---|---|---|---|---|
+| REQ-5 | The Silver corpus covers every published chapter, 1 to 1193, with no gaps. | Functional suitability | 1193 files, 0 missing chapter numbers. | A missing chapter leaves a hole in the story the forecasts learn from and are judged on. | ☐ |
+| REQ-6 | Every Silver File has a front-matter whose `chapter` matches its file name, `complete: true` and a `revision_id`. | Reliability | 0 files failing. | Forecasting chapter n+1 relies on the chapter order; a mislabelled or incomplete file would silently shift it. | ☐ |
+| REQ-7 | Every Silver File has a non-empty Long Summary, plus its Short Summary and Chapter Notes sections. | Functional suitability | 0 empty Long Summaries; 0 files missing the Short Summary or Chapter Notes section. | A chapter without its summary contributes nothing to the forecasts. | ☐ |
+| REQ-8 | The header's `character_count` matches the Characters actually listed. | Reliability | 0 mismatches. | The entity quality figures shown to Konrad (REQ-12) are only as trustworthy as this list. | ☐ |
+| REQ-15 | The GRU pipeline design is written down: inputs, what it predicts for chapter n+1, the baselines it must beat, and the metrics. | Maintainability | 4/4 points covered in a written design document. | Konrad must be able to check that the model answers his question before weeks go into building it. | ☑ 2026-10-30, Konrad (block diagram only; the written document will be submitted for validation) |
+| REQ-16 | The design uses no future information: chronological train/val/test split, everything fitted on training chapters only. | Reliability | 2/2 rules specified in the design (chronological split; fitting on training chapters only), and 0 violations in the leakage-guard test once the split code exists. | Konrad needs scores that hold on chapters not yet published; leakage would inflate them. | ☑ 2026-10-30, Konrad |
 
-| ID | Requirement | How we check it |
-|---|---|---|
-| REQ-12 | Entities (Characters) are extracted from each POC chapter's Long Summary and match the Silver header's character list. | Precision and recall against the header list (on-panel Characters), per chapter. |
-| REQ-13 | Name variants resolve to one Character ("Luffy" = "Monkey D. Luffy"), and different Characters stay distinct ("Fake Luffy" ≠ "Luffy"). | Count the extracted names that map to a header Character; manually review the ones that don't. |
-| REQ-14 | Events are extracted from each POC chapter's Long Summary: who did what to whom, with each event traceable to the sentence it came from. | A teammate reviews every event of the POC chapters against its source sentence and against the chapter's Chapter Notes (the wiki's list of key events); we report the share judged correct and the share of Chapter Notes covered. |
+REQ-12 and REQ-13 (entities) were also committed for this delivery. They were not finished and
+are carried over to 2026-11-12 (see above).
 
-**GRU pipeline research**
+### Delivery Fri 2026-10-23: Taxonomy Gold research and POC
 
-| ID | Requirement | How we check it |
-|---|---|---|
-| REQ-15 | The GRU pipeline design is written down: inputs (chapter vectors, entities, events), what it predicts for chapter n+1, the baseline it must beat (persistence, 53% micro F1) and the metrics. | A design document is committed to the repo and reviewed by a teammate against this list. |
-| REQ-16 | The design uses no future information: chronological train/val/test split, and everything fitted on training chapters only. | Review of the design; leakage-guard test once the split code exists. |
+| ID | Requirement | Characteristic | Metric & threshold | Why it matters (client need) | Validated by client? |
+|---|---|---|---|---|---|
+| REQ-1 | The taxonomy is defined in a documented schema, and each structural decision is recorded with its rationale. | Maintainability | 100 % of the structural choices in the schema document have an ADR. | The client must be able to understand and extend the taxonomy. | ☑ 2026-10-23, Konrad |
+| REQ-2 | A POC tags real chapters into that schema with an LLM. | Functional suitability | ≥ 10 chapters tagged into files that validate against the schema. | Konrad needs to see real chapters tagged before deciding whether the taxonomy is worth producing. | ☑ 2026-10-23, Konrad (accepted as partial) |
+| REQ-3 | The research concludes, with evidence, whether the LLM route can produce the Taxonomy Gold for all 1193 chapters. | Performance | The conclusion cites 3/3 measured limits: quotas, tokens per chapter, chapters tagged. | Konrad decides whether to keep investing in this route. | ☑ 2026-10-23, Konrad |
+| REQ-4 | If the route doesn't scale, an alternative pipeline is proposed, with why it's more likely to work. | Functional suitability | The alternative presented covers 3/3: inputs, outputs, trade-offs. | Konrad needs a way forward if the LLM route is a dead end. | ☑ 2026-10-23, Konrad |
 
-**For the whole delivery**
+### Backlog (not committed yet)
 
-| ID | Requirement | How we check it |
-|---|---|---|
-| REQ-17 | Someone else can rerun the POC from the README alone. | A teammate follows the README on a fresh clone and notes every step that failed. |
-| REQ-18 | Every number shown to the client is traceable to a run (commit, config, chapters). | Spot-check each number on the slides or in the demo against its run output. |
+Kept here so the IDs stay reserved. Each comes back into a delivery when a sprint commits to it.
 
-## §2 Result and Evidence
+- **REQ-9**: each chapter gets exactly one Chapter Embedding, built from its Long Summary only.
+- **REQ-10**: every set of vectors comes with a manifest (model, chunking rule, chapter list, silver `revision_id`s).
+- **REQ-11**: re-running vectorisation on the same input gives identical vectors.
+- **REQ-14**: events are extracted from each chapter's Long Summary (who did what to whom), each traceable to its source sentence.
 
-Result: **PASS** (checked and met) · **PARTIAL** (met in part, see evidence) · **FAIL**
-(checked, not met) · **NOT YET** (the work isn't done yet).
+## 2. Verification (Q2 → Q3)
 
-### Delivery 2026-10-23
+Status: ⏳ not run yet · ✅ pass · ⚠️ partial · ❌ fail (what we do about it is in §3)
 
-| ID | Result | Evidence | Validated by client? |
-|---|---|---|---|
-| REQ-1 | **PASS** | Schema: `docs/taxonomy-schema.md` and `.json` (commit `3bfa198`). Decisions: ADRs 0001–0006 (commit `8c0f99f`). Both on branch `search/taxonomy`. | ☑ 2026-10-23, Konrad |
-| REQ-2 | **PARTIAL** | **2 chapters** tagged out of the ~10 targeted: the free LLM tiers didn't allow more in the time we had. Pipeline: branch `API_LLM_taxonomie` (`API/taxonomy_client.py`, a fallback chain across 5 providers, quota tracking, repair of malformed answers, 15 test files). TODO: commit the 2 tagged chapters; `data/` is git-ignored, so they aren't on GitHub yet. | ☑ 2026-10-23, Konrad |
-| REQ-3 | **PASS** | Conclusion: **the LLM route doesn't scale to 1193 chapters on free tiers.** Measured limits (`API/README.md` on `API_LLM_taxonomie`): one chapter costs about 5–7k tokens; Groq allows 8k tokens per minute, so at most one chapter per minute; Gemini allows about 20 requests per day; OpenRouter's free models share 50 requests per day. Only 2 chapters were tagged in practice. | ☑ 2026-10-23, Konrad |
-| REQ-4 | **PASS** | GRU pipeline proposed and presented to the client: forecast chapter n+1 from vectorised past chapters plus extracted entities and events, so we no longer depend on a full LLM taxonomy. The embedding side is specified in issue #78. | ☑ 2026-10-23, Konrad |
+**Automatic checks (CI).** Since PR #101 (merged 2026-11-09), GitHub Actions
+(`.github/workflows/tests.yml`) runs `pytest -rs` on every PR and every push to `main`, on
+Ubuntu and Windows with Python 3.10 and 3.12. "Automatic (test suite)" in the tables below
+means this run. `data/` is never committed, so the two tests that read the real bronze/silver
+corpus are skipped in CI; REQ-5–8 on the real corpus are still checked locally with
+`scripts/quality/check_silver.py`.
 
-### Delivery 2026-10-30
+### Delivery Thu 2026-11-12 and Fri 2026-11-13
 
-| ID | Result | Evidence | Validated by client? |
-|---|---|---|---|
-| REQ-5 | **PASS** | 2026-10-26: `check_silver.py` → 1193 files (1193 expected), no missing chapters. `data/bronze/chapters.jsonl` also has 1193 lines. | ☐ |
-| REQ-6 | **PASS** | Same run: 0 files failing. | ☐ |
-| REQ-7 | **PASS** | Same run: every Long Summary is non-empty, with min 97, median 598 and max 2094 words. | ☐ |
-| REQ-8 | **PASS** | Same run: `character_count` matches the listed Characters in all 1193 files. | ☐ |
-| REQ-9 – REQ-11 | NOT YET | Vectorisation POC in progress (issue #78). | ☐ |
-| REQ-12 – REQ-14 | NOT YET | Extraction POC in progress. | ☐ |
-| REQ-15 – REQ-16 | NOT YET | GRU design document in progress. | ☐ |
-| REQ-17 – REQ-18 | NOT YET | Checked just before the delivery. | ☐ |
+| ID | Verification method | Pass criterion | When | Owner | Result | Evidence |
+|---|---|---|---|---|---|---|
+| REQ-12 | Read the recall proxy and precision proxy from the extraction's quality report (`registry_quality.json`), overall and per chapter. | Recall proxy ≥ 0.95 overall and ≥ 0.80 in every chapter; precision proxy ≥ 0.80 overall and ≥ 0.50 in every chapter | Before delivery (12/11) | Team | ⏳ | |
+| REQ-13 | Count extracted names resolved to a Canonical name; manually review 20 random Aliases. | ≥ 95 % resolved, 0 wrong merges | Before delivery (12/11) | Team | ⏳ | |
+| REQ-17 | A teammate follows the README on a fresh clone and notes every step that failed. | Same output, 0 undocumented steps | Before delivery (12/11) | Team | ⏳ | |
+| REQ-18 | Spot-check each number on the slides against its run output or document. | 100 % traceable | Before defense (13/11) | Team | ⏳ | |
+| REQ-19 | Read `registry.jsonl` and `registry_quality.json`. | Chapters 1–1193 present, ≥ 1 Scene each | Before delivery (12/11) | Team | ⏳ | |
+| REQ-20 | Test: for every Entity, no Registry row with `valid_from` before its first Mention or Appearance. | 0 violations | Automatic (test suite) | Team | ⏳ | |
+| REQ-21 | Full timed rehearsal of the talk. | ≤ 20 min | Before defense (13/11) | Team | ⏳ | |
+
+### Delivery Fri 2026-10-30
+
+| ID | Verification method | Pass criterion | When | Owner | Result | Evidence |
+|---|---|---|---|---|---|---|
+| REQ-5 | `scripts/quality/check_silver.py` counts the files and lists missing numbers. | 1193 files, 0 missing | Each sprint | Team | ✅ | 2026-10-26 run: 1193 files (1193 expected), no missing chapters. `data/bronze/chapters.jsonl` also has 1193 lines. |
+| REQ-6 | Same script, per file. | 0 files failing | Each sprint | Team | ✅ | Same run: 0 files failing. |
+| REQ-7 | Same script; also reports the Long Summary length. | 0 empty Long Summaries, 0 missing sections | Each sprint | Team | ✅ | Same run: min 97, median 598, max 2094 words. |
+| REQ-8 | Same script. | 0 mismatches | Each sprint | Team | ✅ | Same run: `character_count` matches in all 1193 files. |
+| REQ-15 | A teammate reviews the design document against the four points. | 4/4 points covered | Before demo | Team | ⚠️ | The pipeline design exists only as a block diagram (image), validated by Konrad on 2026-10-30. The written design document doesn't exist yet; once written, it will be reviewed against the four points and submitted to Konrad for validation. |
+| REQ-16 | Review of the design; leakage-guard test once the split code exists. | 2/2 rules in the design; 0 violations in the leakage-guard test | Before demo | Team | ❌ | 0/2 rules written down: neither the chronological split nor fitting on training chapters only appears in the block diagram or in any document. Only the input side is covered: ADR 0002 (`docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`) keeps future facts out of KG(t). The leakage-guard test doesn't exist yet (no split code). Action: write both rules into the design document (REQ-15). |
+| REQ-12, REQ-13 | Entity extraction compared with the Silver header. | See 2026-11-12 | Before demo | Team | ⚠️ | Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open). Carried over to 2026-11-12. |
 
 Output of the run behind REQ-5 to REQ-8:
 
@@ -99,75 +107,47 @@ Mots du Long Summary      : min 97, médiane 598, max 2094
 RÉSULTAT                  : OK
 ```
 
-To check that the check itself works, we ran it on a copy of two chapters with one Long
-Summary emptied and `--expected 3`. It reported `Chapitres manquants : [3]` and
+To check that the check itself works, we ran it on a copy of two chapters with one Long Summary
+emptied and `--expected 3`. It reported `Chapitres manquants : [3]` and
 `chapter_0002.md: Long Summary vide`, then exited with code 1.
 
-## §3 Log
+### Delivery Fri 2026-10-23
 
-One entry per client delivery, newest first. Each entry says what was committed, where
-that commitment is written, which requirements apply, what the client saw, and what they
-said.
+| ID | Verification method | Pass criterion | When | Owner | Result | Evidence |
+|---|---|---|---|---|---|---|
+| REQ-1 | Check the schema document and the ADRs. | Every structural choice has an ADR | Before demo | Team | ✅ | Schema: `docs/taxonomy-schema.md` and `.json` (commit `3bfa198`). Decisions: ADRs 0001–0006 (commit `8c0f99f`). Both on branch `search/taxonomy`. |
+| REQ-2 | Run `API/taxonomy_client.py` on the POC chapters and count the valid tagged files. | ≥ 10 chapters | Before demo | Team | ⚠️ | **2 chapters** tagged out of 10: the free LLM tiers didn't allow more in the time we had. Pipeline on branch `API_LLM_taxonomie` (fallback chain across 5 providers, quota tracking, repair of malformed answers, 15 test files). |
+| REQ-3 | Measure quotas, tokens per chapter and chapters actually tagged. | The conclusion rests on measurements | Before demo | Team | ✅ | **The LLM route doesn't scale to 1193 chapters on free tiers** (`API/README.md` on `API_LLM_taxonomie`): about 5–7k tokens per chapter; Groq allows 8k tokens per minute, so at most one chapter per minute; Gemini about 20 requests per day; OpenRouter's free models share 50 requests per day. |
+| REQ-4 | Present the alternative to the client. | Inputs, outputs and trade-offs presented | Before demo | Team | ✅ | GRU pipeline proposed: forecast chapter n+1 from vectorised past chapters plus extracted entities and events, without a full LLM taxonomy. |
 
-### Delivery Friday 2026-10-30: GRU pipeline research and POC
+## 3. Log (one entry per project week)
 
-| | |
-|---|---|
-| **Committed to deliver** | Research on the GRU pipeline, and a POC of its first stages: **vectorisation** of chapters and **extraction of entities and events**, on 10 chapters at most. |
-| **Where it's written** | Meeting notes of 2026-10-23 with Konrad. TODO: link or path to the notes. |
-| **Requirements** | REQ-5 – REQ-8 (input data), REQ-9 – REQ-11 (vectorisation), REQ-12 – REQ-14 (extraction), REQ-15 – REQ-16 (GRU research), REQ-17 – REQ-18 (reproducibility). |
-| **Status on 2026-10-26** | REQ-5 – REQ-8 PASS; the rest NOT YET (see §2). |
-| **Planned to show the client** | The GRU design document (REQ-15, REQ-16); vectors and their manifest for the POC chapters (REQ-9 – REQ-11); extracted entities with their precision and recall (REQ-12, REQ-13); extracted events next to their source sentences (REQ-14). |
-| **Shown to client** | To fill in on Friday. |
-| **Client said** | To fill in on Friday. |
-| **Validated** | To fill in on Friday: tick each confirmed REQ in §2 with date and name. |
+### Weeks of 02/11 & 09/11 (entities Thu 12/11, mid-term defense Fri 13/11)
+- Added: REQ-19, REQ-20, REQ-21. REQ-12 and REQ-13 carried over with measurable thresholds. REQ-9–11 and REQ-14 moved to the backlog: they were never committed.
+- Checked: nothing yet (all ⏳). Tooling: CI now runs the test suite on every PR and push to `main` (PR #101, 2026-11-09: 32 passed, 2 skipped, the `data/` checks, on all 4 jobs).
+- Planned to show: the finished entity dataset (`Registry(t)`) with its recall/precision (REQ-12, REQ-13, REQ-19, REQ-20), then the mid-term defense on 13/11.
+- Next: once the entities are done, benchmark an API solution with an Anthropic model for the following sprints. Write the GRU pipeline design document (REQ-15), including the chronological split and fitting on training chapters only (REQ-16), and submit it to Konrad for validation.
 
-### Delivery Friday 2026-10-23: Taxonomy Gold research and POC
+### Week of 26/10 (delivery Fri 30/10)
+- Added: REQ-15, REQ-16 (GRU design); REQ-12, REQ-13 (entities).
+- Checked: REQ-5–8 ✅ (Silver corpus, 2026-10-26); REQ-15 ⚠️ (design only as a block diagram, validated by Konrad; no written document yet); REQ-16 ❌ (the split and fitting rules aren't written anywhere; no leakage-guard test yet); REQ-12, REQ-13 ⚠️, entities not finished.
+- Shown to client: the presentation of how the GRU works (`GRU.md`, delivered on Teams). The entity dataset wasn't finished. Events: work started, nothing promised.
+- Client said: satisfied, but disappointed about the entities.
+- Decision: continue with the GRU pipeline; finish the entities first, then benchmark an API solution with an Anthropic model.
+- Next: finish the entities (REQ-12, REQ-13, REQ-19, REQ-20) for 12/11.
 
-| | |
-|---|---|
-| **Committed to deliver** | Research on how to build the Taxonomy Gold, and a small POC of it (about 10 chapters). |
-| **Where it's written** | Meeting notes of 2026-10-16 with Konrad. TODO: confirm date and link. |
-| **Requirements** | REQ-1 – REQ-4. |
-| **Shown to client** | The current taxonomy (REQ-1); the 2 chapters tagged by the LLM pipeline (REQ-2); the research result: tagging chapter summaries with free LLMs doesn't work and can't work at the scale of 1193 chapters (REQ-3); the research on a new pipeline (the GRU pipeline), which is more likely to give good results (REQ-4). |
-| **Client said** | Satisfied with the work done. |
-| **Validated** | The whole deliverable: REQ-1 – REQ-4, Konrad, 2026-10-23. REQ-2 was accepted as PARTIAL (2 chapters instead of ~10). |
-| **Decision** | Stop building the Taxonomy Gold with LLMs; move to the GRU pipeline (next delivery). |
+### Week of 19/10 (delivery Fri 23/10)
+- Added: REQ-1–4.
+- Checked: REQ-1, REQ-3, REQ-4 ✅; REQ-2 ⚠️ (2 chapters instead of ~10).
+- Shown to client: the taxonomy (REQ-1); the 2 chapters tagged by the LLM pipeline (REQ-2); the research result: tagging chapter summaries with free LLMs can't scale to 1193 chapters (REQ-3); the GRU pipeline as an alternative (REQ-4).
+- Client said: satisfied with the work done; validated REQ-1–4, with REQ-2 accepted as partial.
+- Decision: stop building the Taxonomy Gold with LLMs; move to the GRU pipeline.
+- Next: GRU presentation and entity dataset for 30/10.
 
-## §4 Coding practices (CP1)
+## 4. Data & confidentiality rules
 
-What we already do (visible on GitHub):
-
-- **One issue → one branch → one PR**, merged after review (PRs #1, #73, #76, #77).
-  Issues are written as user stories with acceptance criteria (#78).
-- **Decisions are recorded as ADRs** (`docs/adr/` on `search/taxonomy`, ADR 0001 on
-  `architecture`), and **shared vocabulary** lives in `CONTEXT.md` (on `search/taxonomy`),
-  so code, issues and docs use the same terms.
-- **Small, descriptive commits** (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`);
-  secrets kept out of git (`.env` ignored).
-- **Tests with pytest/unittest, without network access**: 15 test files on
-  `API_LLM_taxonomie`, and 34 parser and bronze/silver contract tests on `architecture`.
-- **Installable package and configuration instead of hard-coded values**: `pyproject.toml`
-  and `src/guess_arc/` on `architecture`; `ruff` is configured in `next-chapter-prediction`.
-
-What we start this week:
-
-- Every check in §1 becomes a script or a test that anyone can rerun. The first one is
-  `scripts/quality/check_silver.py` (REQ-5 – REQ-8).
-- Tests are written together with the POC code (REQ-9 – REQ-13), not after it.
-- Every result file records its commit, config and chapter list (REQ-18).
-
-Known gaps: no CI runs the tests on each PR yet, and the tests on other branches weren't
-rerun for this report.
-
-## §5 Documentation (D1)
-
-| Document | For whom | Status |
-|---|---|---|
-| `README.md` | Anyone cloning the repo: setup, ingestion, running the checks | Exists; "Quality checks" section added this week. POC usage to be added (REQ-17). |
-| `CONTEXT.md` | Everyone: the project's vocabulary | On `search/taxonomy`; to bring to `main`. |
-| `docs/adr/` | Future maintainers: why the structure is what it is | ADRs 0001–0006 (taxonomy) on `search/taxonomy`; ADR 0001 (wiki source) on `architecture`. To bring to `main`. |
-| `docs/taxonomy-schema.md` | Reference for the taxonomy shown on 2026-10-23 | On `search/taxonomy`; no longer extended, since the taxonomy route was dropped. |
-| GRU design document | Whoever builds the GRU pipeline | To write this week (REQ-15). |
-| `QUALITY.md` | Client and teacher: what "good" means and the proof | This file, updated every week. |
-| Issue #78 | Whoever implements the vectorisation | Full spec with user stories. |
+- Data that must **never** be committed (paths, file types): `data/` (bronze, silver, gold and `state.json`) and `.env` (API keys).
+- Where the data actually lives (who has access): generated locally by each teammate from the public English One Piece Fandom wiki (`python -m guess_arc.ingestion`). The source is public, under CC BY-SA, and used for academic purposes with attribution.
+- Tools/services **not** allowed by the client: none so far. Sending chapter text (public wiki content) to the Anthropic API is allowed, with the key kept in `.env`.
+- Personal data involved (GDPR) and how it is handled: none. The corpus only covers fictional characters.
+- Matching `.gitignore` entries are in place: ☑ (`data/`, `.env`)
