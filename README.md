@@ -30,17 +30,44 @@ next to `ingestion`. They will read the silver layer through `guess_arc.paths`.
 
 ## Setup
 
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
+Requirements: **Python 3.10 or later**, Git, and an internet connection for the
+ingestion step (tests and quality checks run offline). Works on Windows, macOS
+and Linux.
 
+```bash
+git clone https://github.com/EPF-MDE/GUESS.ARC.git
+cd GUESS.ARC
+```
+
+Create and activate a virtual environment. On macOS / Linux, `python` often
+doesn't exist or points to Python 2: use `python3` for this one command.
+
+| OS / shell | Create | Activate |
+|---|---|---|
+| macOS / Linux | `python3 -m venv .venv` | `source .venv/bin/activate` |
+| Windows, cmd | `python -m venv .venv` | `.venv\Scripts\activate` |
+| Windows, PowerShell | `python -m venv .venv` | `.venv\Scripts\Activate.ps1` |
+| Windows, Git Bash | `python -m venv .venv` | `source .venv/Scripts/activate` |
+
+If PowerShell refuses to run `Activate.ps1` ("running scripts is disabled on this
+system"), allow local scripts once for your user, then activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Once the environment is active, `python` and `pip` point to it on every OS:
+
+```bash
+python --version                  # check: 3.10 or later
 pip install -r requirements.txt   # installs guess_arc in editable mode + pytest
 ```
 
+All the commands below assume the environment is active.
+
 ## Ingestion
+
+Needs internet access (English One Piece Fandom wiki API, no account or API key).
 
 ```bash
 # full run: every chapter, ~24 requests, under a minute
@@ -64,13 +91,14 @@ Outputs always go under `data/` at the repo root (override with `--data-dir`):
 ## Quality checks
 
 ```bash
-python scripts/quality/check_silver.py [--silver data/silver] [--expected 1193]
+python scripts/quality/check_silver.py [--silver PATH] [--expected 1193]
 ```
 
 Checks that the silver corpus is a sound input for the next stages: no missing
 chapters, a valid front-matter in every file, a non-empty long summary, and a
 `character_count` that matches the listed characters. Standard library only, no
-network; exits with code 1 if anything fails. The requirements it covers
+network; exits with code 1 if anything fails. By default it reads `data/silver/`
+at the repo root, whatever the current directory. The requirements it covers
 (REQ-5 to REQ-8) and the results are tracked in [QUALITY.md](QUALITY.md).
 
 ## Tests

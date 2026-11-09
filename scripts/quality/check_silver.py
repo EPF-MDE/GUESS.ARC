@@ -12,6 +12,10 @@ import re
 import sys
 from pathlib import Path
 
+# Ancré sur la racine du repo (comme guess_arc.paths), pas sur le dossier courant :
+# le script donne le même résultat d'où qu'on le lance.
+DEFAULT_SILVER = Path(__file__).resolve().parents[2] / "data" / "silver"
+
 SECTION = re.compile(r"^## (.+)$", re.MULTILINE)
 FILE_NAME = re.compile(r"chapter_(\d{4})\.md")
 
@@ -64,7 +68,8 @@ def check_file(path: Path, number: int) -> tuple[list[str], int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--silver", type=Path, default=Path("data/silver"))
+    parser.add_argument("--silver", type=Path, default=DEFAULT_SILVER,
+                        help="dossier silver (défaut : data/silver à la racine du repo)")
     parser.add_argument("--expected", type=int, default=1193)
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
