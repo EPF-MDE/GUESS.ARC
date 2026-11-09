@@ -1,130 +1,177 @@
 # GUESS.ARC
 
-Prédire le contenu du chapitre n+1 de *One Piece* à partir des chapitres 1 à n.
+[![tests](https://github.com/EPF-MDE/GUESS.ARC/actions/workflows/tests.yml/badge.svg)](https://github.com/EPF-MDE/GUESS.ARC/actions/workflows/tests.yml)
 
-Le dépôt contient aujourd'hui la chaîne de données jusqu'à la couche **silver**.
-La modélisation (architecture séquentielle à base de GRU) viendra s'y brancher
-dans un second temps. L'ancienne approche par taxonomie simple a été abandonnée.
+Predict the content of *One Piece* chapter n+1 from chapters 1 to n.
 
-## Structure
+The repository currently holds the data pipeline up to the **silver** layer,
+plus entity extraction into the **gold** layer (Registry(t)).
+Modelling (a sequential, GRU-based architecture) will plug into it in a later
+step. The earlier simple-taxonomy approach has been dropped.
+
+## Layout
 
 ```
 src/guess_arc/
-├── paths.py              # emplacements data/bronze, data/silver, data/gold, data/state.json
-├── ingestion/            # wiki Fandom EN -> bronze -> silver
-│   ├── wiki_client.py    # appels à l'API MediaWiki
-│   ├── parser.py         # wikitexte d'un chapitre -> Chapter
+├── paths.py              # locations of data/bronze, data/silver, data/gold, data/state.json
+├── ingestion/            # English Fandom wiki -> bronze -> silver
+│   ├── wiki_client.py    # MediaWiki API calls
+│   ├── parser.py         # a chapter's wikitext -> Chapter
 │   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
-│   ├── validation.py     # contrat de format bronze / silver
-│   └── pipeline.py       # orchestration, état incrémental, CLI
-└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) dans la gold
-    ├── extraction.py     # extract_entities(chapters, reference), pure, seul point d'entrée
-    ├── pipeline.py       # lecture du bronze, écriture de la gold, CLI
-    └── common_words.txt  # mots courants : un texte de lien qui commence par l'un d'eux n'est pas un Alias
-reference/                # données de référence versionnées
+│   ├── validation.py     # bronze / silver format contract
+│   └── pipeline.py       # orchestration, incremental state, CLI
+└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
+    ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
+    ├── pipeline.py       # reads bronze, writes gold, CLI
+    └── common_words.txt  # common words: link text starting with one of them is not an Alias
+reference/                # versioned reference data
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
-├── concepts.txt          # Concepts et Titles, exclus de Registry(t)
-├── wiki_categories.json  # cache des catégories du wiki (Entity types)
-├── type_overrides.csv    # Entity types fixés à la main
-└── disguises.csv         # Disguises confirmés à la main, avec leur Revelation
-tests/                    # tests sans réseau
-docs/adr/                 # décisions d'architecture
+├── concepts.txt          # Concepts and Titles, excluded from Registry(t)
+├── wiki_categories.json  # cache of the wiki's categories (Entity types)
+├── type_overrides.csv    # Entity types set by hand
+└── disguises.csv         # Disguises confirmed by hand, with their Revelation
+scripts/quality/          # corpus quality checks (see QUALITY.md)
+tests/                    # network-free tests
+docs/adr/                 # architecture decision records
+QUALITY.md                # quality requirements, evidence and client validation
 ```
 
-Les futures étapes (features, modèle) seront ajoutées comme sous-packages de
-`guess_arc`, à côté d'`ingestion`. Elles liront la silver via `guess_arc.paths`.
+Future stages (features, model) will be added as sub-packages of `guess_arc`,
+next to `ingestion`. They will read the silver layer through `guess_arc.paths`.
 
-## Environnement
+## Setup
+
+Requirements: **Python 3.10 or later**, Git, and an internet connection for the
+ingestion step (tests and quality checks run offline). Works on Windows, macOS
+and Linux.
 
 ```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt   # installe guess_arc en mode éditable + pytest
+git clone https://github.com/EPF-MDE/GUESS.ARC.git
+cd GUESS.ARC
 ```
+
+Create and activate a virtual environment. On macOS / Linux, `python` often
+doesn't exist or points to Python 2: use `python3` for this one command.
+
+| OS / shell | Create | Activate |
+|---|---|---|
+| macOS / Linux | `python3 -m venv .venv` | `source .venv/bin/activate` |
+| Windows, cmd | `python -m venv .venv` | `.venv\Scripts\activate` |
+| Windows, PowerShell | `python -m venv .venv` | `.venv\Scripts\Activate.ps1` |
+| Windows, Git Bash | `python -m venv .venv` | `source .venv/Scripts/activate` |
+
+If PowerShell refuses to run `Activate.ps1` ("running scripts is disabled on this
+system"), allow local scripts once for your user, then activate again:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Once the environment is active, `python` and `pip` point to it on every OS:
+
+```bash
+python --version                  # check: 3.10 or later
+pip install -r requirements.txt   # installs guess_arc in editable mode + pytest
+```
+
+All the commands below assume the environment is active.
 
 ## Ingestion
 
-```bash
-# run complet : tous les chapitres, ~24 requêtes, moins d'une minute
-python -m guess_arc.ingestion --max-chapter 1194
+Needs internet access (English One Piece Fandom wiki API, no account or API key).
 
-# mise à jour hebdomadaire : ne retraite que les pages dont la révision a changé
+```bash
+# full run: every chapter, ~24 requests, under a minute
+python -m guess_arc.ingestion --max-chapter 1193
+
+# weekly update: only reprocesses pages whose revision has changed
 python -m guess_arc.ingestion --max-chapter 1200 --incremental
 
-# après une modification du parseur : régénère la silver depuis le bronze, sans réseau
+# after a parser change: rebuild silver from bronze, no network
 python -m guess_arc.ingestion --rebuild-silver
 ```
 
-Sorties, toujours sous `data/` à la racine du repo (modifiable avec `--data-dir`) :
+Outputs always go under `data/` at the repo root (override with `--data-dir`):
 
-- `data/bronze/chapters.jsonl` : le wikitexte brut archivé, une ligne par chapitre
-- `data/silver/chapter_NNNN.md` : un fichier par chapitre, front-matter YAML (titre, arc, personnages avec faction et `on_panel`) puis résumé court, résumé long et notes
-- `data/state.json` : les `revid` connus, pour les runs incrémentaux
+- `data/bronze/chapters.jsonl`: the archived raw wikitext, one line per chapter
+- `data/silver/chapter_NNNN.md`: one file per chapter, a YAML front-matter (title,
+  arc, characters with their faction and `on_panel`) followed by the short summary,
+  the long summary and the notes
+- `data/state.json`: the known `revid`s, for incremental runs
 
-## Extraction des Entities
+## Entity extraction
 
 ```bash
-# tout le bronze -> Registry(t), sans réseau
+# all of bronze -> Registry(t), no network needed except for uncached wiki categories
 python -m guess_arc.entities
 ```
 
-Chaque paragraphe du Long Summary est une Scene ; chaque lien `[[...]]` d'une
-Scene est une Mention de l'Entity dont le Canonical name est la page cible
-(`[[Page/Sous-page]]` et `[[Page#Section]]` comptent pour la page parente).
-Le texte d'un lien pipé (`[[Edward Newgate|Whitebeard]]`) devient un Alias s'il
-ressemble à un nom : majuscule initiale, premier mot absent de
-`common_words.txt`, lien ni vers une sous-page ni vers une section. Chaque Alias
-est daté par le chapitre de sa première utilisation.
-Le wiki ne liant une Entity qu'à sa première occurrence dans la page, ses
-occurrences non liées sont retrouvées par Alias match : dans chaque Scene, on
-cherche (sensible à la casse) le Canonical name et les Aliases déjà datés des
-Entities liées dans le même chapitre.
-Le Cast vient de la CharTable : un Character avec une Appearance, un Recall ou
-une Cover appearance entre dans Registry(t) à ce chapitre, même sans Mention ;
-un en-tête de faction lié (`;[[Straw Hat Pirates]]`) y ajoute son Group, sans
-compter de Mention.
-Chaque Entity reçoit un seul Entity type, fixe : Character, Place ou Devil Fruit
-si son Canonical name est dans `reference/characters.json`, `islands.json` ou
-`devil_fruits.json` (nom sans l'épithète entre crochets ni la parenthèse finale,
-ou épithète entre crochets d'un Character : `Scien [Queen]` -> Queen ; nom anglais
-d'un Devil Fruit ramené au nom japonais). Sinon, les catégories de sa page sur
-le wiki donnent le type (`Pirate Crews` -> Group, `Ships` -> Ship, `Swords` ->
-Weapon, `Locations` -> Place...), selon un ordre de priorité documenté dans
-`extraction.py`. Faute de mieux, l'Entity est Unknown. `reference/type_overrides.csv`
-l'emporte sur tout le reste. Les catégories sont mises en cache dans
-`reference/wiki_categories.json` : seules les Entities encore Unknown et absentes
-du cache sont demandées au wiki, par lots de 50 (`--offline` pour ne rien demander). Seuls les noms des datasets servent : leurs attributs
-d'état ne sont jamais lus. Les Concepts et Titles de `reference/concepts.txt`
-(`Pirate`, `Haki`, `Admiral`...) sont exclus de Registry(t).
-Les Disguises confirmés dans `reference/disguises.csv` (alias, Canonical name,
-chapitre de Revelation) sont appliqués : avant la Revelation, le Disguise est une
-Entity à part entière (Kyoshiro a ses propres Mentions, liées ou par Alias match,
-et sa présence dans la CharTable) ; à partir de la Revelation, il rejoint son
-Canonical name, qui reprend ses Mentions et l'a pour Alias daté de ce chapitre.
-Liste vide : sortie inchangée.
-Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
+Each paragraph of the Long Summary is a Scene; each `[[...]]` link in a Scene is
+a Mention of the Entity whose Canonical name is the target page
+(`[[Page/Subpage]]` and `[[Page#Section]]` count for the parent page).
+The text of a piped link (`[[Edward Newgate|Whitebeard]]`) becomes an Alias if it
+looks like a name: initial capital, first word not in `common_words.txt`, and the
+link points neither to a subpage nor to a section. Each Alias is dated by the
+chapter of its first use.
+Since the wiki only links an Entity at its first occurrence in a page, its
+unlinked occurrences are recovered by Alias match: in each Scene, we search
+(case-sensitive) for the Canonical name and the already-dated Aliases of the
+Entities linked in the same chapter.
+The Cast comes from the CharTable: a Character with an Appearance, a Recall or a
+Cover appearance enters Registry(t) at that chapter, even without a Mention; a
+linked faction header (`;[[Straw Hat Pirates]]`) adds its Group, without counting
+a Mention.
+Each Entity gets exactly one fixed Entity type: Character, Place or Devil Fruit if
+its Canonical name is in `reference/characters.json`, `islands.json` or
+`devil_fruits.json` (name without the bracketed epithet or the trailing
+parenthesis, or a Character's bracketed epithet: `Scien [Queen]` -> Queen; a Devil
+Fruit's English name mapped to its Japanese name). Otherwise, the categories of its
+wiki page give the type (`Pirate Crews` -> Group, `Ships` -> Ship, `Swords` ->
+Weapon, `Locations` -> Place...), following a priority order documented in
+`extraction.py`. Failing that, the Entity is Unknown. `reference/type_overrides.csv`
+wins over everything else. Categories are cached in
+`reference/wiki_categories.json`: only Entities still Unknown and missing from the
+cache are requested from the wiki, in batches of 50 (`--offline` to request
+nothing). Only the datasets' names are used: their state attributes are never
+read. The Concepts and Titles in `reference/concepts.txt` (`Pirate`, `Haki`,
+`Admiral`...) are excluded from Registry(t).
+The confirmed Disguises in `reference/disguises.csv` (alias, Canonical name,
+Revelation chapter) are applied: before the Revelation, the Disguise is an Entity
+in its own right (Kyoshiro has his own Mentions, linked or by Alias match, and his
+own CharTable presence); from the Revelation on, it merges into its Canonical name,
+which takes over its Mentions and gets it as an Alias dated from that chapter.
+Empty list: unchanged output.
+Vocabulary: [CONTEXT.md](CONTEXT.md). Constraint: [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
 
-- `data/gold/registry.jsonl` : Registry(t), une ligne par Entity et par changement,
-  valable de `valid_from` à `valid_to` inclus (`null` : encore valable), avec
-  Entity type, Aliases déjà utilisés, premier et dernier chapitre vu et nombre
-  de Mentions jusqu'à t
-- `data/gold/registry_quality.json` : rapport qualité (Scenes par chapitre ;
-  recall proxy, global et par arc : part des Characters avec une Appearance dans
-  la CharTable qui ont au moins une Mention dans le Long Summary du chapitre ;
-  Mentions par source, lien ou Alias match ; precision proxy : part des Alias
-  matches de Characters qui tombent dans le Cast du chapitre ; les 20 Aliases
-  les plus suspects, ceux qui tombent le plus souvent hors du Cast ; part des
-  Mentions typées Unknown ; les 50 Entities les plus mentionnées avec leur type)
-- `data/gold/disguise_candidates.csv` : Disguises possibles, triés par nombre de
-  liens. Un candidat est un Alias de Character qui ne partage aucun mot avec son
-  Canonical name (`Kyoshiro` -> Denjiro), relevé dans le Long Summary, la CharTable
-  et les Chapter Notes. Régénéré à chaque run : on y confirme les vrais Disguises
-  à la main, avec leur chapitre de Revelation, avant de les recopier dans
-  `reference/disguises.csv`.
+- `data/gold/registry.jsonl`: Registry(t), one line per Entity and per change,
+  valid from `valid_from` to `valid_to` inclusive (`null`: still valid), with the
+  Entity type, the Aliases used so far, the first and last chapter seen and the
+  number of Mentions up to t
+- `data/gold/registry_quality.json`: quality report (Scenes per chapter; recall
+  proxy, overall and per arc: share of Characters with an Appearance in the
+  CharTable that have at least one Mention in the chapter's Long Summary; Mentions
+  by source, link or Alias match; precision proxy: share of Character Alias matches
+  that fall within the chapter's Cast; the 20 most suspicious Aliases, those that
+  most often fall outside the Cast; share of Mentions typed Unknown; the 50 most
+  mentioned Entities with their type)
+- `data/gold/disguise_candidates.csv`: possible Disguises, sorted by number of
+  links. A candidate is a Character Alias that shares no word with its Canonical
+  name (`Kyoshiro` -> Denjiro), found in the Long Summary, the CharTable and the
+  Chapter Notes. Regenerated on every run: real Disguises are confirmed by hand,
+  with their Revelation chapter, then copied into `reference/disguises.csv`.
+
+## Quality checks
+
+```bash
+python scripts/quality/check_silver.py [--silver PATH] [--expected 1193]
+```
+
+Checks that the silver corpus is a sound input for the next stages: no missing
+chapters, a valid front-matter in every file, a non-empty long summary, and a
+`character_count` that matches the listed characters. Standard library only, no
+network; exits with code 1 if anything fails. By default it reads `data/silver/`
+at the repo root, whatever the current directory. The requirements it covers
+(REQ-5 to REQ-8) and the results are tracked in [QUALITY.md](QUALITY.md).
 
 ## Tests
 
@@ -132,24 +179,28 @@ Vocabulaire : [CONTEXT.md](CONTEXT.md). Contrainte : [ADR 0002](docs/adr/0002-re
 pytest
 ```
 
-Aucun accès réseau n'est nécessaire. Les tests couvrent :
+No network access is needed. GitHub Actions CI (`.github/workflows/tests.yml`)
+runs the same command on every PR and every push to `main`, on Ubuntu and Windows,
+with Python 3.10 and 3.12. `data/` doesn't exist there, so the checks on the real
+corpus are skipped (`pytest -rs` shows why). The tests cover:
 
-- le parseur, sur des extraits réels des chapitres 500 et 1193 : annotations
-  en parenthèses nues des anciens chapitres (`*[[Kalifa]] (cover)`) et
-  en apostrophes des récents (`*[[King]] ''(cover)''`) ;
-- le contrat de format bronze et silver, sur des fixtures synthétiques ;
-- l'extraction des Entities via `extract_entities` seul, sur des extraits réels
-  du bronze (Scenes, Mentions, Aliases datés, Alias match, Cast de la
-  CharTable, recall et precision proxies, Entity types des datasets, des catégories du wiki et des overrides, cache des
-  catégories, Disguises confirmés, Registry(t) sur 3 chapitres, Disguise candidates) ;
-- le contrôle de tous les fichiers de `data/bronze/` et `data/silver/`
-  (ignoré si les données n'ont pas encore été générées).
+- the parser, on real excerpts from chapters 500 and 1193: bare-parenthesis
+  annotations in older chapters (`*[[Kalifa]] (cover)`) and quoted ones in
+  recent chapters (`*[[King]] ''(cover)''`);
+- the bronze and silver format contract, on synthetic fixtures;
+- entity extraction through `extract_entities` alone, on real bronze excerpts
+  (Scenes, Mentions, dated Aliases, Alias match, CharTable Cast, recall and
+  precision proxies, Entity types from the datasets, wiki categories and
+  overrides, category cache, confirmed Disguises, Registry(t) over 3 chapters,
+  Disguise candidates);
+- a check of every file in `data/bronze/` and `data/silver/`
+  (skipped if the data hasn't been generated yet).
 
-## Source de données
+## Data source
 
-Wiki One Piece anglais uniquement. Les sources françaises et japonaises sont
-écartées, voir [ADR 0001](docs/adr/0001-source-wiki-fandom-anglais.md).
+English One Piece wiki only. French and Japanese sources are ruled out, see
+[ADR 0001](docs/adr/0001-source-wiki-fandom-anglais.md).
 
-Le contenu du wiki Fandom est sous licence CC BY-SA : usage académique avec
-attribution. Le client envoie un `User-Agent` identifiant le projet et limite
-son débit.
+Fandom wiki content is licensed under CC BY-SA: academic use with attribution.
+The client sends a `User-Agent` identifying the project and rate-limits its
+requests.
