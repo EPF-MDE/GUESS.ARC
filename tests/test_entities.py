@@ -798,16 +798,17 @@ class TestEntityTypesFromWikiCategories(unittest.TestCase):
                          "Character")
 
 
-# Catégories réelles du wiki (cache reference/wiki_categories.json) : Titles et
-# Concepts rangés dans Positions ou Occupations, et Entities à garder.
-TITLE_CATEGORIES = {
+# Catégories réelles du wiki (cache reference/wiki_categories.json, abrégé pour
+# Captain John) : Titles et Concepts rangés dans Positions ou Occupations, et
+# Entities à garder.
+TITLES_WIKI_CATEGORIES = {
     "Rear Admiral": ("Lists", "Marine", "Occupations"),
     "First Mate": ("Positions",),
     "Royal Guards": ("Occupations",),
     "Captain John": ("Pirate Captains", "Male Characters", "Rocks Pirates"),
     "Cipher Pol": ("World Government Groups",),
 }
-# Phrase écrite pour le test
+# Scene et CharTable écrites pour le test
 CH1001_TITLES_SCENE = (
     "The [[Rear Admiral]] and the [[First Mate]] of [[Captain John]] meet the [[Royal Guards]] "
     "and [[Cipher Pol]]. The Rear Admiral leaves."
@@ -821,7 +822,7 @@ def titles_extraction(overrides=None):
     return extract_entities([bronze_record(1001, CH1001_TITLES_SCENE,
                                            characters=CH1001_TITLES_CHARACTERS)],
                             Reference(characters=CHARACTERS, concepts=CONCEPTS,
-                                      wiki_categories=TITLE_CATEGORIES,
+                                      wiki_categories=TITLES_WIKI_CATEGORIES,
                                       type_overrides=overrides or {}))
 
 
@@ -834,6 +835,9 @@ class TestTitlesExcludedByWikiCategory(unittest.TestCase):
         for title in ("Rear Admiral", "First Mate", "Royal Guards"):
             self.assertNotIn(title, names)
             self.assertNotIn(title, mentioned)
+        # Seuls les liens de Captain John et Cipher Pol restent ; "The Rear Admiral
+        # leaves" n'est pas un Alias match.
+        self.assertEqual(extraction.quality.mentions_by_source, {"link": 2, "alias_match": 0})
 
     def test_real_entities_next_to_titles_stay(self):
         names = names_at(titles_extraction(), 1001)

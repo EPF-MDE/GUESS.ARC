@@ -104,8 +104,8 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
 
     # Les catégories du wiki ne sont demandées que pour les Entities encore
     # Unknown et absentes du cache ; un second run ne touche pas au réseau.
-    # Un Title nouveau sort donc Unknown au premier passage, puis est exclu
-    # par ses catégories au second. Un nom typé par un dataset n'est jamais
+    # Un Title nouveau sort Unknown de la première extraction, puis est exclu
+    # par ses catégories dans la seconde, juste après la requête. Un nom typé par un dataset n'est jamais
     # demandé au wiki : un Title présent dans un dataset ne serait pas exclu
     # (aucun au 2026-11-10 ; à ajouter à concepts.txt le cas échéant).
     unknown = {r.canonical_name for r in extraction.registry if r.entity_type == "Unknown"}

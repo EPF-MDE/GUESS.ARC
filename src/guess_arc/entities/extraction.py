@@ -129,7 +129,7 @@ class QualityReport:
     suspicious_aliases: list[SuspiciousAlias]
     unknown_mention_share: float | None
     top_entities: list[TopEntity]
-    excluded_by_category: int = 0
+    excluded_by_category: int
 
 
 @dataclass(frozen=True)
