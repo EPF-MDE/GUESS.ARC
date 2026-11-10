@@ -29,6 +29,7 @@ reference/                # versioned reference data
 ├── concepts.txt          # Concepts and Titles, excluded from Registry(t)
 ├── wiki_categories.json  # cache of the wiki's categories (Entity types)
 ├── type_overrides.csv    # Entity types set by hand
+├── redirects.csv         # wiki redirects merged into their target's Canonical name
 └── disguises.csv         # Disguises confirmed by hand, with their Revelation
 scripts/quality/          # corpus quality checks (see QUALITY.md)
 tests/                    # network-free tests

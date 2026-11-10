@@ -1,7 +1,7 @@
 # Canonical names des Concepts et des Titles (CONTEXT.md) : jamais des Entities,
 # exclus de Registry(t). Un nom par ligne, tel que le wiki titre la page.
 # Liste tirée des cibles de liens les plus fréquentes du corpus. Les pages de
-# catégorie Positions ou Occupations sont déjà exclues par l'extraction : cette
+# catégorie Positions, Occupations ou Terms (hors Groups) sont déjà exclues par l'extraction : cette
 # liste ne garde que les exceptions que ces catégories ne couvrent pas.
 
 ## Concepts : notions génériques de l'univers
@@ -23,6 +23,17 @@ Ancient Weapons
 Bounty
 Treasure
 Sword
+Swords
+Katana
+Kogatana
+Kukri
+Bisento
+Polearm
+Weapon
+Weapons
+Firearm
+Explosive
+Poison
 Ship
 Foods
 Doctor

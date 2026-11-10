@@ -854,6 +854,106 @@ class TestTitlesExcludedByWikiCategory(unittest.TestCase):
         self.assertEqual(titles_extraction(overrides={"Royal Guards": "Group"})
                          .quality.excluded_by_category, 2)
 
+    def test_quality_report_names_excluded_names_with_their_categories(self):
+        excluded = titles_extraction().quality.excluded_by_category_names
+        self.assertEqual([(e.canonical_name, e.categories) for e in excluded], [
+            ("First Mate", ["Positions"]),
+            ("Rear Admiral", ["Lists", "Marine", "Occupations"]),
+            ("Royal Guards", ["Occupations"]),
+        ])
+
+
+# Catégories réelles du wiki : Concepts rangés dans Terms (typés ou non par une
+# autre catégorie), un minerai précis et un Group rangés aussi dans Terms.
+TERMS_WIKI_CATEGORIES = {
+    "Jolly Roger": ("Lists", "Piracy", "Terms"),
+    "Epithet": ("Lists", "Piracy", "Terms"),
+    "Map": ("Geography", "Technology", "Terms"),
+    "Vearth": ("Minerals", "Terms"),
+    "Worst Generation": ("Pirate Groups", "Terms"),
+}
+# Scene écrite pour le test
+CH1001_TERMS_SCENE = (
+    "[[Shanks]] raises his [[Jolly Roger]], known by his [[Epithet]], over the [[Vearth]] "
+    "on a [[Map]] of the [[Worst Generation]]."
+)
+
+
+def terms_extraction(overrides=None):
+    return extract_entities([bronze_record(1001, CH1001_TERMS_SCENE)],
+                            Reference(characters=CHARACTERS, concepts=CONCEPTS,
+                                      wiki_categories=TERMS_WIKI_CATEGORIES,
+                                      type_overrides=overrides or {}))
+
+
+class TestTermsExcludedByWikiCategory(unittest.TestCase):
+
+    def test_terms_are_not_entities(self):
+        extraction = terms_extraction()
+        names = {r.canonical_name for r in extraction.registry}
+        for term in ("Jolly Roger", "Epithet", "Map", "Vearth"):
+            self.assertNotIn(term, names)
+        self.assertIn("Shanks", names)
+        self.assertEqual(extraction.quality.excluded_by_category, 4)
+
+    def test_a_term_that_is_a_group_stays(self):
+        self.assertEqual(type_of(terms_extraction(), "Worst Generation", 1001), "Group")
+
+    def test_override_keeps_a_term_as_an_entity(self):
+        extraction = terms_extraction(overrides={"Vearth": "Object"})
+        self.assertEqual(type_of(extraction, "Vearth", 1001), "Object")
+        self.assertNotIn("Jolly Roger", names_at(extraction, 1001))
+
+
+# Scenes écrites pour le test : trois titres de redirection vers la même page.
+CH1001_REDIRECTS_SCENE = "[[Shanks]] meets the [[Eleven Supernovas]]."
+CH1002_REDIRECTS_SCENE = (
+    "The [[The Worst Generation|Supernovas]] gather. The [[Worst Generation]] sails on."
+)
+REDIRECTS = {"Eleven Supernovas": "Worst Generation",
+             "The Worst Generation": "Worst Generation"}
+
+
+def redirects_extraction(redirects=REDIRECTS):
+    return extract_entities([bronze_record(1001, CH1001_REDIRECTS_SCENE),
+                             bronze_record(1002, CH1002_REDIRECTS_SCENE)],
+                            Reference(characters=CHARACTERS, redirects=redirects))
+
+
+class TestRedirectsMergedIntoTarget(unittest.TestCase):
+
+    def test_redirects_are_one_entity(self):
+        extraction = redirects_extraction()
+        names = {r.canonical_name for r in extraction.registry}
+        self.assertIn("Worst Generation", names)
+        self.assertNotIn("Eleven Supernovas", names)
+        self.assertNotIn("The Worst Generation", names)
+        self.assertEqual(sum(e.mention_count for e in extraction.quality.top_entities
+                             if e.canonical_name == "Worst Generation"), 3)
+
+    def test_redirect_title_becomes_an_alias_unless_the_link_has_text(self):
+        extraction = redirects_extraction()
+        self.assertEqual(aliases_at(extraction, "Worst Generation", 1001),
+                         {"Eleven Supernovas"})
+        self.assertEqual(aliases_at(extraction, "Worst Generation", 1002),
+                         {"Eleven Supernovas", "Supernovas"})
+
+    def test_quality_report_lists_unknown_entities_most_mentioned_first(self):
+        # Shanks n'est dans aucun dataset du test : Unknown lui aussi.
+        unknown = redirects_extraction().quality.unknown_entities
+        self.assertEqual([(u.canonical_name, u.mention_count) for u in unknown],
+                         [("Worst Generation", 3), ("Shanks", 1)])
+        # À égalité de Mentions, ordre alphabétique.
+        unknown = redirects_extraction(redirects={}).quality.unknown_entities
+        self.assertEqual([u.canonical_name for u in unknown],
+                         ["Eleven Supernovas", "Shanks", "The Worst Generation",
+                          "Worst Generation"])
+
+    def test_without_redirects_each_title_is_its_own_entity(self):
+        names = {r.canonical_name for r in redirects_extraction(redirects={}).registry}
+        self.assertIn("Eleven Supernovas", names)
+        self.assertIn("The Worst Generation", names)
+
 
 class TestWikiCategoryCache(unittest.TestCase):
 

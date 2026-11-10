@@ -39,7 +39,8 @@ class Reference:
     wiki, Disguises, overrides de type, mots communs). Tant que l'extraction
     ne repose que sur les liens, tout lien d'article est une Mention, Concepts
     compris, un Disguise est résolu dès le premier chapitre (ADR 0002) et une
-    redirection reste un Canonical name distinct de sa page cible.
+    redirection reste un Canonical name distinct de sa page cible, sauf si
+    redirects la rattache à sa cible.
 
     common_words : mots en minuscules (pronoms, déterminants) ; un texte de lien
     qui commence par l'un d'eux n'est pas un Alias ("Their mother").
@@ -48,11 +49,13 @@ class Reference:
     status, bounty, current_ruler...) décrivent la fin de l'histoire et n'entrent
     jamais dans Registry(t) (ADR 0002).
     concepts : Canonical names des Concepts et des Titles, exclus de Registry(t),
-    en plus de ceux que leurs catégories du wiki désignent (TITLE_CATEGORIES).
+    en plus de ceux que leurs catégories du wiki désignent (_excluded_by_category).
     disguises : Disguises confirmés à la main, avec leur chapitre de Revelation.
     wiki_categories : Canonical name -> catégories de sa page sur le wiki (cache).
     type_overrides : Canonical name -> Entity type, tenu à la main ; l'emporte
     sur les datasets et les catégories.
+    redirects : titre d'une redirection du wiki -> Canonical name de sa page cible,
+    tenu à la main ; le titre de la redirection devient un Alias de la cible.
     """
     common_words: frozenset[str] = frozenset()
     characters: tuple[dict, ...] = ()
@@ -61,6 +64,7 @@ class Reference:
     concepts: frozenset[str] = frozenset()
     wiki_categories: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     type_overrides: Mapping[str, str] = field(default_factory=dict)
+    redirects: Mapping[str, str] = field(default_factory=dict)
     disguises: tuple[Disguise, ...] = ()
 
 
@@ -107,6 +111,18 @@ class TopEntity:
 
 
 @dataclass(frozen=True)
+class ExcludedName:
+    canonical_name: str
+    categories: list[str]
+
+
+@dataclass(frozen=True)
+class UnknownEntity:
+    canonical_name: str
+    mention_count: int
+
+
+@dataclass(frozen=True)
 class QualityReport:
     """recall_proxy : part des Characters ayant une Appearance dans la CharTable
     qui ont aussi au moins une Mention dans le Long Summary du même chapitre
@@ -118,6 +134,10 @@ class QualityReport:
     unknown_mention_share : part des Mentions dont l'Entity est typée Unknown.
     excluded_by_category : nombre de Canonical names rencontrés dans le corpus et
     écartés de Registry(t) par leurs catégories du wiki (Titles et Concepts).
+    excluded_by_category_names : ces mêmes noms, triés, avec les catégories du wiki
+    qui ont décidé de leur exclusion, à relire (override, concepts.txt, redirects).
+    unknown_entities : toutes les Entities typées Unknown, des plus mentionnées aux
+    moins mentionnées, à typer à la main ou à écarter.
     top_entities : les 50 Entities les plus mentionnées, avec leur type, pour une
     vérification manuelle rapide.
     """
@@ -130,6 +150,8 @@ class QualityReport:
     unknown_mention_share: float | None
     top_entities: list[TopEntity]
     excluded_by_category: int
+    excluded_by_category_names: list[ExcludedName]
+    unknown_entities: list[UnknownEntity]
 
 
 @dataclass(frozen=True)
@@ -281,6 +303,9 @@ CATEGORY_RULES = (
 # Catégories du wiki des pages de rangs, de titres (Rear Admiral, Shogun) et de
 # métiers génériques (Cook, Bounty Hunter) : un Title ou un Concept, jamais une Entity.
 TITLE_CATEGORIES = frozenset({"Positions", "Occupations"})
+# Catégorie du wiki des termes de l'univers (Jolly Roger, Epithet, Map, Sky Island) :
+# un Concept, sauf quand une autre catégorie en fait un Group (Worst Generation).
+TERMS_CATEGORY = "Terms"
 
 
 def _category_type(categories: tuple[str, ...]) -> str | None:
@@ -288,6 +313,13 @@ def _category_type(categories: tuple[str, ...]) -> str | None:
         if any(rule.search(c) for c in categories):
             return entity_type
     return None
+
+
+def _excluded_by_category(categories: tuple[str, ...]) -> bool:
+    """Title ou Concept d'après les catégories du wiki de sa page."""
+    if TITLE_CATEGORIES.intersection(categories):
+        return True
+    return TERMS_CATEGORY in categories and _category_type(categories) != "Group"
 
 
 def _entity_types(names: set[str], dataset_types: dict[str, str],
@@ -544,7 +576,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         if name in reference.concepts:
             return False
         if (name not in reference.type_overrides
-                and TITLE_CATEGORIES.intersection(reference.wiki_categories.get(name, ()))):
+                and _excluded_by_category(reference.wiki_categories.get(name, ()))):
             excluded_by_category.add(name)
             return False
         return True
@@ -552,6 +584,12 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     revelations = {(d.canonical_name, d.alias): d.revelation for d in reference.disguises}
 
     def resolved(item):
+        # [[Eleven Supernovas]] désigne la page Worst Generation : sans texte de
+        # lien, le titre de la redirection est l'Alias employé.
+        target = reference.redirects.get(item.canonical_name)
+        if target is not None:
+            item = dataclasses.replace(item, canonical_name=target,
+                                       alias=item.alias or item.canonical_name)
         name = resolve.get(item.canonical_name)
         item = dataclasses.replace(item, canonical_name=name) if name else item
         # Avant sa Revelation, un lien [[Denjiro|Kyoshiro]] désigne Kyoshiro : le
@@ -622,6 +660,15 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
             ),
             top_entities=top_entities,
             excluded_by_category=len(excluded_by_category),
+            excluded_by_category_names=[
+                ExcludedName(name, list(reference.wiki_categories.get(name, ())))
+                for name in sorted(excluded_by_category)
+            ],
+            unknown_entities=[
+                UnknownEntity(name, mention_totals.get(name, 0))
+                for name in sorted((n for n, t in types.items() if t == UNKNOWN),
+                                   key=lambda n: (-mention_totals.get(n, 0), n))
+            ],
         ),
         disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )

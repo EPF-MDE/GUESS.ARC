@@ -82,6 +82,8 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
         concepts=frozenset(_read_list(reference_dir / "concepts.txt")),
         wiki_categories=load_category_cache(reference_dir / WIKI_CATEGORIES),
         type_overrides=overrides,
+        redirects={row["redirect"]: row["canonical_name"]
+                   for row in _read_csv(reference_dir / REDIRECTS)},
         disguises=disguises,
     )
 
@@ -89,6 +91,7 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
 WIKI_CATEGORIES = "wiki_categories.json"
 TYPE_OVERRIDES = "type_overrides.csv"
 DISGUISES = "disguises.csv"
+REDIRECTS = "redirects.csv"
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
