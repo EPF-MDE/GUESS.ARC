@@ -798,6 +798,59 @@ class TestEntityTypesFromWikiCategories(unittest.TestCase):
                          "Character")
 
 
+# Catégories réelles du wiki (cache reference/wiki_categories.json) : Titles et
+# Concepts rangés dans Positions ou Occupations, et Entities à garder.
+TITLE_CATEGORIES = {
+    "Rear Admiral": ("Lists", "Marine", "Occupations"),
+    "First Mate": ("Positions",),
+    "Royal Guards": ("Occupations",),
+    "Captain John": ("Pirate Captains", "Male Characters", "Rocks Pirates"),
+    "Cipher Pol": ("World Government Groups",),
+}
+# Phrase écrite pour le test
+CH1001_TITLES_SCENE = (
+    "The [[Rear Admiral]] and the [[First Mate]] of [[Captain John]] meet the [[Royal Guards]] "
+    "and [[Cipher Pol]]. The Rear Admiral leaves."
+)
+CH1001_TITLES_CHARACTERS = (
+    ";[[Rear Admiral]]s\n*[[Shanks]]\n;[[Rocks Pirates]]\n*[[Captain John]]\n*[[Shandia Chief]]"
+)
+
+
+def titles_extraction(overrides=None):
+    return extract_entities([bronze_record(1001, CH1001_TITLES_SCENE,
+                                           characters=CH1001_TITLES_CHARACTERS)],
+                            Reference(characters=CHARACTERS, concepts=CONCEPTS,
+                                      wiki_categories=TITLE_CATEGORIES,
+                                      type_overrides=overrides or {}))
+
+
+class TestTitlesExcludedByWikiCategory(unittest.TestCase):
+
+    def test_positions_and_occupations_are_not_entities(self):
+        extraction = titles_extraction()
+        names = {r.canonical_name for r in extraction.registry}
+        mentioned = {e.canonical_name for e in extraction.quality.top_entities}
+        for title in ("Rear Admiral", "First Mate", "Royal Guards"):
+            self.assertNotIn(title, names)
+            self.assertNotIn(title, mentioned)
+
+    def test_real_entities_next_to_titles_stay(self):
+        names = names_at(titles_extraction(), 1001)
+        for name in ("Captain John", "Cipher Pol", "Shandia Chief", "Shanks"):
+            self.assertIn(name, names)
+
+    def test_override_keeps_a_position_as_an_entity(self):
+        extraction = titles_extraction(overrides={"Royal Guards": "Group"})
+        self.assertEqual(type_of(extraction, "Royal Guards", 1001), "Group")
+        self.assertNotIn("Rear Admiral", names_at(extraction, 1001))
+
+    def test_quality_report_counts_names_excluded_by_category(self):
+        self.assertEqual(titles_extraction().quality.excluded_by_category, 3)
+        self.assertEqual(titles_extraction(overrides={"Royal Guards": "Group"})
+                         .quality.excluded_by_category, 2)
+
+
 class TestWikiCategoryCache(unittest.TestCase):
 
     def test_categories_are_fetched_in_batches_then_read_from_the_cache(self):

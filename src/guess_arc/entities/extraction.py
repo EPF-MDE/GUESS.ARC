@@ -47,7 +47,8 @@ class Reference:
     Seuls leurs noms servent (Entity type) ; leurs attributs d'état (affiliation,
     status, bounty, current_ruler...) décrivent la fin de l'histoire et n'entrent
     jamais dans Registry(t) (ADR 0002).
-    concepts : Canonical names des Concepts et des Titles, exclus de Registry(t).
+    concepts : Canonical names des Concepts et des Titles, exclus de Registry(t),
+    en plus de ceux que leurs catégories du wiki désignent (TITLE_CATEGORIES).
     disguises : Disguises confirmés à la main, avec leur chapitre de Revelation.
     wiki_categories : Canonical name -> catégories de sa page sur le wiki (cache).
     type_overrides : Canonical name -> Entity type, tenu à la main ; l'emporte
@@ -115,6 +116,8 @@ class QualityReport:
     Character est dans le Cast du chapitre (Appearance, Recall ou Cover appearance).
     suspicious_aliases : les 20 formes qui tombent le plus souvent hors du Cast.
     unknown_mention_share : part des Mentions dont l'Entity est typée Unknown.
+    excluded_by_category : nombre de Canonical names rencontrés dans le corpus et
+    écartés de Registry(t) par leurs catégories du wiki (Titles et Concepts).
     top_entities : les 50 Entities les plus mentionnées, avec leur type, pour une
     vérification manuelle rapide.
     """
@@ -126,6 +129,7 @@ class QualityReport:
     suspicious_aliases: list[SuspiciousAlias]
     unknown_mention_share: float | None
     top_entities: list[TopEntity]
+    excluded_by_category: int = 0
 
 
 @dataclass(frozen=True)
@@ -272,6 +276,11 @@ CATEGORY_RULES = (
         r"(Technology|Artifacts|Literature|Substances|Minerals|Animal Species|Vehicles"
         r"|Sea Trains|By-Products|Plants|Creations)$")),
 )
+
+
+# Catégories du wiki des pages de rangs, de titres (Rear Admiral, Shogun) et de
+# métiers génériques (Cook, Bounty Hunter) : un Title ou un Concept, jamais une Entity.
+TITLE_CATEGORIES = frozenset({"Positions", "Occupations"})
 
 
 def _category_type(categories: tuple[str, ...]) -> str | None:
@@ -527,9 +536,18 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
     dataset_types, resolve = _lexicon(reference)
 
+    excluded_by_category: set[str] = set()
+
     def keep(name: str) -> bool:
-        # Concepts et Titles ne sont jamais des Entities.
-        return name not in reference.concepts
+        # Concepts et Titles ne sont jamais des Entities : liste manuelle d'abord,
+        # puis catégories du wiki, sauf si un override de type garde le nom.
+        if name in reference.concepts:
+            return False
+        if (name not in reference.type_overrides
+                and TITLE_CATEGORIES.intersection(reference.wiki_categories.get(name, ()))):
+            excluded_by_category.add(name)
+            return False
+        return True
 
     revelations = {(d.canonical_name, d.alias): d.revelation for d in reference.disguises}
 
@@ -603,6 +621,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
                 if mentions else None
             ),
             top_entities=top_entities,
+            excluded_by_category=len(excluded_by_category),
         ),
         disguise_candidates=_disguise_candidates(chapters, reference.common_words),
     )

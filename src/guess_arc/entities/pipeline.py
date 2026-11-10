@@ -104,6 +104,10 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
 
     # Les catégories du wiki ne sont demandées que pour les Entities encore
     # Unknown et absentes du cache ; un second run ne touche pas au réseau.
+    # Un Title nouveau sort donc Unknown au premier passage, puis est exclu
+    # par ses catégories au second. Un nom typé par un dataset n'est jamais
+    # demandé au wiki : un Title présent dans un dataset ne serait pas exclu
+    # (aucun au 2026-11-10 ; à ajouter à concepts.txt le cas échéant).
     unknown = {r.canonical_name for r in extraction.registry if r.entity_type == "Unknown"}
     if fetch:
         fetched = update_category_cache(paths.REFERENCE_DIR / WIKI_CATEGORIES, unknown)
@@ -125,6 +129,8 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
               "de Characters tombent dans le Cast")
     if extraction.quality.unknown_mention_share is not None:
         print(f"Mentions typées Unknown : {extraction.quality.unknown_mention_share:.1%}")
+    print(f"Titles et Concepts exclus par catégorie du wiki : "
+          f"{extraction.quality.excluded_by_category}")
     print(f"Disguise candidates à relire : {len(extraction.disguise_candidates)}")
     empty = [n for n, count in scenes.items() if count == 0]
     if empty:

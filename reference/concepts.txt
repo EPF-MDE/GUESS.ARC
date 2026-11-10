@@ -1,6 +1,8 @@
 # Canonical names des Concepts et des Titles (CONTEXT.md) : jamais des Entities,
 # exclus de Registry(t). Un nom par ligne, tel que le wiki titre la page.
-# Liste tirée des cibles de liens les plus fréquentes du corpus.
+# Liste tirée des cibles de liens les plus fréquentes du corpus. Les pages de
+# catégorie Positions ou Occupations sont déjà exclues par l'extraction : cette
+# liste ne garde que les exceptions que ces catégories ne couvrent pas.
 
 ## Concepts : notions génériques de l'univers
 Pirate
@@ -48,3 +50,7 @@ Emperor
 World Noble
 Pirate King
 King (Title)
+# Rangés par le wiki dans des catégories de Groups, mais ce sont des Titles :
+# rang d'agent de Baroque Works, titre de Kong.
+Officer Agent
+Commander-in-Chief
