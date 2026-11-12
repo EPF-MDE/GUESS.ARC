@@ -108,11 +108,21 @@ python -m guess_arc.entities
 ```
 
 Each paragraph of the Long Summary is a Scene; each `[[...]]` link in a Scene is
-a Mention of the Entity whose Canonical name is the target page
-(`[[Page/Subpage]]` and `[[Page#Section]]` count for the parent page).
+a Mention of the Entity whose Canonical name is the target page.
+A part of a page (`[[Page/Subpage]]`, `[[Page#Section]]`) counts for the parent
+page, with two exceptions decided by wiki categories. A subpage whose own
+categories give an Entity type is a separate Entity, named by its full title
+(`Vegapunk/Lilith`, Character). A page in the `Lists` category that is linked to a
+section somewhere in the corpus is a catalog (`Animal Species`, `Foods`): a link to
+one of its sections is a Mention of the entry, named by the section
+(`[[Animal Species/Arabasta Saga#Bananawani]]` -> Bananawani, like the wiki's
+redirect), typed by the catalog's categories; the catalog itself is not an Entity.
+A section titled like a page of its own (`#Arabasta`, a heading) is dropped
+rather than merged. The entries of an excluded catalog (`Marine Ranks`) are
+excluded too.
 The text of a piped link (`[[Edward Newgate|Whitebeard]]`) becomes an Alias if it
 looks like a name: initial capital, first word not in `common_words.txt`, and the
-link points neither to a subpage nor to a section. Each Alias is dated by the
+link names the Entity itself, not a part of a page. Each Alias is dated by the
 chapter of its first use.
 Since the wiki only links an Entity at its first occurrence in a page, its
 unlinked occurrences are recovered by Alias match: in each Scene, we search
@@ -131,7 +141,8 @@ wiki page give the type (`Pirate Crews` -> Group, `Ships` -> Ship, `Swords` ->
 Weapon, `Locations` -> Place...), following a priority order documented in
 `extraction.py`. Failing that, the Entity is Unknown. `reference/type_overrides.csv`
 wins over everything else. Categories are cached in
-`reference/wiki_categories.json`: only Entities still Unknown and missing from the
+`reference/wiki_categories.json`: only Entities still Unknown, linked subpages,
+parents of section or subpage links and catalog entries missing from the
 cache are requested from the wiki, in batches of 50 (`--offline` to request
 nothing). Only the datasets' names are used: their state attributes are never
 read. The Concepts and Titles in `reference/concepts.txt` (`Pirate`, `Haki`,
@@ -143,11 +154,14 @@ own CharTable presence); from the Revelation on, it merges into its Canonical na
 which takes over its Mentions and gets it as an Alias dated from that chapter.
 Empty list: unchanged output.
 Vocabulary: [CONTEXT.md](CONTEXT.md). Constraint: [ADR 0002](docs/adr/0002-reader-knowledge-only.md).
+Plain-language account of the step, its results, problems and decisions:
+[docs/entity-extraction.md](docs/entity-extraction.md) (French: [docs/entity-extraction.fr.md](docs/entity-extraction.fr.md)).
 
 - `data/gold/registry.jsonl`: Registry(t), one line per Entity and per change,
   valid from `valid_from` to `valid_to` inclusive (`null`: still valid), with the
-  Entity type, the Aliases used so far, the first and last chapter seen and the
-  number of Mentions up to t
+  Entity type, the catalog it is an entry of (`"Animal Species"` for Bananawani,
+  `null` otherwise), the Aliases used so far, the first and last chapter seen and
+  the number of Mentions up to t
 - `data/gold/registry_quality.json`: quality report (Scenes per chapter; recall
   proxy, overall and per arc: share of Characters with an Appearance in the
   CharTable that have at least one Mention in the chapter's Long Summary; Mentions

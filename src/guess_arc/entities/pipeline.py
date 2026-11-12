@@ -111,11 +111,15 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
     # par ses catégories dans la seconde, juste après la requête. Un nom typé par un dataset n'est jamais
     # demandé au wiki : un Title présent dans un dataset ne serait pas exclu
     # (aucun au 2026-11-10 ; à ajouter à concepts.txt le cas échéant).
+    # S'y ajoutent les sous-pages liées, les pages parentes des liens vers une partie
+    # de page et les entrées de catalogue : leurs catégories décident d'une chose à
+    # part, d'un catalogue ou d'une section qui porte le titre d'une autre page.
     unknown = {r.canonical_name for r in extraction.registry if r.entity_type == "Unknown"}
     if fetch:
-        fetched = update_category_cache(paths.REFERENCE_DIR / WIKI_CATEGORIES, unknown)
+        fetched = update_category_cache(paths.REFERENCE_DIR / WIKI_CATEGORIES,
+                                        unknown | extraction.pages_without_categories)
         if fetched:
-            print(f"Catégories du wiki récupérées pour {fetched} Entities")
+            print(f"Catégories du wiki récupérées pour {fetched} pages")
             extraction = extract_entities(chapters, load_reference())
     registry_path = write_gold(extraction, paths.gold_dir(data_dir))
 
