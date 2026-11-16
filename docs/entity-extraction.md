@@ -111,7 +111,7 @@ entity extraction on the wiki's own links, with fixed, readable rules.
    ├─ 6. filtering     ──► Titles and Concepts removed
    └─ 7. Disguises     ──► hidden identities kept apart until their Revelation
    │
- gold: registry.jsonl  +  registry_quality.json  +  disguise_candidates.csv
+ gold/entities: registry.jsonl  +  registry_quality.json  +  disguise_candidates.csv
 ```
 
 All of this lives in **one function**, `extract_entities(chapters, reference)`, in
@@ -216,7 +216,7 @@ secret.
 
 - The extraction lists **Disguise candidates**: character Aliases that share no word with their
   Canonical name (Kyoshiro → Denjiro, Miss All Sunday → Nico Robin), sorted by number of links, in
-  `data/gold/disguise_candidates.csv`.
+  `data/gold/entities/disguise_candidates.csv`.
 - A human confirms the real ones and writes down the **Revelation** chapter in
   `reference/disguises.csv`.
 - Before its Revelation, a confirmed Disguise is a separate Entity, with its own Mentions. From the
@@ -224,7 +224,7 @@ secret.
 
 ### What the output looks like
 
-`data/gold/registry.jsonl` has one line per Entity and per change, valid from `valid_from` to
+`data/gold/entities/registry.jsonl` has one line per Entity and per change, valid from `valid_from` to
 `valid_to` (`null` = still valid). `catalog` names the catalog page an Entity is an entry of
 (`"Animal Species"` for Bananawani), `null` for every other Entity; like the type, it never changes:
 
@@ -234,7 +234,7 @@ secret.
  "last_chapter_seen": 1, "mention_count": 0}
 ```
 
-`data/gold/registry_quality.json` holds the quality measures used in §6 and lists for manual review
+`data/gold/entities/registry_quality.json` holds the quality measures used in §6 and lists for manual review
 (the most suspicious Aliases, the 50 most mentioned Entities with their type, the remaining Unknown
 Entities, the names excluded by category).
 
@@ -390,7 +390,7 @@ is also a catalog, but its only section link points to a list heading, so it add
    measure whether precision holds.
 2. **Disguise review not done yet.** `reference/disguises.csv` is still empty, so **today's
    Registry(t) still leaks secret identities** (Kyoshiro is counted as Denjiro from his first
-   appearance). 194 candidates are waiting in `data/gold/disguise_candidates.csv`. Many are not
+   appearance). 194 candidates are waiting in `data/gold/entities/disguise_candidates.csv`. Many are not
    Disguises but plain epithets ("Big Mom" → Charlotte Linlin, "Kizaru" → Borsalino) and must be
    rejected; the real ones (Kyoshiro, Komurasaki, "Lucy", Miss All Sunday, Sogeking...) need their
    Revelation chapter.
@@ -427,8 +427,8 @@ pytest                                  # 127 tests, offline
 | `reference/redirects.csv` | Wiki redirects merged into their target | human |
 | `reference/disguises.csv` | Confirmed Disguises and their Revelation chapter | human |
 | `reference/wiki_categories.json` | Cache of wiki categories | pipeline |
-| `data/gold/registry.jsonl` | Registry(t) | pipeline |
-| `data/gold/registry_quality.json` | Quality report | pipeline |
-| `data/gold/disguise_candidates.csv` | Disguise candidates to review | pipeline |
+| `data/gold/entities/registry.jsonl` | Registry(t) | pipeline |
+| `data/gold/entities/registry_quality.json` | Quality report | pipeline |
+| `data/gold/entities/disguise_candidates.csv` | Disguise candidates to review | pipeline |
 
 More details: [README](../README.md#entity-extraction), vocabulary in [CONTEXT.md](../CONTEXT.md).

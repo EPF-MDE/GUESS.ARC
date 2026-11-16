@@ -157,19 +157,19 @@ Vocabulary: [CONTEXT.md](CONTEXT.md). Constraint: [ADR 0002](docs/adr/0002-reade
 Plain-language account of the step, its results, problems and decisions:
 [docs/entity-extraction.md](docs/entity-extraction.md) (French: [docs/entity-extraction.fr.md](docs/entity-extraction.fr.md)).
 
-- `data/gold/registry.jsonl`: Registry(t), one line per Entity and per change,
+- `data/gold/entities/registry.jsonl`: Registry(t), one line per Entity and per change,
   valid from `valid_from` to `valid_to` inclusive (`null`: still valid), with the
   Entity type, the catalog it is an entry of (`"Animal Species"` for Bananawani,
   `null` otherwise), the Aliases used so far, the first and last chapter seen and
   the number of Mentions up to t
-- `data/gold/registry_quality.json`: quality report (Scenes per chapter; recall
+- `data/gold/entities/registry_quality.json`: quality report (Scenes per chapter; recall
   proxy, overall and per arc: share of Characters with an Appearance in the
   CharTable that have at least one Mention in the chapter's Long Summary; Mentions
   by source, link or Alias match; precision proxy: share of Character Alias matches
   that fall within the chapter's Cast; the 20 most suspicious Aliases, those that
   most often fall outside the Cast; share of Mentions typed Unknown; the 50 most
   mentioned Entities with their type)
-- `data/gold/disguise_candidates.csv`: possible Disguises, sorted by number of
+- `data/gold/entities/disguise_candidates.csv`: possible Disguises, sorted by number of
   links. A candidate is a Character Alias that shares no word with its Canonical
   name (`Kyoshiro` -> Denjiro), found in the Long Summary, the CharTable and the
   Chapter Notes. Regenerated on every run: real Disguises are confirmed by hand,

@@ -1,7 +1,7 @@
 """
 One Piece — extraction des Entities, du bronze à Registry(t) dans la gold.
 
-Gold : registry.jsonl (une ligne par Entity et par changement, datée par
+Gold (data/gold/entities/) : registry.jsonl (une ligne par Entity et par changement, datée par
 valid_from / valid_to), registry_quality.json (rapport qualité) et
 disguise_candidates.csv (Disguises possibles, à relire par un humain).
 
@@ -121,7 +121,7 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
         if fetched:
             print(f"Catégories du wiki récupérées pour {fetched} pages")
             extraction = extract_entities(chapters, load_reference())
-    registry_path = write_gold(extraction, paths.gold_dir(data_dir))
+    registry_path = write_gold(extraction, paths.gold_dir(data_dir) / "entities")
 
     scenes = extraction.quality.scenes_per_chapter
     entities = {row.canonical_name for row in extraction.registry}
