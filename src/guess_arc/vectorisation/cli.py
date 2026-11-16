@@ -76,6 +76,8 @@ def main(
         raise SystemExit(f"erreur : {exc}") from exc
 
     result = run(args.data_dir, encoder, rebuild=args.rebuild)
+    if result.rebuild_reason:
+        print(f"recalcul complet : {result.rebuild_reason}")
     print(f"chapitres vectorisés : {len(result.vectorised)}, conservés : {len(result.kept)}, "
           f"sautés : {len(result.skipped)} "
           f"-> {result.path}")

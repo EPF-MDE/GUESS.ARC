@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,7 +21,14 @@ import numpy as np
 
 from guess_arc import paths
 
-from .dataset import ChapterEmbeddings, Metadata, dataset_path, load_chapter_embeddings, write_dataset
+from .dataset import (
+    ChapterEmbeddings,
+    CorruptDatasetError,
+    Metadata,
+    dataset_path,
+    load_chapter_embeddings,
+    write_dataset,
+)
 from .encoder import Encoder
 from .quality import quality_report, report_path, write_report
 
@@ -136,55 +144,94 @@ class RunResult:
     vectorised: list[int]  # passés par l'encodeur à cette exécution
     kept: list[int]  # repris tels quels du dataset précédent
     skipped: dict[int, str]  # chapitre -> raison
+    rebuild_reason: str | None = None  # pourquoi rien n'a été repris ; None si incrémental
 
 
-def _previous_dataset(data_dir: Path, encoder: Encoder, rebuild: bool) -> ChapterEmbeddings | None:
-    """Le dataset précédent, si ses vecteurs peuvent être conservés : ni
-    `rebuild`, ni changement de modèle ou de pooling (des vecteurs de deux
-    modèles ne sont pas comparables)."""
-    if rebuild or not dataset_path(data_dir).exists():
-        return None
-    previous = load_chapter_embeddings(data_dir)
-    if (previous.metadata.model, previous.metadata.pooling) != (encoder.model_name, POOLING):
-        return None
-    return previous
+def _previous_dataset(data_dir: Path, encoder: Encoder, rebuild: bool) -> tuple[ChapterEmbeddings | None, str | None]:
+    """Le dataset précédent, si ses Chapter embeddings peuvent être conservés,
+    sinon None et la raison du recalcul complet : `rebuild`, dataset corrompu,
+    ou changement de modèle ou de pooling (des vecteurs de deux modèles ne sont
+    pas comparables). Pas de dataset précédent : (None, None)."""
+    if rebuild:
+        return None, "--rebuild demandé"
+    try:
+        previous = load_chapter_embeddings(data_dir)
+    except FileNotFoundError:
+        return None, None
+    except CorruptDatasetError as exc:
+        return None, f"dataset précédent corrompu ({exc})"
+    if previous.metadata.model != encoder.model_name:
+        return None, f"modèle changé : {previous.metadata.model} -> {encoder.model_name}"
+    if previous.metadata.pooling != POOLING:
+        return None, f"pooling changé : {previous.metadata.pooling} -> {POOLING}"
+    return previous, None
+
+
+@dataclass
+class _Update:
+    """Le contenu du dataset à écrire, chapitre par chapitre."""
+    embeddings: dict[int, np.ndarray]
+    revision_ids: dict[int, int]
+    vectorised: list[int]
+    kept: list[int]
+    skipped: dict[int, str]
+
+
+def _update(
+    silver: list[SilverChapter],
+    previous: ChapterEmbeddings | None,
+    encode: Callable[[SilverChapter, list[str]], np.ndarray],
+) -> _Update:
+    update = _Update({}, {}, [], [], {})
+    for chapter in silver:
+        scene_texts = scenes(chapter.long_summary)
+        if not chapter.complete:
+            update.skipped[chapter.number] = "complete: false"
+            continue
+        if not scene_texts:
+            update.skipped[chapter.number] = "Long Summary vide"
+            continue
+        if previous is not None and previous.revision_ids.get(chapter.number) == chapter.revision_id:
+            update.embeddings[chapter.number] = previous[chapter.number]
+            update.kept.append(chapter.number)
+        else:
+            update.embeddings[chapter.number] = encode(chapter, scene_texts)
+            update.vectorised.append(chapter.number)
+        update.revision_ids[chapter.number] = chapter.revision_id
+    return update
 
 
 def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult:
     """Met à jour le dataset des chapitres complets de la silver, et son rapport qualité.
 
     Incrémental par défaut : un chapitre déjà dans le dataset avec le même
-    revision_id est conservé avec son Chapter embedding, les autres sont (re)vectorisés.
-    Tout est recalculé si `rebuild`, ou si le modèle de l'encodeur diffère de
-    celui du dataset. Un chapitre `complete: false`, sans Scene, ou absent de la
-    silver, n'a aucune entrée dans le dataset.
+    revision_id est conservé avec son Chapter embedding, les autres sont
+    (re)vectorisés. Tout est recalculé si `rebuild`, si le dataset précédent est
+    corrompu, si le modèle de l'encodeur diffère de celui du dataset, ou si
+    l'encodeur rend désormais des vecteurs d'une autre dimension. Un chapitre
+    `complete: false`, sans Scene, ou absent de la silver, n'a aucune entrée
+    dans le dataset.
     """
-    previous = _previous_dataset(data_dir, encoder, rebuild)
-    embeddings: dict[int, np.ndarray] = {}
-    revision_ids: dict[int, int] = {}
-    vectorised: list[int] = []
-    kept: list[int] = []
-    skipped: dict[int, str] = {}
-    arcs: dict[int, str] = {}
-    for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md")):
-        chapter = read_silver_chapter(path)
-        arcs[chapter.number] = chapter.arc
-        scene_texts = scenes(chapter.long_summary)
-        if not chapter.complete:
-            skipped[chapter.number] = "complete: false"
-            continue
-        if not scene_texts:
-            skipped[chapter.number] = "Long Summary vide"
-            continue
-        if previous is not None and previous.revision_ids.get(chapter.number) == chapter.revision_id:
-            embeddings[chapter.number] = previous[chapter.number]
-            kept.append(chapter.number)
-        else:
-            embeddings[chapter.number] = chapter_embedding(scene_texts, encoder)
-            vectorised.append(chapter.number)
-        revision_ids[chapter.number] = chapter.revision_id
+    silver = [read_silver_chapter(path) for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md"))]
+    previous, rebuild_reason = _previous_dataset(data_dir, encoder, rebuild)
 
-    dimensions = {v.shape[0] for v in embeddings.values()}
+    # Un chapitre n'est encodé qu'une fois, même si l'on recommence sans reprise.
+    encoded: dict[int, np.ndarray] = {}
+
+    def encode(chapter: SilverChapter, scene_texts: list[str]) -> np.ndarray:
+        if chapter.number not in encoded:
+            encoded[chapter.number] = chapter_embedding(scene_texts, encoder)
+        return encoded[chapter.number]
+
+    update = _update(silver, previous, encode)
+    if previous is not None:
+        new_dimensions = {update.embeddings[c].shape[0] for c in update.vectorised} - {previous.metadata.dimension}
+        if new_dimensions and update.kept:
+            # Même nom de modèle, autre dimension : on ne mélange pas les deux.
+            rebuild_reason = f"dimension de l'encodeur changée : {previous.metadata.dimension} -> {min(new_dimensions)}"
+            update = _update(silver, None, encode)
+
+    dimensions = {v.shape[0] for v in update.embeddings.values()}
     if len(dimensions) > 1:
         raise ValueError(f"dimensions incohérentes entre chapitres : {sorted(dimensions)}")
     metadata = Metadata(
@@ -193,15 +240,17 @@ def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult
         pooling=POOLING,
         created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     )
-    dataset = ChapterEmbeddings(embeddings, revision_ids, metadata)
-    report = quality_report(dataset, arcs, kept=kept, skipped=skipped)
+    dataset = ChapterEmbeddings(update.embeddings, update.revision_ids, metadata)
+    arcs = {chapter.number: chapter.arc for chapter in silver}
+    report = quality_report(dataset, arcs, kept=update.kept, skipped=update.skipped)
     target, quality_target = dataset_path(data_dir), report_path(data_dir)
     write_dataset(target, dataset)
     write_report(quality_target, report)
     return RunResult(
         path=target,
         quality_path=quality_target,
-        vectorised=sorted(vectorised),
-        kept=sorted(kept),
-        skipped=skipped,
+        vectorised=sorted(update.vectorised),
+        kept=sorted(update.kept),
+        skipped=update.skipped,
+        rebuild_reason=rebuild_reason,
     )

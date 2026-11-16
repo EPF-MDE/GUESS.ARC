@@ -2,14 +2,16 @@
 
 La ligne i de `embeddings` est le Chapter embedding du chapitre `chapters[i]`.
 Le chargeur rend un dict chapitre -> Chapter embedding, pour que personne ne lise un
-Chapter embedding par sa position.
+Chapter embedding par sa position. Il refuse un dataset corrompu
+(`corrupt_verification`) au lieu de rendre des vecteurs faux.
 """
 
 from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Callable
+import zipfile
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -73,20 +75,64 @@ def write_dataset(path: Path, embeddings: ChapterEmbeddings) -> None:
     ))
 
 
+class CorruptDatasetError(ValueError):
+    """Le dataset existe mais est illisible ou incohérent."""
+
+
+REQUIRED = ("chapters", "revision_ids", "embeddings", "model", "dimension", "pooling", "created_at")
+# Tolérance sur la norme L2 : les vecteurs sont stockés en float32.
+NORM_TOLERANCE = 1e-3
+
+
+def corrupt_verification(npz: Mapping[str, np.ndarray]) -> str | None:
+    """None si le contenu du .npz est un dataset sain, sinon ce qui ne va pas :
+    tableau manquant, lignes désalignées avec les chapitres, dimension différente
+    des métadonnées, chapitre en double, NaN, norme différente de 1."""
+    missing = [key for key in REQUIRED if key not in npz]
+    if missing:
+        return f"tableaux manquants : {', '.join(missing)}"
+    chapters, revision_ids, matrix = npz["chapters"], npz["revision_ids"], npz["embeddings"]
+    dimension = int(npz["dimension"])
+    if chapters.ndim != 1 or revision_ids.shape != chapters.shape:
+        return f"chapters {chapters.shape} et revision_ids {revision_ids.shape} désalignés"
+    if matrix.shape != (len(chapters), dimension):
+        return f"embeddings {matrix.shape} au lieu de ({len(chapters)}, {dimension})"
+    if len(np.unique(chapters)) != len(chapters):
+        return "chapitre en double"
+    if not np.isfinite(matrix).all():
+        return "valeurs non finies (NaN ou infini)"
+    norms = np.linalg.norm(matrix.astype(np.float64), axis=1)
+    if norms.size and np.abs(norms - 1.0).max() > NORM_TOLERANCE:
+        return f"normes entre {norms.min():.4f} et {norms.max():.4f}, au lieu de 1"
+    return None
+
+
 def load_chapter_embeddings(data_dir: Path = paths.DATA_DIR) -> ChapterEmbeddings:
-    """{chapitre: Chapter embedding float32 de dimension d}, avec `.revision_ids` et `.metadata`."""
-    with np.load(dataset_path(data_dir), allow_pickle=False) as npz:
-        chapters = [int(c) for c in npz["chapters"]]
-        matrix = npz["embeddings"]
-        revision_ids = [int(r) for r in npz["revision_ids"]]
-        metadata = Metadata(
-            model=str(npz["model"]),
-            dimension=int(npz["dimension"]),
-            pooling=str(npz["pooling"]),
-            created_at=str(npz["created_at"]),
-        )
+    """{chapitre: Chapter embedding float32 de dimension d}, avec `.revision_ids` et `.metadata`.
+
+    FileNotFoundError si le dataset n'existe pas ; CorruptDatasetError s'il ne
+    passe pas `corrupt_verification`."""
+    path = dataset_path(data_dir)
+    if not path.exists():
+        raise FileNotFoundError(path)
+    try:
+        with np.load(path, allow_pickle=False) as npz:
+            arrays = {key: npz[key] for key in npz.files}
+    except (OSError, ValueError, EOFError, zipfile.BadZipFile) as exc:
+        raise CorruptDatasetError(f"{path} : archive illisible ({exc}) ; relancer avec --rebuild") from exc
+    problem = corrupt_verification(arrays)
+    if problem is not None:
+        raise CorruptDatasetError(f"{path} : {problem} ; relancer avec --rebuild")
+    chapters = [int(c) for c in arrays["chapters"]]
+    matrix = arrays["embeddings"]
+    metadata = Metadata(
+        model=str(arrays["model"]),
+        dimension=int(arrays["dimension"]),
+        pooling=str(arrays["pooling"]),
+        created_at=str(arrays["created_at"]),
+    )
     return ChapterEmbeddings(
         embeddings={c: matrix[i] for i, c in enumerate(chapters)},
-        revision_ids=dict(zip(chapters, revision_ids)),
+        revision_ids={c: int(r) for c, r in zip(chapters, arrays["revision_ids"])},
         metadata=metadata,
     )

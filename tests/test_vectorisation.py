@@ -15,7 +15,7 @@ import numpy as np
 from guess_arc import paths
 from guess_arc.ingestion.parser import Chapter
 from guess_arc.ingestion.silver import write_markdown
-from guess_arc.vectorisation import load_chapter_embeddings, run
+from guess_arc.vectorisation import CorruptDatasetError, load_chapter_embeddings, run
 
 DIM = 8
 
@@ -105,6 +105,16 @@ def chapter(number: int, long_summary: str, **overrides) -> Chapter:
 LONG_10 = "Luffy sets sail from his village.\n\nHe meets a huge sea monster.\n\nShanks loses his arm."
 LONG_2 = "Zoro is tied to a post at the Marine base."
 LONG_7 = "Nami steals a map.\n\nBuggy fires the Buggy Ball at the town."
+
+
+def unexplained_gaps(dataset_chapters, skipped) -> list[int]:
+    """Les trous de la suite 1..max du dataset qu'aucune raison du rapport
+    qualité n'explique : un chapitre sauté (`complete: false`, Long Summary vide)
+    est un trou attendu, un chapitre absent de la silver ne l'est pas."""
+    if not dataset_chapters:
+        return []
+    explained = {int(c) for c in skipped}
+    return sorted(set(range(1, max(dataset_chapters) + 1)) - set(dataset_chapters) - explained)
 
 
 class SilverTestCase(unittest.TestCase):
@@ -268,6 +278,24 @@ class VectorisationTest(SilverTestCase):
 
         self.assertEqual(encoder.seen, [fits, "a short scene"])
 
+    def test_chapter_sequence_has_no_unexplained_gap(self):
+        data_dir = self.data_dir("data", [
+            chapter(1, LONG_2), chapter(2, LONG_7, complete=False), chapter(3, LONG_10), chapter(4, ""),
+            chapter(5, LONG_2),
+        ])
+        run(data_dir, HashEncoder())
+
+        emb, quality = load_chapter_embeddings(data_dir), report(data_dir)
+        self.assertEqual(sorted(emb), [1, 3, 5])
+        self.assertEqual(unexplained_gaps(emb, quality["chapters"]["skipped"]), [])
+
+    def test_chapter_missing_from_the_silver_is_an_unexplained_gap(self):
+        data_dir = self.data_dir("data", [chapter(1, LONG_2), chapter(2, LONG_7), chapter(4, LONG_10)])
+        run(data_dir, HashEncoder())
+
+        emb, quality = load_chapter_embeddings(data_dir), report(data_dir)
+        self.assertEqual(unexplained_gaps(emb, quality["chapters"]["skipped"]), [3])
+
     def test_failed_first_run_leaves_no_file(self):
         data_dir = self.data_dir("data", [chapter(1, LONG_2)])
         with self.assertRaises(RuntimeError):
@@ -288,6 +316,69 @@ class CountingEncoder(HashEncoder):
     def encode(self, texts: list[str]) -> np.ndarray:
         self.calls.append(list(texts))
         return super().encode(texts)
+
+
+class WideEncoder(CountingEncoder):
+    """Même nom de modèle que HashEncoder, mais des vecteurs deux fois plus longs."""
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        narrow = super().encode(texts)
+        return np.concatenate([narrow, narrow[:, ::-1]], axis=1)
+
+
+class CorruptDatasetTest(SilverTestCase):
+    """Un dataset existant illisible ou incohérent : le chargeur le refuse en
+    nommant --rebuild, et `run` recalcule tout au lieu de planter."""
+
+    def setUp(self):
+        super().setUp()
+        self.data_dir = self.data_dir("data", [chapter(10, LONG_10), chapter(2, LONG_2)])
+        run(self.data_dir, HashEncoder())
+        self.npz = paths.vector_dir(self.data_dir) / "chapter_embeddings.npz"
+        with np.load(self.npz) as npz:
+            self.arrays = dict(npz)
+
+    def corrupt(self, **changes) -> None:
+        arrays = {k: v for k, v in {**self.arrays, **changes}.items() if v is not None}
+        with self.npz.open("wb") as fh:
+            np.savez(fh, **arrays)
+
+    CORRUPTIONS = {
+        "archive illisible": None,
+        "tableau manquant": dict(revision_ids=None),
+        "lignes et chapitres désalignés": dict(chapters=np.array([2], dtype=np.int64)),
+        "dimension différente des métadonnées": dict(dimension=np.array(DIM + 1, dtype=np.int64)),
+        "chapitre en double": dict(chapters=np.array([2, 2], dtype=np.int64)),
+        "NaN": dict(embeddings=np.full((2, DIM), np.nan, dtype=np.float32)),
+        "norme différente de 1": dict(embeddings=np.full((2, DIM), 3.0, dtype=np.float32)),
+    }
+
+    def apply(self, name: str) -> None:
+        if self.CORRUPTIONS[name] is None:
+            self.npz.write_bytes(b"not a zip archive")
+        else:
+            self.corrupt(**self.CORRUPTIONS[name])
+
+    def test_loader_refuses_a_corrupt_dataset_and_names_rebuild(self):
+        for name in self.CORRUPTIONS:
+            with self.subTest(name):
+                self.apply(name)
+                with self.assertRaises(CorruptDatasetError) as ctx:
+                    load_chapter_embeddings(self.data_dir)
+                self.assertIn("--rebuild", str(ctx.exception))
+
+    def test_run_over_a_corrupt_dataset_revectorises_everything(self):
+        for name in self.CORRUPTIONS:
+            with self.subTest(name):
+                self.apply(name)
+                encoder = CountingEncoder()
+
+                result = run(self.data_dir, encoder)
+
+                emb = load_chapter_embeddings(self.data_dir)
+                self.assertEqual(sorted(emb), [2, 10])
+                self.assertEqual((result.vectorised, result.kept), ([2, 10], []))
+                self.assertIn("corrompu", result.rebuild_reason)
 
 
 class IncrementalUpdateTest(SilverTestCase):
@@ -376,6 +467,29 @@ class IncrementalUpdateTest(SilverTestCase):
         self.assertEqual((result.vectorised, result.kept), ([2, 7, 10], []))
         for c in (2, 7, 10):
             np.testing.assert_allclose(emb[c], self.first[c], rtol=1e-6)
+
+    def test_incremental_run_has_no_rebuild_reason(self):
+        _, result, _ = self.rerun()
+
+        self.assertIsNone(result.rebuild_reason)
+
+    def test_rebuild_and_model_change_give_their_reason(self):
+        _, rebuilt, _ = self.rerun(rebuild=True)
+        _, other_model, _ = self.rerun(CountingEncoder("fake/another-model"))
+
+        self.assertIn("--rebuild", rebuilt.rebuild_reason)
+        self.assertIn("fake/another-model", other_model.rebuild_reason)
+
+    def test_encoder_dimension_change_under_the_same_model_name_revectorises_everything(self):
+        self.write(chapter(11, "Luffy meets Koby."))
+
+        encoder, result, emb = self.rerun(WideEncoder())
+
+        self.assertEqual(sorted(emb), [2, 7, 10, 11])
+        self.assertEqual(emb.metadata.dimension, 2 * DIM)
+        self.assertEqual({v.shape for v in emb.values()}, {(2 * DIM,)})
+        self.assertEqual((result.vectorised, result.kept), ([2, 7, 10, 11], []))
+        self.assertIn("dimension", result.rebuild_reason)
 
     def test_quality_report_separates_vectorised_from_kept_chapters(self):
         self.write(chapter(11, "Luffy meets Koby."))

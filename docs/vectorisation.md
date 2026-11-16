@@ -105,9 +105,11 @@ Comme l'ingestion, la vectorisation tourne chaque semaine. Par défaut, `run` pa
 - un chapitre inchangé est conservé tel quel, avec le même Chapter embedding, sans appel à l'encodeur ;
 - un chapitre devenu `complete: false`, ou disparu de la silver, est retiré du dataset ;
 - si le modèle configuré (ou la méthode de pooling) diffère de celui du dataset, tout est recalculé : des vecteurs de deux modèles différents ne sont pas comparables ;
+- si le dataset existant est corrompu, tout est recalculé. `corrupt_verification` (dans `dataset.py`) refuse une archive illisible, un tableau manquant, des lignes désalignées avec `chapters`, une dimension différente des métadonnées, un chapitre en double, des NaN ou une norme différente de 1. Le chargeur lève alors `CorruptDatasetError`, en nommant `--rebuild` ;
+- si l'encodeur rend des vecteurs d'une autre dimension sous le même nom de modèle, tout est recalculé plutôt que de mélanger deux dimensions. Les chapitres déjà encodés à cette exécution ne repassent pas par l'encodeur ;
 - `run(..., rebuild=True)` et l'option `--rebuild` de la CLI forcent le recalcul complet. Il faut l'utiliser après tout changement du découpage (Scenes, Chunks) qui ne change ni le modèle ni le nom du pooling : un chapitre n'est « modifié » que si son `revision_id` change.
 
-Le résumé de la CLI et le rapport qualité (`vectorised` / `kept`) distinguent les chapitres vectorisés à cette exécution des chapitres conservés.
+Quand rien n'est repris, la CLI affiche la raison (`recalcul complet : …`). Le résumé de la CLI et le rapport qualité (`vectorised` / `kept`) distinguent les chapitres vectorisés à cette exécution des chapitres conservés.
 
 ## 8. Contrôle qualité
 

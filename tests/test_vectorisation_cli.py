@@ -24,7 +24,7 @@ from guess_arc.vectorisation import load_chapter_embeddings, run
 from guess_arc.vectorisation.cli import MissingSettingError, embedding_model, main
 from guess_arc.vectorisation.sentence_encoder import MissingExtraError, SentenceTransformerEncoder
 
-from test_vectorisation import DIM, LONG_2, LONG_7, LONG_10, CountingEncoder, HashEncoder, chapter
+from test_vectorisation import DIM, LONG_2, LONG_7, LONG_10, CountingEncoder, HashEncoder, chapter, unexplained_gaps
 
 PIP_COMMAND = "pip install -e .[vectorisation]"
 
@@ -117,6 +117,16 @@ class CliTest(unittest.TestCase):
         self.assertEqual(len(encoder.calls), 2)  # chapitres 2 et 10
         self.assertIn("vectorisés : 2", output)
         self.assertIn("conservés : 0", output)
+        self.assertIn("recalcul complet : --rebuild demandé", output)
+
+    def test_corrupt_dataset_is_rebuilt_and_says_so(self):
+        self.main("--data-dir", str(self.data_dir))
+        (paths.vector_dir(self.data_dir) / "chapter_embeddings.npz").write_bytes(b"not a zip archive")
+
+        output = self.main("--data-dir", str(self.data_dir))
+
+        self.assertIn("recalcul complet : dataset précédent corrompu", output)
+        self.assertEqual(sorted(load_chapter_embeddings(self.data_dir)), [2, 10])
 
     def test_missing_embedding_model_exits_with_message_and_writes_nothing(self):
         self.env_file.write_text("LLM_MODEL=x\n", encoding="utf-8")
@@ -199,11 +209,18 @@ class SentenceTransformerEncoderTest(unittest.TestCase):
 
 @unittest.skipUnless(paths.silver_dir().is_dir(), "data/silver/ absent : lancer d'abord l'ingestion")
 class RealSilverTest(unittest.TestCase):
-    def complete_chapters(self) -> set[int]:
+    def silver(self):
         from guess_arc.vectorisation.pipeline import read_silver_chapter, scenes
 
-        chapters = (read_silver_chapter(p) for p in paths.silver_dir().glob("chapter_*.md"))
-        return {c.number for c in chapters if c.complete and scenes(c.long_summary)}
+        chapters = [read_silver_chapter(p) for p in paths.silver_dir().glob("chapter_*.md")]
+        return {c.number: bool(c.complete and scenes(c.long_summary)) for c in chapters}
+
+    def complete_chapters(self) -> set[int]:
+        return {number for number, usable in self.silver().items() if usable}
+
+    def skipped_chapters(self) -> set[int]:
+        """Les chapitres de la silver sautés à raison (`complete: false`, Long Summary vide)."""
+        return {number for number, usable in self.silver().items() if not usable}
 
     def test_one_finite_vector_per_complete_silver_chapter(self):
         tmp = tempfile.TemporaryDirectory()
@@ -215,6 +232,8 @@ class RealSilverTest(unittest.TestCase):
 
         emb = load_chapter_embeddings(data_dir)
         self.assertEqual(set(emb), self.complete_chapters())
+        self.assertEqual(unexplained_gaps(emb, self.skipped_chapters()), [],
+                         "trous dans la suite des chapitres (absents de la silver)")
         matrix = np.stack(list(emb.values()))
         self.assertFalse(np.isnan(matrix).any())
         np.testing.assert_allclose(np.linalg.norm(matrix, axis=1), 1.0, rtol=1e-5)
@@ -225,6 +244,8 @@ class RealSilverTest(unittest.TestCase):
         emb = load_chapter_embeddings()
 
         self.assertEqual(set(emb), self.complete_chapters())
+        self.assertEqual(unexplained_gaps(emb, self.skipped_chapters()), [],
+                         "trous dans la suite des chapitres (absents de la silver)")
         matrix = np.stack(list(emb.values()))
         self.assertEqual(matrix.shape[1], emb.metadata.dimension)
         self.assertFalse(np.isnan(matrix).any())
