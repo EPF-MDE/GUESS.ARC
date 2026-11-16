@@ -83,18 +83,29 @@ def chapter_embedding(scene_texts: list[str], encoder: Encoder) -> np.ndarray:
     return (pooled / norm).astype(np.float32)
 
 
-def run(data_dir: Path, encoder: Encoder) -> Path:
+@dataclass(frozen=True)
+class RunResult:
+    path: Path  # le dataset écrit
+    vectorised: list[int]
+    skipped: dict[int, str]  # chapitre -> raison
+
+
+def run(data_dir: Path, encoder: Encoder) -> RunResult:
     """Vectorise tous les chapitres complets de la silver et écrit le dataset.
 
     Un chapitre `complete: false`, ou sans Scene, n'a aucune entrée dans le dataset.
-    Renvoie le chemin du dataset écrit.
     """
     embeddings: dict[int, np.ndarray] = {}
     revision_ids: dict[int, int] = {}
+    skipped: dict[int, str] = {}
     for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md")):
         chapter = read_silver_chapter(path)
         scene_texts = scenes(chapter.long_summary)
-        if not chapter.complete or not scene_texts:
+        if not chapter.complete:
+            skipped[chapter.number] = "complete: false"
+            continue
+        if not scene_texts:
+            skipped[chapter.number] = "Long Summary vide"
             continue
         embeddings[chapter.number] = chapter_embedding(scene_texts, encoder)
         revision_ids[chapter.number] = chapter.revision_id
@@ -110,4 +121,4 @@ def run(data_dir: Path, encoder: Encoder) -> Path:
     )
     target = dataset_path(data_dir)
     write_dataset(target, ChapterEmbeddings(embeddings, revision_ids, metadata))
-    return target
+    return RunResult(path=target, vectorised=sorted(embeddings), skipped=skipped)

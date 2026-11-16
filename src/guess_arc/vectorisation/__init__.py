@@ -3,10 +3,12 @@
     encoder   -> protocole Encoder, injecté dans `run`
     pipeline  -> `run(data_dir, encoder)` : silver -> Scenes -> Chapter embeddings
     dataset   -> écriture atomique du .npz et `load_chapter_embeddings`
+    sentence_encoder -> l'Encoder réel (sentence-transformers, extra [vectorisation])
+    cli       -> `python -m guess_arc.vectorisation` : EMBEDDING_MODEL lu dans le .env
 """
 
 from .dataset import ChapterEmbeddings, Metadata, load_chapter_embeddings
 from .encoder import Encoder
-from .pipeline import run
+from .pipeline import RunResult, run
 
-__all__ = ["ChapterEmbeddings", "Encoder", "Metadata", "load_chapter_embeddings", "run"]
+__all__ = ["ChapterEmbeddings", "Encoder", "Metadata", "load_chapter_embeddings", "RunResult", "run"]

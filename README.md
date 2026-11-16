@@ -20,10 +20,16 @@ src/guess_arc/
 │   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
 │   ├── validation.py     # bronze / silver format contract
 │   └── pipeline.py       # orchestration, incremental state, CLI
-└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
-    ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
-    ├── pipeline.py       # reads bronze, writes gold, CLI
-    └── common_words.txt  # common words: link text starting with one of them is not an Alias
+├── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
+│   ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
+│   ├── pipeline.py       # reads bronze, writes gold, CLI
+│   └── common_words.txt  # common words: link text starting with one of them is not an Alias
+└── vectorisation/        # silver -> Scenes -> Chapter embeddings in data/gold/vector/
+    ├── pipeline.py       # run(data_dir, encoder): Scenes, token-weighted mean, L2
+    ├── encoder.py        # Encoder protocol, injected into run
+    ├── sentence_encoder.py  # the real Encoder: sentence-transformers on CPU (optional extra)
+    ├── dataset.py        # atomic .npz writing, load_chapter_embeddings
+    └── cli.py            # reads EMBEDDING_MODEL from .env, CLI
 reference/                # versioned reference data
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
 ├── concepts.txt          # Concepts and Titles, excluded from Registry(t)
@@ -175,6 +181,47 @@ Plain-language account of the step, its results, problems and decisions:
   Chapter Notes. Regenerated on every run: real Disguises are confirmed by hand,
   with their Revelation chapter, then copied into `reference/disguises.csv`.
 
+## Vectorisation
+
+Turns the Long Summary of every complete silver chapter into a Chapter embedding,
+with a frozen pre-trained sentence encoder run locally on CPU
+([ADR 0003](docs/adr/0003-chapter-embeddings-encodeur-gele.md), details in
+[docs/vectorisation.md](docs/vectorisation.md)). Its dependencies
+(`sentence-transformers`, which pulls in `torch`, ~200 MB) are an optional extra,
+so ingestion, entity extraction and `pytest` don't need them:
+
+```bash
+pip install -e .[vectorisation]
+```
+
+On Linux, plain `pip` installs the CUDA build of `torch` (~2 GB); the CPU build is
+enough: `pip install -e .[vectorisation] --extra-index-url https://download.pytorch.org/whl/cpu`.
+
+The model is set in `.env` at the repo root, never in the code. Recommended:
+
+```
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+```
+
+```bash
+# all complete silver chapters -> data/gold/vector/ (override with --data-dir)
+python -m guess_arc.vectorisation
+```
+
+On the first run the model is downloaded from Hugging Face (~130 MB), then cached:
+later runs work offline. Each Scene of the Long Summary is encoded;
+the Chapter embedding is their mean weighted by token count, L2-normalised
+(dimension 384 for `bge-small-en-v1.5`). The run ends with the number of chapters
+vectorised and skipped (`complete: false` or empty Long Summary: no entry).
+A missing `EMBEDDING_MODEL` or a missing extra stops the run with an explicit
+message, and nothing is written.
+
+- `data/gold/vector/chapter_embeddings.npz`: `chapters`, `revision_ids`,
+  `embeddings` (N × d, row i is chapter `chapters[i]`) and the metadata (model,
+  dimension, pooling, date). Read it with
+  `guess_arc.vectorisation.load_chapter_embeddings()`, which returns
+  `{chapter: vector}`.
+
 ## Quality checks
 
 ```bash
@@ -208,6 +255,9 @@ corpus are skipped (`pytest -rs` shows why). The tests cover:
   precision proxies, Entity types from the datasets, wiki categories and
   overrides, category cache, confirmed Disguises, Registry(t) over 3 chapters,
   Disguise candidates);
+- vectorisation through `run` and the CLI, with fake encoders (no network, no
+  extra); the real encoder is tested only if the extra is installed and the model
+  cached;
 - a check of every file in `data/bronze/` and `data/silver/`
   (skipped if the data hasn't been generated yet).
 

@@ -13,6 +13,10 @@ dependencies = [
     "numpy>=1.24",
 ]
 
+[project.optional-dependencies]
+# Vectorisation (python -m guess_arc.vectorisation) : installe torch, ~200 Mo.
+vectorisation = ["sentence-transformers>=3.0"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
