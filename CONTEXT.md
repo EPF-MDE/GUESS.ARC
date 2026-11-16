@@ -1,11 +1,11 @@
 # GUESS.ARC
 
-Prédiction du casting du chapitre n+1 de *One Piece* à partir d'un graphe de connaissances temporel construit sur les chapitres 1 à n.
+Prédiction des Events du chapitre n+1 de *One Piece* à partir des chapitres 1 à n (texte, Events, graphe de connaissances temporel).
 
 ## Apparitions
 
 **Appearance**:
-Présence d'un Character *on panel* dans un chapitre. C'est la seule forme de présence que le modèle cherche à prédire.
+Présence d'un Character *on panel* dans un chapitre.
 _Avoid_: tag, présence, apparition (sans précision)
 
 **Recall**:
@@ -87,3 +87,25 @@ _Avoid_: rank
 
 **Concept**:
 Notion générique de l'univers (Pirate, Haki, le Devil Fruit en général). Jamais une Entity.
+
+## Événements
+
+**Event**:
+Fait narratif survenu dans un chapitre, décrit par un Event type et ses Participants. C'est ce que le modèle cherche à prédire pour le chapitre n+1.
+_Avoid_: événement nommé (Buster Call, Levely : ce sont des Entities), action, fait
+
+**Event type**:
+Catégorie d'un Event (combat, alliance…), prise dans une liste fermée. Chaque Event type est soit orienté (des Sources vers des Targets), soit non orienté, une fois pour toutes.
+
+**Participant**:
+Entity de Registry(t) impliquée dans un Event, désignée par les Aliases connus au chapitre t (un Disguise reste un Participant distinct jusqu'à sa Revelation). Un Event a de 1 à n Participants. Dans un Event orienté, chaque Participant est soit Source, soit Target.
+_Avoid_: acteur, argument
+
+**Source** / **Target**:
+Les deux rôles des Participants d'un Event orienté : celui qui agit et celui qui subit (vainqueur → vaincu, traître → trahi). 1 à n de chaque côté.
+
+**Event phase**:
+Moment d'un Event qui s'étend sur plusieurs chapitres, tel que le chapitre le montre : start, ongoing ou end.
+
+**Flashback event**:
+Event raconté au chapitre t mais situé dans le passé de l'histoire. Signal pour l'état de l'histoire, jamais une cible de prédiction ni une vérité terrain.
