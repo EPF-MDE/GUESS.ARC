@@ -30,29 +30,43 @@ def _finite_or_none(value: float) -> float | None:
     return float(value) if math.isfinite(value) else None
 
 
+def _mean_or_none(values: list[float]) -> float | None:
+    return _finite_or_none(float(np.mean(values))) if values else None
+
+
 def _semantic_coherence(matrix: np.ndarray, arcs: list[str]) -> dict:
-    """Similarité cosinus moyenne sur toutes les paires de chapitres d'un même
-    arc, contre toutes les paires d'arcs différents. Un arc d'un seul chapitre
-    n'apporte aucune paire intra-arc ; sans paire, la moyenne vaut null."""
+    """Moyenne par Arc, chaque Arc pesant autant quelle que soit sa longueur.
+
+    Intra-arc : la moyenne, sur les Arcs d'au moins deux chapitres, de la
+    similarité cosinus moyenne entre deux chapitres de l'Arc. Inter-arc : la
+    moyenne, sur les couples d'Arcs différents, de la similarité moyenne entre
+    un chapitre de l'un et un chapitre de l'autre. Un Arc d'un seul chapitre
+    n'a pas de moyenne intra-arc ; sans aucune moyenne, la valeur est null."""
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     unit = matrix / np.where(norms == 0, 1.0, norms)
     similarity = unit @ unit.T
-    labels = np.array(arcs, dtype=object)
-    upper = np.triu(np.ones_like(similarity, dtype=bool), k=1)
-    same_arc = labels[:, None] == labels[None, :]
+    members = {arc: np.flatnonzero(np.array(arcs, dtype=object) == arc) for arc in sorted(set(arcs))}
 
-    intra = similarity[upper & same_arc]
-    inter = similarity[upper & ~same_arc]
-    intra_mean = _finite_or_none(intra.mean()) if intra.size else None
-    inter_mean = _finite_or_none(inter.mean()) if inter.size else None
+    intra = []
+    for rows in members.values():
+        if len(rows) >= 2:
+            block = similarity[np.ix_(rows, rows)]
+            intra.append(float(block[np.triu_indices(len(rows), k=1)].mean()))
+    groups = list(members.values())
+    inter = [
+        float(similarity[np.ix_(a, b)].mean())
+        for i, a in enumerate(groups)
+        for b in groups[i + 1:]
+    ]
+    intra_mean, inter_mean = _mean_or_none(intra), _mean_or_none(inter)
     gap = intra_mean - inter_mean if intra_mean is not None and inter_mean is not None else None
     return {
-        "arcs": len(set(arcs)),
+        "arcs": len(members),
         "intra_arc_mean": intra_mean,
         "inter_arc_mean": inter_mean,
         "gap": gap,
-        "intra_arc_pairs": int(intra.size),
-        "inter_arc_pairs": int(inter.size),
+        "intra_arcs": len(intra),  # Arcs d'au moins deux chapitres
+        "arc_pairs": len(inter),  # couples d'Arcs différents
     }
 
 

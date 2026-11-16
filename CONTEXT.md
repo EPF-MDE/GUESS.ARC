@@ -2,6 +2,12 @@
 
 Prédiction du casting du chapitre n+1 de *One Piece* à partir d'un graphe de connaissances temporel construit sur les chapitres 1 à n.
 
+## Récit
+
+**Arc**:
+Collection de chapitres connectés entre eux, qui racontent une histoire complète avec une intrigue, des enjeux et un dénouement propres (Arlong Park Arc, Wano Country Arc). Chaque chapitre appartient à un seul Arc, lu dans le front-matter silver.
+_Avoid_: saga, partie
+
 ## Apparitions
 
 **Appearance**:

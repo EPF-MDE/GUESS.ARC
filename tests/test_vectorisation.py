@@ -332,16 +332,34 @@ class QualityReportTest(SilverTestCase):
         data_dir = self.data_dir("data", chapters)
         run(data_dir, KeywordEncoder())
         coherence = report(data_dir)["semantic_coherence"]
-        emb = load_chapter_embeddings(data_dir)
 
-        intra = [cosine(emb[a], emb[b]) for a, b in ((1, 2), (1, 3), (2, 3), (4, 5))]
-        inter = [cosine(emb[a], emb[b]) for a in (1, 2, 3) for b in (4, 5)]
-        self.assertAlmostEqual(coherence["intra_arc_mean"], np.mean(intra), places=5)
-        self.assertAlmostEqual(coherence["inter_arc_mean"], np.mean(inter), places=5)
         self.assertGreater(coherence["intra_arc_mean"], coherence["inter_arc_mean"])
         self.assertAlmostEqual(coherence["gap"], coherence["intra_arc_mean"] - coherence["inter_arc_mean"], places=6)
-        self.assertEqual(coherence["intra_arc_pairs"], 4)
-        self.assertEqual(coherence["inter_arc_pairs"], 6)
+
+    def test_each_arc_weighs_the_same_whatever_its_number_of_chapters(self):
+        # East Blue : 3 chapitres (3 paires), Arlong Park : 2 (1 paire), Loguetown : 1.
+        loguetown = chapter(6, "delta\n\nalpha alpha alpha alpha alpha", arc="Loguetown Arc")
+        chapters = [chapter(n, text, arc=arc) for n, text, arc in ARC_CHAPTERS] + [loguetown]
+        data_dir = self.data_dir("data", chapters)
+        run(data_dir, KeywordEncoder())
+        coherence = report(data_dir)["semantic_coherence"]
+        emb = load_chapter_embeddings(data_dir)
+
+        def mean_cosine(pairs):
+            return np.mean([cosine(emb[a], emb[b]) for a, b in pairs])
+
+        east_blue, arlong, loguetown = (1, 2, 3), (4, 5), (6,)
+        intra = np.mean([mean_cosine([(1, 2), (1, 3), (2, 3)]), mean_cosine([(4, 5)])])
+        inter = np.mean([
+            mean_cosine([(a, b) for a in east_blue for b in arlong]),
+            mean_cosine([(a, b) for a in east_blue for b in loguetown]),
+            mean_cosine([(a, b) for a in arlong for b in loguetown]),
+        ])
+        self.assertAlmostEqual(coherence["intra_arc_mean"], intra, places=5)
+        self.assertAlmostEqual(coherence["inter_arc_mean"], inter, places=5)
+        self.assertEqual(coherence["arcs"], 3)
+        self.assertEqual(coherence["intra_arcs"], 2)
+        self.assertEqual(coherence["arc_pairs"], 3)
 
     def test_arc_with_a_single_chapter_does_not_break_the_intra_arc_mean(self):
         chapters = [chapter(n, text, arc=arc) for n, text, arc in ARC_CHAPTERS[:4]]
@@ -352,7 +370,7 @@ class QualityReportTest(SilverTestCase):
 
         intra = [cosine(emb[a], emb[b]) for a, b in ((1, 2), (1, 3), (2, 3))]
         self.assertAlmostEqual(coherence["intra_arc_mean"], np.mean(intra), places=5)
-        self.assertEqual(coherence["intra_arc_pairs"], 3)
+        self.assertEqual(coherence["intra_arcs"], 1)
 
     def test_without_any_pair_the_means_are_null(self):
         quality = self.run_and_report([chapter(1, LONG_2, arc=EAST_BLUE), chapter(2, LONG_7, arc=ARLONG)])
@@ -360,7 +378,8 @@ class QualityReportTest(SilverTestCase):
         coherence = quality["semantic_coherence"]
         self.assertIsNone(coherence["intra_arc_mean"])
         self.assertIsNone(coherence["gap"])
-        self.assertEqual(coherence["inter_arc_pairs"], 1)
+        self.assertEqual(coherence["intra_arcs"], 0)
+        self.assertEqual(coherence["arc_pairs"], 1)
 
     def test_empty_dataset_still_gets_a_report(self):
         quality = self.run_and_report([chapter(1, LONG_2, complete=False)])

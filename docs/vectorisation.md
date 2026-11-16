@@ -111,7 +111,7 @@ Chaque exécution écrit `data/gold/vector/embeddings_quality.json` :
 
 - nombre de chapitres vectorisés, liste des chapitres sautés et pourquoi ;
 - dimension, présence de NaN, normes (toutes égales à 1) ;
-- **cohérence sémantique** : similarité cosinus moyenne entre chapitres d'un même arc (arc lu dans le front-matter) contre entre chapitres d'arcs différents. La première doit être nettement plus élevée : c'est une preuve simple que les vecteurs capturent le sens de l'histoire.
+- **cohérence sémantique** : similarité cosinus moyenne entre chapitres d'un même Arc (lu dans le front-matter) contre entre chapitres d'arcs différents. La première doit être nettement plus élevée : c'est une preuve simple que les vecteurs capturent le sens de l'histoire.
 
 ```json
 {
@@ -119,11 +119,11 @@ Chaque exécution écrit `data/gold/vector/embeddings_quality.json` :
   "chapters": {"total": 1195, "vectorised": [1, 2, …], "kept": [], "skipped": {"1196": "complete: false"}},
   "dimension": 384, "nan_count": 0, "norm_min": 1.0, "norm_max": 1.0,
   "semantic_coherence": {"arcs": 33, "intra_arc_mean": …, "inter_arc_mean": …, "gap": …,
-                         "intra_arc_pairs": …, "inter_arc_pairs": …}
+                         "intra_arcs": …, "arc_pairs": …}
 }
 ```
 
-Les moyennes portent sur toutes les paires de chapitres du dataset (pas sur une moyenne par arc). Un arc d'un seul chapitre n'apporte aucune paire intra-arc ; sans aucune paire, la moyenne vaut `null`. `kept` liste les chapitres repris tels quels du dataset précédent (mise à jour incrémentale) ; `skipped` donne la raison de chaque saut (`complete: false`, `Long Summary vide`). Le rapport est écrit de façon atomique, juste après le dataset.
+Les moyennes sont **par Arc**, pour qu'un Arc long ne domine pas : `intra_arc_mean` est la moyenne, sur les `intra_arcs` Arcs d'au moins deux chapitres, de la similarité moyenne entre deux chapitres de l'Arc ; `inter_arc_mean` est la moyenne, sur les `arc_pairs` couples d'Arcs différents, de la similarité moyenne entre un chapitre de l'un et un chapitre de l'autre. Un Arc d'un seul chapitre n'a pas de moyenne intra-arc ; sans aucune moyenne, la valeur vaut `null`. `kept` liste les chapitres repris tels quels du dataset précédent (mise à jour incrémentale) ; `skipped` donne la raison de chaque saut (`complete: false`, `Long Summary vide`). Le rapport est écrit de façon atomique, juste après le dataset.
 
 ## 9. Lien avec l'ADR 0002 (connaissance du lecteur)
 
