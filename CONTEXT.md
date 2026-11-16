@@ -29,6 +29,10 @@ _Avoid_: paragraphe, passage
 Vecteur de taille fixe qui représente le sens du Long Summary d'un chapitre, produit par un encodeur pré-entraîné gelé. Il ne dépend que du texte du chapitre t, jamais d'un autre chapitre.
 _Avoid_: vecteur, encoding, représentation
 
+**Chunk**:
+Texte encodé en un seul vecteur pour former le Chapter embedding : une Scene entière, ou, si elle dépasse la fenêtre de l'encodeur, l'une des fenêtres qui se chevauchent et la découpent.
+_Avoid_: morceau, segment, passage
+
 ## Entités
 
 **Entity**:

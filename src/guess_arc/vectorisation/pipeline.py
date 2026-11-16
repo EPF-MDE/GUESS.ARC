@@ -1,8 +1,10 @@
 """Vectorisation : de la silver au dataset des Chapter embeddings.
 
 Pour chaque chapitre complet de la silver, le Long Summary est découpé en
-Scenes, chaque Scene est encodée, et le Chapter embedding est la moyenne des
-vecteurs de Scenes pondérée par leur nombre de tokens, normalisée L2.
+Scenes, une Scene plus longue que la fenêtre de l'encodeur est découpée en
+fenêtres qui se chevauchent, chaque Chunk est encodé, et le Chapter embedding
+est la moyenne des vecteurs de Chunks pondérée par leur nombre de tokens,
+normalisée L2.
 Voir docs/vectorisation.md et l'ADR 0003.
 """
 
@@ -21,6 +23,8 @@ from .dataset import ChapterEmbeddings, Metadata, dataset_path, write_dataset
 from .encoder import Encoder
 
 POOLING = "scene-mean-token-weighted-l2"
+# Les fenêtres d'une Scene trop longue se chevauchent d'environ 1/4 de fenêtre.
+OVERLAP_DIVISOR = 4
 
 FRONT_MATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 LONG_SUMMARY_RE = re.compile(r"^## Long Summary[ \t]*\n(.*?)(?=^## |\Z)", re.DOTALL | re.MULTILINE)
@@ -70,12 +74,52 @@ def scenes(long_summary: str) -> list[str]:
     return [p.strip() for p in PARAGRAPH_BREAK_RE.split(long_summary) if p.strip()]
 
 
+def _longest_fit(words: list[str], start: int, stop: int, budget: int, encoder: Encoder, *, from_end: bool) -> int:
+    """Le plus grand k de [0, stop - start] tel que k mots, pris au début de
+    words[start:stop] (ou à la fin si `from_end`), tiennent en `budget` tokens."""
+    def fits(k: int) -> bool:
+        piece = words[stop - k:stop] if from_end else words[start:start + k]
+        return encoder.count_tokens(" ".join(piece)) <= budget
+
+    low, high = 0, stop - start
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(middle):
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
+def chunks(scene: str, encoder: Encoder) -> list[str]:
+    """Les Chunks d'une Scene : la Scene elle-même si elle tient dans la fenêtre
+    de l'encodeur, sinon des fenêtres de mots qui se chevauchent (d'au moins un
+    mot, d'environ 1/OVERLAP_DIVISOR de fenêtre), chacune d'au plus `max_tokens`
+    tokens comptés par l'encodeur. La dernière fenêtre finit au dernier mot de la
+    Scene. Seul un mot à lui seul plus long que la fenêtre la dépasse."""
+    if encoder.count_tokens(scene) <= encoder.max_tokens:
+        return [scene]
+    words = scene.split()
+    overlap = encoder.max_tokens // OVERLAP_DIVISOR
+    chunks: list[str] = []
+    start = 0
+    while True:
+        # Au moins un mot par fenêtre, même un mot seul plus long que la fenêtre.
+        end = start + max(1, _longest_fit(words, start, len(words), encoder.max_tokens, encoder, from_end=False))
+        chunks.append(" ".join(words[start:end]))
+        if end == len(words):
+            return chunks
+        shared = max(1, _longest_fit(words, start, end, overlap, encoder, from_end=True))
+        start = max(start + 1, end - shared)
+
+
 def chapter_embedding(scene_texts: list[str], encoder: Encoder) -> np.ndarray:
-    """Moyenne des vecteurs de Scenes pondérée par leur nombre de tokens, puis L2."""
-    vectors = np.asarray(encoder.encode(scene_texts), dtype=np.float64)
-    if vectors.ndim != 2 or vectors.shape[0] != len(scene_texts):
-        raise ValueError(f"l'encodeur a renvoyé {vectors.shape} pour {len(scene_texts)} textes")
-    weights = np.array([encoder.count_tokens(s) for s in scene_texts], dtype=np.float64)
+    """Moyenne des vecteurs de Chunks pondérée par leur nombre de tokens, puis L2."""
+    texts = [chunk for scene in scene_texts for chunk in chunks(scene, encoder)]
+    vectors = np.asarray(encoder.encode(texts), dtype=np.float64)
+    if vectors.ndim != 2 or vectors.shape[0] != len(texts):
+        raise ValueError(f"l'encodeur a renvoyé {vectors.shape} pour {len(texts)} textes")
+    weights = np.array([encoder.count_tokens(c) for c in texts], dtype=np.float64)
     pooled = weights @ vectors / weights.sum()
     norm = np.linalg.norm(pooled)
     if not np.isfinite(norm) or norm == 0:

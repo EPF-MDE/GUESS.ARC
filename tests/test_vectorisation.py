@@ -61,6 +61,28 @@ class FailingEncoder(HashEncoder):
         raise RuntimeError("encodeur en panne")
 
 
+class SmallWindowEncoder(HashEncoder):
+    """Petite fenêtre, et, comme le vrai modèle, ne voit que ses `max_tokens`
+    premiers tokens : un texte trop long serait tronqué en silence."""
+
+    model_name = "fake/small-window-encoder"
+    max_tokens = 8
+
+    def _truncated(self, texts: list[str]) -> list[str]:
+        return [" ".join(t.split()[: self.max_tokens]) for t in texts]
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        return super().encode(self._truncated(texts))
+
+    def encode_seen(self) -> np.ndarray:
+        """Les vecteurs des Chunks reçus, recalculés sans les enregistrer."""
+        return HashEncoder().encode(self._truncated(self.seen))
+
+
+def words(n: int, prefix: str = "w") -> str:
+    return " ".join(f"{prefix}{i}" for i in range(n))
+
+
 def chapter(number: int, long_summary: str, **overrides) -> Chapter:
     values = dict(
         number=number,
@@ -199,6 +221,48 @@ class VectorisationTest(unittest.TestCase):
 
         self.assertEqual([p.name for p in paths.vector_dir(data_dir).iterdir()], ["chapter_embeddings.npz"])
         self.assertEqual(dataset.read_bytes(), previous)
+
+    def test_scene_longer_than_the_window_is_split_into_overlapping_chunks(self):
+        encoder = SmallWindowEncoder()
+        scene = words(30)
+        self.embeddings([chapter(1, scene)], encoder=encoder)
+
+        chunks = [c.split() for c in encoder.seen]
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(encoder.count_tokens(" ".join(chunk)), encoder.max_tokens)
+        for previous, following in zip(chunks, chunks[1:]):
+            self.assertTrue(set(previous) & set(following), f"{previous} / {following}")
+        # Les Chunks, dans l'ordre, couvrent toute la Scene, jusqu'au dernier mot.
+        covered = []
+        for chunk in chunks:
+            covered.extend(w for w in chunk if w not in covered)
+        self.assertEqual(covered, scene.split())
+        self.assertEqual(chunks[-1][-1], "w29")
+
+    def test_changing_the_last_words_of_a_long_scene_changes_the_vector(self):
+        long_scene = words(30)
+        cliffhanger = words(27) + " Luffy is defeated"
+        reference = self.embeddings([chapter(1, long_scene)], encoder=SmallWindowEncoder(), name="a")[1]
+        changed = self.embeddings([chapter(1, cliffhanger)], encoder=SmallWindowEncoder(), name="b")[1]
+
+        self.assertFalse(np.allclose(reference, changed))
+
+    def test_chunks_are_weighted_by_their_token_count(self):
+        encoder = SmallWindowEncoder()
+        emb = self.embeddings([chapter(1, words(3, "short") + "\n\n" + words(19))], encoder=encoder)
+
+        weights = np.array([encoder.count_tokens(c) for c in encoder.seen], dtype=np.float64)
+        self.assertGreater(len(set(weights)), 1, "le test doit mêler des Chunks de tailles différentes")
+        pooled = weights @ encoder.encode_seen().astype(np.float64)
+        np.testing.assert_allclose(emb[1], pooled / np.linalg.norm(pooled), rtol=1e-5)
+
+    def test_scene_that_fits_the_window_is_a_single_chunk(self):
+        encoder = SmallWindowEncoder()
+        fits = words(8)
+        self.embeddings([chapter(1, fits + "\n\n" + "a short scene")], encoder=encoder)
+
+        self.assertEqual(encoder.seen, [fits, "a short scene"])
 
     def test_failed_first_run_leaves_no_file(self):
         data_dir = self.data_dir("data", [chapter(1, LONG_2)])

@@ -52,9 +52,9 @@ Un encodeur a une fenêtre limitée (512 tokens pour `bge-small`, environ 380 mo
 Tronquer le chapitre à 512 tokens ferait perdre la fin, souvent le cliffhanger, c'est-à-dire l'information la plus utile pour prédire t+1. On découpe donc par **Scene** (un paragraphe du Long Summary), qui tient dans la fenêtre dans 95 % des cas :
 
 1. Le Long Summary est découpé en Scenes (paragraphes non vides).
-2. Une Scene plus longue que la fenêtre de l'encodeur (rare) est découpée en fenêtres de 512 tokens qui se chevauchent.
-3. Chaque Scene (ou fenêtre) est encodée en un vecteur.
-4. Le Chapter embedding est la **moyenne des vecteurs, pondérée par la longueur** de chaque morceau (une Scene de 300 mots pèse plus qu'une Scene de 20 mots).
+2. Une Scene plus longue que la fenêtre de l'encodeur (rare) est découpée en fenêtres de mots d'au plus 512 tokens (comptés par l'encodeur), qui se chevauchent d'environ un quart de fenêtre (au moins un mot). La dernière fenêtre finit au dernier mot de la Scene : la fin, souvent le cliffhanger, n'est jamais tronquée.
+3. Chaque **Chunk** (une Scene entière, ou une fenêtre d'une Scene trop longue) est encodé en un vecteur.
+4. Le Chapter embedding est la **moyenne des vecteurs, pondérée par la longueur** (en tokens) de chaque Chunk (une Scene de 300 mots pèse plus qu'une Scene de 20 mots).
 5. Le résultat est **normalisé L2** (norme 1), pour que la similarité cosinus se réduise à un produit scalaire et que tous les chapitres aient la même échelle.
 
 ```
