@@ -1,7 +1,7 @@
 """
 One Piece — extraction des Entities, du bronze à Registry(t) dans la gold.
 
-Gold : registry.jsonl (une ligne par Entity et par changement, datée par
+Gold (data/gold/entities/) : registry.jsonl (une ligne par Entity et par changement, datée par
 valid_from / valid_to), registry_quality.json (rapport qualité) et
 disguise_candidates.csv (Disguises possibles, à relire par un humain).
 
@@ -82,6 +82,8 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
         concepts=frozenset(_read_list(reference_dir / "concepts.txt")),
         wiki_categories=load_category_cache(reference_dir / WIKI_CATEGORIES),
         type_overrides=overrides,
+        redirects={row["redirect"]: row["canonical_name"]
+                   for row in _read_csv(reference_dir / REDIRECTS)},
         disguises=disguises,
     )
 
@@ -89,6 +91,7 @@ def load_reference(reference_dir: Path = paths.REFERENCE_DIR) -> Reference:
 WIKI_CATEGORIES = "wiki_categories.json"
 TYPE_OVERRIDES = "type_overrides.csv"
 DISGUISES = "disguises.csv"
+REDIRECTS = "redirects.csv"
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -104,13 +107,21 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
 
     # Les catégories du wiki ne sont demandées que pour les Entities encore
     # Unknown et absentes du cache ; un second run ne touche pas au réseau.
+    # Un Title nouveau sort Unknown de la première extraction, puis est exclu
+    # par ses catégories dans la seconde, juste après la requête. Un nom typé par un dataset n'est jamais
+    # demandé au wiki : un Title présent dans un dataset ne serait pas exclu
+    # (aucun au 2026-11-10 ; à ajouter à concepts.txt le cas échéant).
+    # S'y ajoutent les sous-pages liées, les pages parentes des liens vers une partie
+    # de page et les entrées de catalogue : leurs catégories décident d'une chose à
+    # part, d'un catalogue ou d'une section qui porte le titre d'une autre page.
     unknown = {r.canonical_name for r in extraction.registry if r.entity_type == "Unknown"}
     if fetch:
-        fetched = update_category_cache(paths.REFERENCE_DIR / WIKI_CATEGORIES, unknown)
+        fetched = update_category_cache(paths.REFERENCE_DIR / WIKI_CATEGORIES,
+                                        unknown | extraction.pages_without_categories)
         if fetched:
-            print(f"Catégories du wiki récupérées pour {fetched} Entities")
+            print(f"Catégories du wiki récupérées pour {fetched} pages")
             extraction = extract_entities(chapters, load_reference())
-    registry_path = write_gold(extraction, paths.gold_dir(data_dir))
+    registry_path = write_gold(extraction, paths.gold_dir(data_dir) / "entities")
 
     scenes = extraction.quality.scenes_per_chapter
     entities = {row.canonical_name for row in extraction.registry}
@@ -125,6 +136,8 @@ def run(data_dir: Path = paths.DATA_DIR, fetch: bool = True) -> Extraction:
               "de Characters tombent dans le Cast")
     if extraction.quality.unknown_mention_share is not None:
         print(f"Mentions typées Unknown : {extraction.quality.unknown_mention_share:.1%}")
+    print(f"Titles et Concepts exclus par catégorie du wiki : "
+          f"{extraction.quality.excluded_by_category}")
     print(f"Disguise candidates à relire : {len(extraction.disguise_candidates)}")
     empty = [n for n, count in scenes.items() if count == 0]
     if empty:

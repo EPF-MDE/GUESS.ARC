@@ -1,0 +1,13 @@
+# Redirections du wiki rattachées à leur page cible : le titre de la redirection
+# devient un Alias du Canonical name de la cible au lieu d'une Entity distincte.
+# Tenu à la main ; le wiki fait de ces titres des redirections vers la même page.
+redirect,canonical_name
+The Worst Generation,Worst Generation
+Eleven Supernovas,Worst Generation
+The Eleven Supernovas,Worst Generation
+Usopp's Arsenal/Ginga Pachinko,Usopp Tactics/Ginga Pachinko
+Usopp's Arsenal/Kabuto,Usopp Tactics/Kabuto
+Usopp's Arsenal/Kuro Kabuto,Usopp Tactics/Kuro Kabuto
+Ginga Pachinko,Usopp Tactics/Ginga Pachinko
+Kabuto,Usopp Tactics/Kabuto
+Kuro Kabuto,Usopp Tactics/Kuro Kabuto
