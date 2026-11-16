@@ -798,6 +798,306 @@ class TestEntityTypesFromWikiCategories(unittest.TestCase):
                          "Character")
 
 
+# Catégories réelles du wiki (cache reference/wiki_categories.json, abrégé pour
+# Captain John) : Titles et Concepts rangés dans Positions ou Occupations, et
+# Entities à garder.
+TITLES_WIKI_CATEGORIES = {
+    "Rear Admiral": ("Lists", "Marine", "Occupations"),
+    "First Mate": ("Positions",),
+    "Royal Guards": ("Occupations",),
+    "Captain John": ("Pirate Captains", "Male Characters", "Rocks Pirates"),
+    "Cipher Pol": ("World Government Groups",),
+}
+# Scene et CharTable écrites pour le test
+CH1001_TITLES_SCENE = (
+    "The [[Rear Admiral]] and the [[First Mate]] of [[Captain John]] meet the [[Royal Guards]] "
+    "and [[Cipher Pol]]. The Rear Admiral leaves."
+)
+CH1001_TITLES_CHARACTERS = (
+    ";[[Rear Admiral]]s\n*[[Shanks]]\n;[[Rocks Pirates]]\n*[[Captain John]]\n*[[Shandia Chief]]"
+)
+
+
+def titles_extraction(overrides=None):
+    return extract_entities([bronze_record(1001, CH1001_TITLES_SCENE,
+                                           characters=CH1001_TITLES_CHARACTERS)],
+                            Reference(characters=CHARACTERS, concepts=CONCEPTS,
+                                      wiki_categories=TITLES_WIKI_CATEGORIES,
+                                      type_overrides=overrides or {}))
+
+
+class TestTitlesExcludedByWikiCategory(unittest.TestCase):
+
+    def test_positions_and_occupations_are_not_entities(self):
+        extraction = titles_extraction()
+        names = {r.canonical_name for r in extraction.registry}
+        mentioned = {e.canonical_name for e in extraction.quality.top_entities}
+        for title in ("Rear Admiral", "First Mate", "Royal Guards"):
+            self.assertNotIn(title, names)
+            self.assertNotIn(title, mentioned)
+        # Seuls les liens de Captain John et Cipher Pol restent ; "The Rear Admiral
+        # leaves" n'est pas un Alias match.
+        self.assertEqual(extraction.quality.mentions_by_source, {"link": 2, "alias_match": 0})
+
+    def test_real_entities_next_to_titles_stay(self):
+        names = names_at(titles_extraction(), 1001)
+        for name in ("Captain John", "Cipher Pol", "Shandia Chief", "Shanks"):
+            self.assertIn(name, names)
+
+    def test_override_keeps_a_position_as_an_entity(self):
+        extraction = titles_extraction(overrides={"Royal Guards": "Group"})
+        self.assertEqual(type_of(extraction, "Royal Guards", 1001), "Group")
+        self.assertNotIn("Rear Admiral", names_at(extraction, 1001))
+
+    def test_quality_report_counts_names_excluded_by_category(self):
+        self.assertEqual(titles_extraction().quality.excluded_by_category, 3)
+        self.assertEqual(titles_extraction(overrides={"Royal Guards": "Group"})
+                         .quality.excluded_by_category, 2)
+
+    def test_quality_report_names_excluded_names_with_their_categories(self):
+        excluded = titles_extraction().quality.excluded_by_category_names
+        self.assertEqual([(e.canonical_name, e.categories) for e in excluded], [
+            ("First Mate", ["Positions"]),
+            ("Rear Admiral", ["Lists", "Marine", "Occupations"]),
+            ("Royal Guards", ["Occupations"]),
+        ])
+
+
+# Catégories réelles du wiki : Concepts rangés dans Terms (typés ou non par une
+# autre catégorie), un minerai précis et un Group rangés aussi dans Terms.
+TERMS_WIKI_CATEGORIES = {
+    "Jolly Roger": ("Lists", "Piracy", "Terms"),
+    "Epithet": ("Lists", "Piracy", "Terms"),
+    "Map": ("Geography", "Technology", "Terms"),
+    "Vearth": ("Minerals", "Terms"),
+    "Worst Generation": ("Pirate Groups", "Terms"),
+}
+# Scene écrite pour le test
+CH1001_TERMS_SCENE = (
+    "[[Shanks]] raises his [[Jolly Roger]], known by his [[Epithet]], over the [[Vearth]] "
+    "on a [[Map]] of the [[Worst Generation]]."
+)
+
+
+def terms_extraction(overrides=None):
+    return extract_entities([bronze_record(1001, CH1001_TERMS_SCENE)],
+                            Reference(characters=CHARACTERS, concepts=CONCEPTS,
+                                      wiki_categories=TERMS_WIKI_CATEGORIES,
+                                      type_overrides=overrides or {}))
+
+
+class TestTermsExcludedByWikiCategory(unittest.TestCase):
+
+    def test_terms_are_not_entities(self):
+        extraction = terms_extraction()
+        names = {r.canonical_name for r in extraction.registry}
+        for term in ("Jolly Roger", "Epithet", "Map", "Vearth"):
+            self.assertNotIn(term, names)
+        self.assertIn("Shanks", names)
+        self.assertEqual(extraction.quality.excluded_by_category, 4)
+
+    def test_a_term_that_is_a_group_stays(self):
+        self.assertEqual(type_of(terms_extraction(), "Worst Generation", 1001), "Group")
+
+    def test_override_keeps_a_term_as_an_entity(self):
+        extraction = terms_extraction(overrides={"Vearth": "Object"})
+        self.assertEqual(type_of(extraction, "Vearth", 1001), "Object")
+        self.assertNotIn("Jolly Roger", names_at(extraction, 1001))
+
+
+# Scenes écrites pour le test : trois titres de redirection vers la même page.
+CH1001_REDIRECTS_SCENE = "[[Shanks]] meets the [[Eleven Supernovas]]."
+CH1002_REDIRECTS_SCENE = (
+    "The [[The Worst Generation|Supernovas]] gather. The [[Worst Generation]] sails on."
+)
+REDIRECTS = {"Eleven Supernovas": "Worst Generation",
+             "The Worst Generation": "Worst Generation"}
+
+
+def redirects_extraction(redirects=REDIRECTS):
+    return extract_entities([bronze_record(1001, CH1001_REDIRECTS_SCENE),
+                             bronze_record(1002, CH1002_REDIRECTS_SCENE)],
+                            Reference(characters=CHARACTERS, redirects=redirects))
+
+
+class TestRedirectsMergedIntoTarget(unittest.TestCase):
+
+    def test_redirects_are_one_entity(self):
+        extraction = redirects_extraction()
+        names = {r.canonical_name for r in extraction.registry}
+        self.assertIn("Worst Generation", names)
+        self.assertNotIn("Eleven Supernovas", names)
+        self.assertNotIn("The Worst Generation", names)
+        self.assertEqual(sum(e.mention_count for e in extraction.quality.top_entities
+                             if e.canonical_name == "Worst Generation"), 3)
+
+    def test_redirect_title_becomes_an_alias_unless_the_link_has_text(self):
+        extraction = redirects_extraction()
+        self.assertEqual(aliases_at(extraction, "Worst Generation", 1001),
+                         {"Eleven Supernovas"})
+        self.assertEqual(aliases_at(extraction, "Worst Generation", 1002),
+                         {"Eleven Supernovas", "Supernovas"})
+
+    def test_quality_report_lists_unknown_entities_most_mentioned_first(self):
+        # Shanks n'est dans aucun dataset du test : Unknown lui aussi.
+        unknown = redirects_extraction().quality.unknown_entities
+        self.assertEqual([(u.canonical_name, u.mention_count) for u in unknown],
+                         [("Worst Generation", 3), ("Shanks", 1)])
+        # À égalité de Mentions, ordre alphabétique.
+        unknown = redirects_extraction(redirects={}).quality.unknown_entities
+        self.assertEqual([u.canonical_name for u in unknown],
+                         ["Eleven Supernovas", "Shanks", "The Worst Generation",
+                          "Worst Generation"])
+
+    def test_without_redirects_each_title_is_its_own_entity(self):
+        names = {r.canonical_name for r in redirects_extraction(redirects={}).registry}
+        self.assertIn("Eleven Supernovas", names)
+        self.assertIn("The Worst Generation", names)
+
+
+# Extrait réel du chapitre 1093 : un satellite de Vegapunk et un Weapon de Franky,
+# tous deux sur une sous-page de leur page parente.
+CH1093_SCENE = (
+    "Franky joins the three as he tells [[Vegapunk/Lilith|Lilith]] to use "
+    "[[Battle Frankies/General Franky|General Franky]] to carry the [[Thousand Sunny]]."
+)
+# Catégories réelles du wiki (abrégées) : une sous-page catégorisée est une chose à
+# part ; une sous-page sans catégorie est une partie de sa page parente.
+SUBPAGE_WIKI_CATEGORIES = {
+    "Vegapunk/Lilith": ("Female Characters", "Satellites", "Vegapunk's Creations"),
+    "Battle Frankies/General Franky": ("Mechas", "Polearms"),
+    "Battle Frankies": ("Flashback Introduction Ships", "Technology", "Weapons"),
+    "Gomu Gomu no Mi": ("Devil Fruits with Multiple Users", "Paramecia"),
+    "Gomu Gomu no Mi/Gear 5 Techniques": (),
+}
+
+
+def subpage_extraction(*records):
+    return extract_entities(list(records), Reference(
+        common_words=COMMON_WORDS, wiki_categories=SUBPAGE_WIKI_CATEGORIES))
+
+
+class TestSubpagesWithTheirOwnCategories(unittest.TestCase):
+
+    def test_typed_subpage_is_an_entity_of_its_own(self):
+        extraction = subpage_extraction(bronze_record(1093, CH1093_SCENE))
+        names = names_at(extraction, 1093)
+        self.assertIn("Vegapunk/Lilith", names)
+        self.assertNotIn("Vegapunk", names)
+        self.assertEqual(type_of(extraction, "Vegapunk/Lilith", 1093), "Character")
+        self.assertEqual(aliases_at(extraction, "Vegapunk/Lilith", 1093), {"Lilith"})
+        self.assertEqual(type_of(extraction, "Battle Frankies/General Franky", 1093), "Weapon")
+        self.assertNotIn("Battle Frankies", names)
+
+    def test_subpage_without_category_stays_a_mention_of_the_parent(self):
+        extraction = subpage_extraction(bronze_record(1044, CH1044_SCENE))
+        names = names_at(extraction, 1044)
+        self.assertIn("Gomu Gomu no Mi", names)
+        self.assertNotIn("Gomu Gomu no Mi/Gear 5 Techniques", names)
+        self.assertEqual(aliases_at(extraction, "Gomu Gomu no Mi", 1044), set())
+
+    def test_alias_of_a_typed_subpage_is_matched_in_later_text(self):
+        extraction = subpage_extraction(bronze_record(
+            1093, CH1093_SCENE + " Lilith agrees."))
+        self.assertEqual(state_at(extraction, "Vegapunk/Lilith", 1093)[2], 2)
+
+
+# Catégories réelles du wiki : Animal Species est un catalogue (Lists) ; News Coo,
+# redirection vers une de ses sections, hérite de ses catégories.
+CATALOG_WIKI_CATEGORIES = {
+    "Animal Species": ("Animal Species", "Lists"),
+    "News Coo": ("Animal Species", "Lists"),
+    "Marine Ranks": ("Lists", "Marine", "Occupations"),
+    "Blue Gorilla": ("Animal Species Subpages",),
+    "Arabasta Kingdom": ("Twenty Kingdoms",),
+    "Arabasta": ("Twenty Kingdoms",),
+}
+# Scenes et CharTable écrites pour le test, avec les liens réels du corpus.
+CH160_CATALOG_SCENE = (
+    "[[Monkey D. Luffy|Luffy]] is chased by a [[Animal Species/Arabasta Saga#Bananawani|"
+    "Bananawani]] while a [[Animal Species#News Coo|News Coo]] flies by."
+)
+CH160_CATALOG_CHARACTERS = (
+    "! [[Animal Species|Animals]]\n*[[Animal Species/Arabasta Saga#Bananawani|Bananawani]]"
+)
+CH161_CATALOG_SCENE = (
+    "The [[Bananawani]] eats a [[Animal Species|fish]], the [[News Coo]] delivers papers "
+    "and a [[Marine Ranks#Commodore|commodore]] arrives."
+)
+# La section #Arabasta du catalogue regroupe les animaux d'Arabasta : elle porte le
+# titre d'une page à part, le royaume. Blue Gorilla redirige vers une sous-page du
+# catalogue, dont elle hérite des catégories.
+CH162_CATALOG_SCENE = (
+    "In [[Arabasta Kingdom|Arabasta]], [[Animal Species/Arabasta Saga#Arabasta|camels]] rest "
+    "near a [[Animal Species/Summit War Saga#Blue Gorilla|Blue Gorilla]] and a "
+    "[[Animal Species#Panda Shark|Panda Shark]]."
+)
+
+
+def catalog_extraction(concepts=frozenset()):
+    return extract_entities([
+        bronze_record(160, CH160_CATALOG_SCENE, characters=CH160_CATALOG_CHARACTERS),
+        bronze_record(161, CH161_CATALOG_SCENE),
+        bronze_record(162, CH162_CATALOG_SCENE),
+    ], Reference(characters=CHARACTERS, common_words=COMMON_WORDS, concepts=concepts,
+                 wiki_categories=CATALOG_WIKI_CATEGORIES))
+
+
+def row_at(extraction, name, t):
+    return next(r for r in extraction.registry_at(t) if r.canonical_name == name)
+
+
+class TestCatalogEntries(unittest.TestCase):
+
+    def test_link_to_a_catalog_section_is_a_mention_of_the_entry(self):
+        extraction = catalog_extraction()
+        row = row_at(extraction, "Bananawani", 160)
+        self.assertEqual((row.entity_type, row.catalog), ("Object", "Animal Species"))
+        # Long Summary et CharTable du 160, puis le lien direct du 161.
+        self.assertEqual(state_at(extraction, "Bananawani", 161), (160, 161, 2))
+
+    def test_redirect_to_a_catalog_section_is_the_same_entry(self):
+        row = row_at(catalog_extraction(), "News Coo", 161)
+        self.assertEqual((row.entity_type, row.catalog, row.mention_count),
+                         ("Object", "Animal Species", 2))
+
+    def test_catalog_itself_is_not_an_entity(self):
+        extraction = catalog_extraction()
+        self.assertNotIn("Animal Species", {r.canonical_name for r in extraction.registry})
+        self.assertNotIn("Animal Species",
+                         {e.canonical_name for e in extraction.quality.top_entities})
+        self.assertNotIn(("Animals", "Animal Species"),
+                         {(c.alias, c.canonical_name) for c in extraction.disguise_candidates})
+
+    def test_entries_of_an_excluded_catalog_are_not_entities(self):
+        # Marine Ranks est un Title (Occupations) : ses entrées aussi.
+        names = {r.canonical_name for r in catalog_extraction().registry}
+        self.assertNotIn("Commodore", names)
+        self.assertNotIn("Marine Ranks", names)
+
+    def test_section_titled_like_a_page_of_its_own_is_not_merged(self):
+        extraction = catalog_extraction()
+        names = names_at(extraction, 162)
+        self.assertNotIn("Arabasta", names)
+        self.assertIsNone(row_at(extraction, "Arabasta Kingdom", 162).catalog)
+        # Une entrée sans page (Panda Shark) ou redirigée dans le catalogue reste.
+        self.assertEqual(row_at(extraction, "Blue Gorilla", 162).catalog, "Animal Species")
+        self.assertEqual(row_at(extraction, "Panda Shark", 162).catalog, "Animal Species")
+
+    def test_entries_missing_from_the_cache_are_named_for_the_wiki(self):
+        missing = catalog_extraction().pages_without_categories
+        self.assertTrue({"Bananawani", "Panda Shark"} <= missing)
+        self.assertNotIn("Blue Gorilla", missing)
+        # Les entrées d'un catalogue exclu ne servent à rien.
+        self.assertNotIn("Commodore", missing)
+
+    def test_entities_outside_a_catalog_have_no_catalog(self):
+        extraction = catalog_extraction()
+        self.assertIsNone(row_at(extraction, "Monkey D. Luffy", 160).catalog)
+        catalogs = {r.catalog for r in extraction.registry}
+        self.assertEqual(catalogs, {None, "Animal Species"})
+
+
 class TestWikiCategoryCache(unittest.TestCase):
 
     def test_categories_are_fetched_in_batches_then_read_from_the_cache(self):
@@ -818,6 +1118,16 @@ class TestWikiCategoryCache(unittest.TestCase):
             calls.clear()
             self.assertEqual(update_category_cache(cache, titles, fake_fetch, batch=50), 0)
             self.assertEqual(calls, [])
+
+    def test_extraction_names_the_subpages_and_parents_missing_from_the_cache(self):
+        # Sous-pages et pages parentes de sections : leurs catégories décident
+        # d'une chose à part ou d'un catalogue. Un lien simple n'en demande aucune.
+        extraction = extract_entities(
+            [bronze_record(1093, CH1093_SCENE), bronze_record(444, CH444_SCENE)],
+            Reference(wiki_categories={"Battle Frankies": ("Weapons",)}))
+        self.assertEqual(extraction.pages_without_categories, frozenset({
+            "Vegapunk", "Vegapunk/Lilith", "Battle Frankies/General Franky", "Thousand Sunny",
+        }))
 
 
 # Extraits réels autour du Disguise Kyoshiro -> Denjiro.

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from guess_arc.ingestion.parser import ARC_RE, parse_characters, parse_groups, section
@@ -39,7 +39,8 @@ class Reference:
     wiki, Disguises, overrides de type, mots communs). Tant que l'extraction
     ne repose que sur les liens, tout lien d'article est une Mention, Concepts
     compris, un Disguise est résolu dès le premier chapitre (ADR 0002) et une
-    redirection reste un Canonical name distinct de sa page cible.
+    redirection reste un Canonical name distinct de sa page cible, sauf si
+    redirects la rattache à sa cible.
 
     common_words : mots en minuscules (pronoms, déterminants) ; un texte de lien
     qui commence par l'un d'eux n'est pas un Alias ("Their mother").
@@ -47,11 +48,14 @@ class Reference:
     Seuls leurs noms servent (Entity type) ; leurs attributs d'état (affiliation,
     status, bounty, current_ruler...) décrivent la fin de l'histoire et n'entrent
     jamais dans Registry(t) (ADR 0002).
-    concepts : Canonical names des Concepts et des Titles, exclus de Registry(t).
+    concepts : Canonical names des Concepts et des Titles, exclus de Registry(t),
+    en plus de ceux que leurs catégories du wiki désignent (_excluded_by_category).
     disguises : Disguises confirmés à la main, avec leur chapitre de Revelation.
     wiki_categories : Canonical name -> catégories de sa page sur le wiki (cache).
     type_overrides : Canonical name -> Entity type, tenu à la main ; l'emporte
     sur les datasets et les catégories.
+    redirects : titre d'une redirection du wiki -> Canonical name de sa page cible,
+    tenu à la main ; le titre de la redirection devient un Alias de la cible.
     """
     common_words: frozenset[str] = frozenset()
     characters: tuple[dict, ...] = ()
@@ -60,6 +64,7 @@ class Reference:
     concepts: frozenset[str] = frozenset()
     wiki_categories: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     type_overrides: Mapping[str, str] = field(default_factory=dict)
+    redirects: Mapping[str, str] = field(default_factory=dict)
     disguises: tuple[Disguise, ...] = ()
 
 
@@ -77,10 +82,13 @@ class RegistryRow:
     """État d'une Entity dans Registry(t) pour valid_from <= t <= valid_to.
 
     valid_to à None : l'état vaut encore au dernier chapitre extrait.
+    catalog : titre de la page catalogue du wiki dont l'Entity est une entrée
+    ("Animal Species" pour Bananawani), None sinon ; fixe pour toute l'histoire.
     aliases : Aliases déjà utilisés au chapitre valid_from, triés (ADR 0002).
     """
     canonical_name: str
     entity_type: str
+    catalog: str | None
     aliases: tuple[str, ...]
     valid_from: int
     valid_to: int | None
@@ -106,6 +114,18 @@ class TopEntity:
 
 
 @dataclass(frozen=True)
+class ExcludedName:
+    canonical_name: str
+    categories: list[str]
+
+
+@dataclass(frozen=True)
+class UnknownEntity:
+    canonical_name: str
+    mention_count: int
+
+
+@dataclass(frozen=True)
 class QualityReport:
     """recall_proxy : part des Characters ayant une Appearance dans la CharTable
     qui ont aussi au moins une Mention dans le Long Summary du même chapitre
@@ -115,6 +135,12 @@ class QualityReport:
     Character est dans le Cast du chapitre (Appearance, Recall ou Cover appearance).
     suspicious_aliases : les 20 formes qui tombent le plus souvent hors du Cast.
     unknown_mention_share : part des Mentions dont l'Entity est typée Unknown.
+    excluded_by_category : nombre de Canonical names rencontrés dans le corpus et
+    écartés de Registry(t) par leurs catégories du wiki (Titles et Concepts).
+    excluded_by_category_names : ces mêmes noms, triés, avec les catégories du wiki
+    qui ont décidé de leur exclusion, à relire (override, concepts.txt, redirects).
+    unknown_entities : toutes les Entities typées Unknown, des plus mentionnées aux
+    moins mentionnées, à typer à la main ou à écarter.
     top_entities : les 50 Entities les plus mentionnées, avec leur type, pour une
     vérification manuelle rapide.
     """
@@ -126,6 +152,9 @@ class QualityReport:
     suspicious_aliases: list[SuspiciousAlias]
     unknown_mention_share: float | None
     top_entities: list[TopEntity]
+    excluded_by_category: int
+    excluded_by_category_names: list[ExcludedName]
+    unknown_entities: list[UnknownEntity]
 
 
 @dataclass(frozen=True)
@@ -148,6 +177,9 @@ class Extraction:
     registry: list[RegistryRow]
     quality: QualityReport
     disguise_candidates: list[DisguiseCandidate]
+    # Pages parentes, sous-pages liées et entrées de catalogue dont les catégories
+    # du wiki manquent au cache : à demander au wiki, puis à extraire de nouveau.
+    pages_without_categories: frozenset[str] = frozenset()
 
     def registry_at(self, t: int) -> list[RegistryRow]:
         return [
@@ -171,6 +203,7 @@ class _Mention:
     alias: str | None
     source: str = "link"
     surface: str | None = None
+    catalog: str | None = None
 
 
 @dataclass(frozen=True)
@@ -182,21 +215,111 @@ class _CastEntry:
     appearance: bool
     group: bool = False
     alias: str | None = None  # texte affiché ('*[[Denjiro|Kyoshiro]]' -> Kyoshiro)
+    catalog: str | None = None
+
+
+def _page_title(title: str) -> str:
+    """Titre tel que le wiki le lit : '_' vaut une espace, première lettre en capitale
+    ([[pirate]] -> Pirate)."""
+    title = title.replace("_", " ").strip()
+    return title[:1].upper() + title[1:]
 
 
 def _canonical_name(target: str) -> str | None:
-    """Cible d'un lien -> titre de la page d'article, ou None hors articles."""
+    """Cible d'un lien -> titre de la page parente, ou None hors articles."""
     # Préfixe de namespace ou d'interwiki seulement : 'Ryu Ryu no Mi, Model: X'
     # est un article dont le titre contient un ':'.
     prefix = target.lstrip(":").split(":", 1)[0].strip().lower()
     if ":" in target and prefix in NON_ARTICLE_PREFIXES:
         return None
-    # [[Page#Section]] et [[Page/Sous-page]] désignent l'Entity de la page parente.
-    title = target.split("#", 1)[0].split("/", 1)[0].strip()
-    if not title:  # [[#Section]] : ancre dans la page courante
+    # [[Page#Section]] et [[Page/Sous-page]] mènent à la page parente.
+    title = _page_title(target.split("#", 1)[0].split("/", 1)[0])
+    return title or None  # [[#Section]] : ancre dans la page courante
+
+
+@dataclass(frozen=True)
+class _Target:
+    """Entity désignée par un lien. own : le lien nomme l'Entity elle-même, pas une
+    de ses parties, donc son texte peut en être un Alias. catalog : page catalogue
+    dont l'Entity est une entrée."""
+    canonical_name: str
+    own: bool
+    catalog: str | None = None
+
+
+# Catégorie du wiki des pages qui listent des choses distinctes, une par section
+# (Animal Species, Foods). Les redirections vers une de ces sections (News Coo)
+# en héritent aussi.
+LISTS_CATEGORY = "Lists"
+
+
+def _parts_of_pages(chapters: list[dict]) -> tuple[frozenset[str], frozenset[str]]:
+    """Liens vers une partie de page -> (pages parentes, sous-pages liées).
+
+    Leurs catégories du wiki décident d'un catalogue (parente) ou d'une chose à
+    part (sous-page) : ce sont les pages dont _link_target a besoin.
+    """
+    parents, subpages = set(), set()
+    for rec in chapters:
+        for m in LINK_RE.finditer(rec["wikitext"]):
+            parent = _canonical_name(m.group(1))
+            page_part, has_section, _ = m.group(1).partition("#")
+            page = _page_title(page_part)
+            if parent is None or (page == parent and not has_section):
+                continue
+            parents.add(parent)
+            if page != parent:
+                subpages.add(page)
+    return frozenset(parents), frozenset(subpages)
+
+
+def _catalogs(parents: frozenset[str],
+              wiki_categories: Mapping[str, tuple[str, ...]]) -> frozenset[str]:
+    """Pages catalogues : rangées dans Lists et liées au moins une fois vers une
+    section ou une sous-page. Une redirection vers une entrée (News Coo) porte les
+    mêmes catégories mais n'est jamais liée ainsi : elle reste l'entrée elle-même.
+    Lu sur tout le corpus : c'est un fait de structure du wiki, pas de l'histoire."""
+    return frozenset(p for p in parents if LISTS_CATEGORY in wiki_categories.get(p, ()))
+
+
+def _is_catalog_entry(categories: tuple[str, ...]) -> bool:
+    """Un nom de section est une entrée s'il n'a pas de page sur le wiki, ou si sa
+    page redirige dans le catalogue (Lists, ou "Animal Species Subpages" pour une
+    sous-page). Sinon la section porte le titre d'une page à part : un intertitre
+    (#Arabasta, les animaux d'Arabasta) ou une homonyme (#Candy, pas le Character
+    Candy). Le lien ne désigne alors aucune Entity sûre : pas de fusion."""
+    return (not categories or LISTS_CATEGORY in categories
+            or any(c.endswith("Subpages") for c in categories))
+
+
+def _link_target(target: str, wiki_categories: Mapping[str, tuple[str, ...]],
+                 catalogs: frozenset[str]) -> _Target | None:
+    """Cible d'un lien -> Entity désignée, ou None si le lien n'en désigne aucune.
+
+    Un lien vers une section d'un catalogue (sur sa page ou une de ses sous-pages)
+    désigne l'entrée, nommée par la section comme les redirections du wiki
+    ([[Animal Species/Arabasta Saga#Bananawani]] -> Bananawani) ; le catalogue
+    lui-même n'est pas une Entity. Une sous-page dont les catégories du wiki
+    donnent un Entity type est une chose à part (Vegapunk/Lilith) ; sinon une
+    sous-page ou une section est une partie de sa page parente
+    ([[Gomu Gomu no Mi/Gear 5 Techniques]]).
+    """
+    parent = _canonical_name(target)
+    if parent is None:
         return None
-    # Le wiki ignore la casse de la première lettre : [[pirate]] -> Pirate.
-    return title[0].upper() + title[1:]
+    page_part, has_section, section_part = target.partition("#")
+    if parent in catalogs:
+        entry = section_part.replace("_", " ").strip()
+        if not entry or not _is_catalog_entry(wiki_categories.get(entry, ())):
+            return None
+        return _Target(entry, own=True, catalog=parent)
+    page = _page_title(page_part)
+    if page != parent and _category_type(wiki_categories.get(page, ())) is not None:
+        return _Target(page, own=not has_section)
+    return _Target(parent, own=page == parent and not has_section)
+
+
+Resolve = Callable[[str], "_Target | None"]
 
 
 UNKNOWN = "Unknown"
@@ -274,6 +397,14 @@ CATEGORY_RULES = (
 )
 
 
+# Catégories du wiki des pages de rangs, de titres (Rear Admiral, Shogun) et de
+# métiers génériques (Cook, Bounty Hunter) : un Title ou un Concept, jamais une Entity.
+TITLE_CATEGORIES = frozenset({"Positions", "Occupations"})
+# Catégorie du wiki des termes de l'univers (Jolly Roger, Epithet, Map, Sky Island) :
+# un Concept, sauf quand une autre catégorie en fait un Group (Worst Generation).
+TERMS_CATEGORY = "Terms"
+
+
 def _category_type(categories: tuple[str, ...]) -> str | None:
     for entity_type, rule in CATEGORY_RULES:
         if any(rule.search(c) for c in categories):
@@ -281,30 +412,40 @@ def _category_type(categories: tuple[str, ...]) -> str | None:
     return None
 
 
-def _entity_types(names: set[str], dataset_types: dict[str, str],
-                  reference: Reference) -> dict[str, str]:
-    """Un seul type par Entity : override > datasets > catégories du wiki > Unknown."""
+def _excluded_by_category(categories: tuple[str, ...]) -> bool:
+    """Title ou Concept d'après les catégories du wiki de sa page."""
+    if TITLE_CATEGORIES.intersection(categories):
+        return True
+    return TERMS_CATEGORY in categories and _category_type(categories) != "Group"
+
+
+def _entity_types(names: set[str], dataset_types: dict[str, str], reference: Reference,
+                  entry_catalogs: Mapping[str, str]) -> dict[str, str]:
+    """Un seul type par Entity : override > datasets > catégories du wiki >
+    catégories de son catalogue > Unknown."""
     bad = {n: t for n, t in reference.type_overrides.items() if t not in ENTITY_TYPES}
     if bad:
         raise ValueError(f"Entity type inconnu dans les overrides : {bad}")
     types = {}
     for name in names:
+        catalog = entry_catalogs.get(name)
         types[name] = (
             reference.type_overrides.get(name)
             or dataset_types.get(name)
             or _category_type(reference.wiki_categories.get(name, ()))
+            or (catalog and _category_type(reference.wiki_categories.get(catalog, ())))
             or UNKNOWN
         )
     return types
 
 
-def _alias(target: str, canonical_name: str, text: str | None,
-           common_words: frozenset[str]) -> str | None:
+def _alias(target: _Target, text: str | None, common_words: frozenset[str]) -> str | None:
     """Texte d'un lien pipé -> Alias de l'Entity, s'il ressemble à un nom."""
-    # Le texte d'un lien vers une sous-page ou une section nomme cette partie
-    # ("Gear 5"), pas l'Entity parente.
-    if text is None or "#" in target or "/" in target:
+    # Le texte d'un lien vers une partie de page ("Gear 5") nomme cette partie,
+    # pas l'Entity parente.
+    if text is None or not target.own:
         return None
+    canonical_name = target.canonical_name
     text = WIKI_EMPHASIS_RE.sub("", text).replace("’", "'").strip()
     if text[:1] in QUOTES and text.endswith(QUOTES[text[0]]):
         text = text[1:-1].strip()
@@ -328,31 +469,34 @@ def _scenes(chapter: int, long_summary: str) -> list[_Scene]:
     return scenes
 
 
-def _mentions(scene: _Scene, common_words: frozenset[str]) -> list[_Mention]:
+def _mentions(scene: _Scene, resolve: Resolve, common_words: frozenset[str]) -> list[_Mention]:
     # Le lien reste une Mention même quand son texte n'est pas un Alias.
     return [
-        _Mention(name, scene.chapter, _alias(m.group(1), name, m.group(2), common_words))
+        _Mention(target.canonical_name, scene.chapter, _alias(target, m.group(2), common_words),
+                 catalog=target.catalog)
         for m in LINK_RE.finditer(scene.wikitext)
-        if (name := _canonical_name(m.group(1))) is not None
+        if (target := resolve(m.group(1))) is not None
     ]
 
 
-def _cast(chapter: int, char_section: str) -> list[_CastEntry]:
+def _cast(chapter: int, char_section: str, resolve: Resolve) -> list[_CastEntry]:
     """CharTable -> Characters présents et Groups des en-têtes liés."""
     entries = []
     for c in parse_characters(char_section):
-        name = _canonical_name(c["name"])
+        target = resolve(c["name"])
         annotations = " ".join(c["annotations"])
         # Une présence "mentioned" ou "dream" n'est ni une Appearance, ni un
         # Recall, ni une Cover appearance.
-        if name is not None and (c["on_panel"] or "flashback" in annotations
-                                 or "cover" in annotations):
-            alias = _alias(c["name"], name, c["label"], frozenset())
-            entries.append(_CastEntry(name, chapter, appearance=c["on_panel"], alias=alias))
+        if target is not None and (c["on_panel"] or "flashback" in annotations
+                                   or "cover" in annotations):
+            alias = _alias(target, c["label"], frozenset())
+            entries.append(_CastEntry(target.canonical_name, chapter, appearance=c["on_panel"],
+                                      alias=alias, catalog=target.catalog))
     entries += [
-        _CastEntry(name, chapter, appearance=False, group=True)
+        _CastEntry(target.canonical_name, chapter, appearance=False, group=True,
+                   catalog=target.catalog)
         for group in parse_groups(char_section)
-        if (name := _canonical_name(group)) is not None
+        if (target := resolve(group)) is not None
     ]
     return entries
 
@@ -434,7 +578,7 @@ def _precision_proxy(mentions: list[_Mention], cast: list[_CastEntry]
 
 def _registry(mentions: list[_Mention], cast: list[_CastEntry],
               alias_first_use: dict[str, dict[str, int]], types: dict[str, str],
-              disguises: tuple[Disguise, ...]) -> list[RegistryRow]:
+              catalogs: Mapping[str, str], disguises: tuple[Disguise, ...]) -> list[RegistryRow]:
     # Une ligne par Entity et par chapitre où son état change : chapitre où elle
     # est vue (Mention ou CharTable), et Revelation d'un de ses Disguises.
     counts: dict[str, dict[int, int]] = {}
@@ -473,6 +617,7 @@ def _registry(mentions: list[_Mention], cast: list[_CastEntry],
                 canonical_name=name,
                 # Un seul type, fixe pour toute l'histoire (ADR 0002).
                 entity_type=types.get(name, UNKNOWN),
+                catalog=catalogs.get(name),
                 # Un Alias commence toujours sur une ligne : sa première utilisation
                 # est une Mention, ou la Revelation pour un Disguise.
                 aliases=tuple(sorted(a for a, f in alias_first_use.get(name, {}).items()
@@ -490,7 +635,8 @@ def _name_tokens(name: str) -> set[str]:
     return set(re.findall(r"\w+", name.lower()))
 
 
-def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> list[DisguiseCandidate]:
+def _disguise_candidates(chapters: list[dict], resolve: Resolve,
+                         common_words: frozenset[str]) -> list[DisguiseCandidate]:
     """Aliases sans aucun mot commun avec leur Canonical name, Characters seulement.
 
     Liste de relecture hors ligne, pas Registry(t) : elle lit tout le corpus d'un
@@ -501,15 +647,16 @@ def _disguise_candidates(chapters: list[dict], common_words: frozenset[str]) -> 
     for rec in chapters:
         wikitext = rec["wikitext"]
         characters |= {
-            name for c in parse_characters(section(wikitext, "Characters"))
-            if (name := _canonical_name(c["name"])) is not None
+            target.canonical_name for c in parse_characters(section(wikitext, "Characters"))
+            if (target := resolve(c["name"])) is not None
         }
         for heading in DISGUISE_SECTIONS:
             for m in LINK_RE.finditer(section(wikitext, heading)):
-                name = _canonical_name(m.group(1))
-                if name is None:
+                target = resolve(m.group(1))
+                if target is None:
                     continue
-                alias = _alias(m.group(1), name, m.group(2), common_words)
+                name = target.canonical_name
+                alias = _alias(target, m.group(2), common_words)
                 # "Robin" -> Nico Robin est un simple Alias ; "Miss All Sunday" ne
                 # partage aucun mot avec Nico Robin.
                 if alias and _name_tokens(alias).isdisjoint(_name_tokens(name)):
@@ -527,13 +674,38 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     """Bronze déjà en mémoire -> Registry(t) publiable + Disguise candidates à relire."""
     dataset_types, resolve = _lexicon(reference)
 
+    parents, subpages = _parts_of_pages(chapters)
+    catalogs = _catalogs(parents, reference.wiki_categories)
+
+    def link_target(target: str) -> _Target | None:
+        return _link_target(target, reference.wiki_categories, catalogs)
+
+    excluded_by_category: set[str] = set()
+
     def keep(name: str) -> bool:
-        # Concepts et Titles ne sont jamais des Entities.
-        return name not in reference.concepts
+        # Concepts et Titles ne sont jamais des Entities : liste manuelle d'abord,
+        # puis catégories du wiki, sauf si un override de type garde le nom.
+        if name in reference.concepts:
+            return False
+        if (name not in reference.type_overrides
+                and _excluded_by_category(reference.wiki_categories.get(name, ()))):
+            excluded_by_category.add(name)
+            return False
+        return True
+
+    def kept(item) -> bool:
+        # Les entrées d'un catalogue exclu (Marine Ranks, un Title) le sont aussi.
+        return keep(item.canonical_name) and (item.catalog is None or keep(item.catalog))
 
     revelations = {(d.canonical_name, d.alias): d.revelation for d in reference.disguises}
 
     def resolved(item):
+        # [[Eleven Supernovas]] désigne la page Worst Generation : sans texte de
+        # lien, le titre de la redirection est l'Alias employé.
+        target = reference.redirects.get(item.canonical_name)
+        if target is not None:
+            item = dataclasses.replace(item, canonical_name=target,
+                                       alias=item.alias or item.canonical_name)
         name = resolve.get(item.canonical_name)
         item = dataclasses.replace(item, canonical_name=name) if name else item
         # Avant sa Revelation, un lien [[Denjiro|Kyoshiro]] désigne Kyoshiro : le
@@ -554,11 +726,11 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         arc = ARC_RE.search(wikitext)
         arcs[number] = arc.group(1) if arc else "Unknown"
         linked[number] = [
-            m for s in scenes for m in map(resolved, _mentions(s, reference.common_words))
-            if keep(m.canonical_name)
+            m for s in scenes for m in map(resolved, _mentions(s, link_target, reference.common_words))
+            if kept(m)
         ]
-        cast += [e for e in map(resolved, _cast(number, section(wikitext, "Characters")))
-                 if keep(e.canonical_name)]
+        cast += [e for e in map(resolved, _cast(number, section(wikitext, "Characters"), link_target))
+                 if kept(e)]
 
     # Les Aliases sont datés sur tous les liens avant de servir à l'Alias match.
     link_mentions = [m for ms in linked.values() for m in ms]
@@ -571,8 +743,15 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         for m in _alias_matches(number, scenes, linked[number], alias_first_use)
     ]
 
+    # Une entrée prend le catalogue de ses liens (le premier par ordre alphabétique
+    # si plusieurs catalogues la listent), et son type quand rien d'autre n'en donne.
+    entry_catalogs: dict[str, str] = {}
+    for item in [*link_mentions, *cast]:
+        if item.catalog is not None:
+            current = entry_catalogs.get(item.canonical_name, item.catalog)
+            entry_catalogs[item.canonical_name] = min(current, item.catalog)
     types = _entity_types({m.canonical_name for m in mentions} | {e.canonical_name for e in cast},
-                          dataset_types, reference)
+                          dataset_types, reference, entry_catalogs)
     for d in reference.disguises:  # les Disguises ne concernent que des Characters
         if d.alias in types:
             types[d.alias] = "Character"
@@ -587,7 +766,8 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     recall_proxy, recall_proxy_per_arc = _recall_proxy(cast, mentions, arcs)
     precision_proxy, suspicious_aliases = _precision_proxy(mentions, cast)
     return Extraction(
-        registry=_registry(mentions, cast, alias_first_use, types, reference.disguises),
+        registry=_registry(mentions, cast, alias_first_use, types, entry_catalogs,
+                           reference.disguises),
         quality=QualityReport(
             scenes_per_chapter={n: len(s) for n, s in scenes_by_chapter.items()},
             recall_proxy=recall_proxy,
@@ -603,6 +783,18 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
                 if mentions else None
             ),
             top_entities=top_entities,
+            excluded_by_category=len(excluded_by_category),
+            excluded_by_category_names=[
+                ExcludedName(name, list(reference.wiki_categories.get(name, ())))
+                for name in sorted(excluded_by_category)
+            ],
+            unknown_entities=[
+                UnknownEntity(name, mention_totals.get(name, 0))
+                for name in sorted((n for n, t in types.items() if t == UNKNOWN),
+                                   key=lambda n: (-mention_totals.get(n, 0), n))
+            ],
         ),
-        disguise_candidates=_disguise_candidates(chapters, reference.common_words),
+        disguise_candidates=_disguise_candidates(chapters, link_target, reference.common_words),
+        pages_without_categories=(parents | subpages | set(entry_catalogs))
+        - set(reference.wiki_categories),
     )
