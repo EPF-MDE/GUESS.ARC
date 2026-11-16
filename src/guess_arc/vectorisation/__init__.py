@@ -1,0 +1,12 @@
+"""Vectorisation de la silver en Chapter embeddings, dans data/gold/vector/.
+
+    encoder   -> protocole Encoder, injecté dans `run`
+    pipeline  -> `run(data_dir, encoder)` : silver -> Scenes -> Chapter embeddings
+    dataset   -> écriture atomique du .npz et `load_chapter_embeddings`
+"""
+
+from .dataset import ChapterEmbeddings, Metadata, load_chapter_embeddings
+from .encoder import Encoder
+from .pipeline import run
+
+__all__ = ["ChapterEmbeddings", "Encoder", "Metadata", "load_chapter_embeddings", "run"]
