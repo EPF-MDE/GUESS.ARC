@@ -75,3 +75,4 @@ def main(
           f"-> {result.path}")
     if result.skipped:
         print("sautés : " + ", ".join(f"{c} ({why})" for c, why in sorted(result.skipped.items())))
+    print(f"rapport qualité -> {result.quality_path}")

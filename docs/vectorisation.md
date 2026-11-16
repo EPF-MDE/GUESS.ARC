@@ -113,6 +113,18 @@ Chaque exécution écrit `data/gold/vector/embeddings_quality.json` :
 - dimension, présence de NaN, normes (toutes égales à 1) ;
 - **cohérence sémantique** : similarité cosinus moyenne entre chapitres d'un même arc (arc lu dans le front-matter) contre entre chapitres d'arcs différents. La première doit être nettement plus élevée : c'est une preuve simple que les vecteurs capturent le sens de l'histoire.
 
+```json
+{
+  "model": "BAAI/bge-small-en-v1.5", "pooling": "chunk-mean-token-weighted-l2", "created_at": "…",
+  "chapters": {"total": 1195, "vectorised": [1, 2, …], "kept": [], "skipped": {"1196": "complete: false"}},
+  "dimension": 384, "nan_count": 0, "norm_min": 1.0, "norm_max": 1.0,
+  "semantic_coherence": {"arcs": 33, "intra_arc_mean": …, "inter_arc_mean": …, "gap": …,
+                         "intra_arc_pairs": …, "inter_arc_pairs": …}
+}
+```
+
+Les moyennes portent sur toutes les paires de chapitres du dataset (pas sur une moyenne par arc). Un arc d'un seul chapitre n'apporte aucune paire intra-arc ; sans aucune paire, la moyenne vaut `null`. `kept` liste les chapitres repris tels quels du dataset précédent (mise à jour incrémentale) ; `skipped` donne la raison de chaque saut (`complete: false`, `Long Summary vide`). Le rapport est écrit de façon atomique, juste après le dataset.
+
 ## 9. Lien avec l'ADR 0002 (connaissance du lecteur)
 
 Le Chapter embedding du chapitre t ne dépend **que du texte du chapitre t** et d'un encodeur entraîné hors du corpus, donc sans rien savoir de One Piece après t. Il ne fait fuiter aucune information future, ni dans les entrées du GRU, ni dans l'évaluation. Seule limite, déjà acceptée par l'ADR 0002 : le Long Summary vient de la révision actuelle du wiki et peut contenir des formulations rétrospectives.

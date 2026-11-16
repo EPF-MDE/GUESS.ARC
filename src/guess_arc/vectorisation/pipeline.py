@@ -21,6 +21,7 @@ from guess_arc import paths
 
 from .dataset import ChapterEmbeddings, Metadata, dataset_path, write_dataset
 from .encoder import Encoder
+from .quality import quality_report, report_path, write_report
 
 POOLING = "chunk-mean-token-weighted-l2"
 # Les fenêtres d'une Scene trop longue se chevauchent d'environ 1/4 de fenêtre.
@@ -130,20 +131,24 @@ def chapter_embedding(scene_texts: list[str], encoder: Encoder) -> np.ndarray:
 @dataclass(frozen=True)
 class RunResult:
     path: Path  # le dataset écrit
+    quality_path: Path  # le rapport qualité écrit à côté
     vectorised: list[int]
     skipped: dict[int, str]  # chapitre -> raison
 
 
 def run(data_dir: Path, encoder: Encoder) -> RunResult:
-    """Vectorise tous les chapitres complets de la silver et écrit le dataset.
+    """Vectorise tous les chapitres complets de la silver, écrit le dataset et
+    son rapport qualité.
 
     Un chapitre `complete: false`, ou sans Scene, n'a aucune entrée dans le dataset.
     """
     embeddings: dict[int, np.ndarray] = {}
     revision_ids: dict[int, int] = {}
     skipped: dict[int, str] = {}
+    arcs: dict[int, str] = {}
     for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md")):
         chapter = read_silver_chapter(path)
+        arcs[chapter.number] = chapter.arc
         scene_texts = scenes(chapter.long_summary)
         if not chapter.complete:
             skipped[chapter.number] = "complete: false"
@@ -163,6 +168,9 @@ def run(data_dir: Path, encoder: Encoder) -> RunResult:
         pooling=POOLING,
         created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     )
-    target = dataset_path(data_dir)
-    write_dataset(target, ChapterEmbeddings(embeddings, revision_ids, metadata))
-    return RunResult(path=target, vectorised=sorted(embeddings), skipped=skipped)
+    dataset = ChapterEmbeddings(embeddings, revision_ids, metadata)
+    report = quality_report(dataset, arcs, kept=[], skipped=skipped)
+    target, quality_target = dataset_path(data_dir), report_path(data_dir)
+    write_dataset(target, dataset)
+    write_report(quality_target, report)
+    return RunResult(path=target, quality_path=quality_target, vectorised=sorted(embeddings), skipped=skipped)

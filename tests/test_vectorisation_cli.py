@@ -100,6 +100,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("sautés : 1", output)
         self.assertIn("7 (complete: false)", output)
         self.assertIn("chapter_embeddings.npz", output)
+        self.assertIn("embeddings_quality.json", output)
 
     def test_missing_embedding_model_exits_with_message_and_writes_nothing(self):
         self.env_file.write_text("LLM_MODEL=x\n", encoding="utf-8")

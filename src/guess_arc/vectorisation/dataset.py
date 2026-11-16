@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 
@@ -41,30 +43,34 @@ class ChapterEmbeddings(dict[int, np.ndarray]):
         self.metadata = metadata
 
 
-def write_dataset(path: Path, embeddings: ChapterEmbeddings) -> None:
+def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
     """Écriture atomique : un fichier temporaire du même dossier, renommé à la
-    fin. En cas d'erreur, l'ancien dataset reste intact et rien d'autre ne reste."""
-    chapters = sorted(embeddings)
-    dimension = embeddings.metadata.dimension
-    matrix = np.array([embeddings[c] for c in chapters], dtype=np.float32).reshape(len(chapters), dimension)
+    fin. En cas d'erreur, l'ancien fichier reste intact et rien d'autre ne reste."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as fh:
-            np.savez(
-                fh,
-                chapters=np.array(chapters, dtype=np.int64),
-                revision_ids=np.array([embeddings.revision_ids[c] for c in chapters], dtype=np.int64),
-                embeddings=matrix,
-                model=np.array(embeddings.metadata.model),
-                dimension=np.array(dimension, dtype=np.int64),
-                pooling=np.array(embeddings.metadata.pooling),
-                created_at=np.array(embeddings.metadata.created_at),
-            )
+            write(fh)
         os.replace(tmp_name, path)
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
+
+
+def write_dataset(path: Path, embeddings: ChapterEmbeddings) -> None:
+    chapters = sorted(embeddings)
+    dimension = embeddings.metadata.dimension
+    matrix = np.array([embeddings[c] for c in chapters], dtype=np.float32).reshape(len(chapters), dimension)
+    atomic_write(path, lambda fh: np.savez(
+        fh,
+        chapters=np.array(chapters, dtype=np.int64),
+        revision_ids=np.array([embeddings.revision_ids[c] for c in chapters], dtype=np.int64),
+        embeddings=matrix,
+        model=np.array(embeddings.metadata.model),
+        dimension=np.array(dimension, dtype=np.int64),
+        pooling=np.array(embeddings.metadata.pooling),
+        created_at=np.array(embeddings.metadata.created_at),
+    ))
 
 
 def load_chapter_embeddings(data_dir: Path = paths.DATA_DIR) -> ChapterEmbeddings:

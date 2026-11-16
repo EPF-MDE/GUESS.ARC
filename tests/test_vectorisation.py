@@ -1,10 +1,11 @@
-"""Tests de la vectorisation via `run` et `load_chapter_embeddings` uniquement.
+"""Tests de la vectorisation via `run`, `load_chapter_embeddings` et le rapport qualité uniquement.
 
 Silver synthétique écrite par le vrai writer de l'ingestion, dans un dossier
 temporaire. Encodeurs factices : ni réseau, ni sentence-transformers.
 """
 import datetime
 import hashlib
+import json
 import pathlib
 import tempfile
 import unittest
@@ -106,7 +107,9 @@ LONG_2 = "Zoro is tied to a post at the Marine base."
 LONG_7 = "Nami steals a map.\n\nBuggy fires the Buggy Ball at the town."
 
 
-class VectorisationTest(unittest.TestCase):
+class SilverTestCase(unittest.TestCase):
+    """Une silver synthétique par test, dans un dossier temporaire."""
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
@@ -118,6 +121,8 @@ class VectorisationTest(unittest.TestCase):
             write_markdown(ch, paths.silver_dir(data_dir))
         return data_dir
 
+
+class VectorisationTest(SilverTestCase):
     def embeddings(self, chapters, encoder=None, name="data"):
         data_dir = self.data_dir(name, chapters)
         run(data_dir, encoder or HashEncoder())
@@ -132,12 +137,12 @@ class VectorisationTest(unittest.TestCase):
             self.assertEqual(vector.dtype, np.float32)
             self.assertAlmostEqual(float(np.linalg.norm(vector)), 1.0, places=5)
 
-    def test_dataset_is_a_single_npz_under_gold_vector(self):
+    def test_dataset_is_a_single_npz_under_gold_vector_next_to_its_quality_report(self):
         data_dir = self.data_dir("data", [chapter(1, LONG_2)])
         run(data_dir, HashEncoder())
 
-        files = [p.name for p in paths.vector_dir(data_dir).iterdir()]
-        self.assertEqual(files, ["chapter_embeddings.npz"])
+        files = sorted(p.name for p in paths.vector_dir(data_dir).iterdir())
+        self.assertEqual(files, ["chapter_embeddings.npz", "embeddings_quality.json"])
 
     def test_each_vector_is_found_by_its_chapter_number(self):
         corpus = self.embeddings([chapter(10, LONG_10), chapter(2, LONG_2), chapter(7, LONG_7)])
@@ -212,15 +217,14 @@ class VectorisationTest(unittest.TestCase):
     def test_failed_run_leaves_no_partial_file_and_keeps_previous_dataset(self):
         data_dir = self.data_dir("data", [chapter(10, LONG_10), chapter(2, LONG_2)])
         run(data_dir, HashEncoder())
-        dataset = paths.vector_dir(data_dir) / "chapter_embeddings.npz"
-        previous = dataset.read_bytes()
+        vector_dir = paths.vector_dir(data_dir)
+        previous = {p.name: p.read_bytes() for p in vector_dir.iterdir()}
 
         write_markdown(chapter(2, "Zoro is freed by Luffy."), paths.silver_dir(data_dir))
         with self.assertRaises(RuntimeError):
             run(data_dir, FailingEncoder())
 
-        self.assertEqual([p.name for p in paths.vector_dir(data_dir).iterdir()], ["chapter_embeddings.npz"])
-        self.assertEqual(dataset.read_bytes(), previous)
+        self.assertEqual({p.name: p.read_bytes() for p in vector_dir.iterdir()}, previous)
 
     def test_scene_longer_than_the_window_is_split_into_overlapping_chunks(self):
         encoder = SmallWindowEncoder()
@@ -271,6 +275,99 @@ class VectorisationTest(unittest.TestCase):
 
         vector_dir = paths.vector_dir(data_dir)
         self.assertEqual(list(vector_dir.iterdir()) if vector_dir.exists() else [], [])
+
+
+
+def report(data_dir: pathlib.Path) -> dict:
+    return json.loads((paths.vector_dir(data_dir) / "embeddings_quality.json").read_text(encoding="utf-8"))
+
+
+# KeywordEncoder : "alpha" sur l'axe 0, tout le reste sur l'axe 1. Les chapitres
+# d'East Blue penchent vers l'axe 0, ceux d'Arlong Park vers l'axe 1.
+EAST_BLUE = "East Blue Arc"
+ARLONG = "Arlong Park Arc"
+ARC_CHAPTERS = [
+    (1, "alpha alpha alpha\n\nbeta", EAST_BLUE),
+    (2, "alpha alpha alpha alpha\n\nbeta", EAST_BLUE),
+    (3, "alpha alpha\n\nbeta", EAST_BLUE),
+    (4, "gamma gamma gamma\n\nalpha", ARLONG),
+    (5, "gamma gamma gamma gamma\n\nalpha", ARLONG),
+]
+
+
+def cosine(a, b) -> float:
+    a, b = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+class QualityReportTest(SilverTestCase):
+    def run_and_report(self, chapters, encoder=None, name="data") -> dict:
+        data_dir = self.data_dir(name, chapters)
+        run(data_dir, encoder or HashEncoder())
+        return report(data_dir)
+
+    def test_lists_vectorised_and_skipped_chapters_with_their_reason(self):
+        quality = self.run_and_report([
+            chapter(1, LONG_2),
+            chapter(2, LONG_7, complete=False),
+            chapter(3, LONG_10),
+            chapter(4, ""),
+        ])
+
+        self.assertEqual(quality["chapters"]["vectorised"], [1, 3])
+        self.assertEqual(quality["chapters"]["kept"], [])
+        self.assertEqual(quality["chapters"]["skipped"], {"2": "complete: false", "4": "Long Summary vide"})
+
+    def test_gives_dimension_nan_count_and_norm_range(self):
+        quality = self.run_and_report([chapter(10, LONG_10), chapter(2, LONG_2), chapter(7, LONG_7)])
+
+        self.assertEqual(quality["model"], "fake/hash-encoder")
+        self.assertEqual(quality["dimension"], DIM)
+        self.assertEqual(quality["nan_count"], 0)
+        self.assertAlmostEqual(quality["norm_min"], 1.0, places=5)
+        self.assertAlmostEqual(quality["norm_max"], 1.0, places=5)
+
+    def test_intra_arc_similarity_beats_inter_arc_similarity_on_separable_arcs(self):
+        chapters = [chapter(n, text, arc=arc) for n, text, arc in ARC_CHAPTERS]
+        data_dir = self.data_dir("data", chapters)
+        run(data_dir, KeywordEncoder())
+        coherence = report(data_dir)["semantic_coherence"]
+        emb = load_chapter_embeddings(data_dir)
+
+        intra = [cosine(emb[a], emb[b]) for a, b in ((1, 2), (1, 3), (2, 3), (4, 5))]
+        inter = [cosine(emb[a], emb[b]) for a in (1, 2, 3) for b in (4, 5)]
+        self.assertAlmostEqual(coherence["intra_arc_mean"], np.mean(intra), places=5)
+        self.assertAlmostEqual(coherence["inter_arc_mean"], np.mean(inter), places=5)
+        self.assertGreater(coherence["intra_arc_mean"], coherence["inter_arc_mean"])
+        self.assertAlmostEqual(coherence["gap"], coherence["intra_arc_mean"] - coherence["inter_arc_mean"], places=6)
+        self.assertEqual(coherence["intra_arc_pairs"], 4)
+        self.assertEqual(coherence["inter_arc_pairs"], 6)
+
+    def test_arc_with_a_single_chapter_does_not_break_the_intra_arc_mean(self):
+        chapters = [chapter(n, text, arc=arc) for n, text, arc in ARC_CHAPTERS[:4]]
+        data_dir = self.data_dir("data", chapters)
+        run(data_dir, KeywordEncoder())
+        coherence = report(data_dir)["semantic_coherence"]
+        emb = load_chapter_embeddings(data_dir)
+
+        intra = [cosine(emb[a], emb[b]) for a, b in ((1, 2), (1, 3), (2, 3))]
+        self.assertAlmostEqual(coherence["intra_arc_mean"], np.mean(intra), places=5)
+        self.assertEqual(coherence["intra_arc_pairs"], 3)
+
+    def test_without_any_pair_the_means_are_null(self):
+        quality = self.run_and_report([chapter(1, LONG_2, arc=EAST_BLUE), chapter(2, LONG_7, arc=ARLONG)])
+
+        coherence = quality["semantic_coherence"]
+        self.assertIsNone(coherence["intra_arc_mean"])
+        self.assertIsNone(coherence["gap"])
+        self.assertEqual(coherence["inter_arc_pairs"], 1)
+
+    def test_empty_dataset_still_gets_a_report(self):
+        quality = self.run_and_report([chapter(1, LONG_2, complete=False)])
+
+        self.assertEqual(quality["chapters"]["vectorised"], [])
+        self.assertIsNone(quality["norm_min"])
+        self.assertIsNone(quality["semantic_coherence"]["inter_arc_mean"])
 
 
 if __name__ == "__main__":
