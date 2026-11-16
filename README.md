@@ -204,15 +204,21 @@ EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 ```
 
 ```bash
-# all complete silver chapters -> data/gold/vector/ (override with --data-dir)
+# incremental: new chapters and chapters whose revision_id changed -> data/gold/vector/
+# (override with --data-dir)
 python -m guess_arc.vectorisation
+
+# after a change to Scene/Chunk splitting: re-encode every chapter
+python -m guess_arc.vectorisation --rebuild
 ```
 
 On the first run the model is downloaded from Hugging Face (~130 MB), then cached:
 later runs work offline. Each Scene of the Long Summary is encoded;
 the Chapter embedding is their mean weighted by token count, L2-normalised
-(dimension 384 for `bge-small-en-v1.5`). The run ends with the number of chapters
-vectorised and skipped (`complete: false` or empty Long Summary: no entry).
+(dimension 384 for `bge-small-en-v1.5`). An unchanged chapter keeps its Chapter embedding
+without calling the encoder; a model change in `.env` re-encodes everything. The
+run ends with the number of chapters vectorised, kept and skipped
+(`complete: false` or empty Long Summary: no entry).
 A missing `EMBEDDING_MODEL` or a missing extra stops the run with an explicit
 message, and nothing is written.
 

@@ -24,7 +24,7 @@ from guess_arc.vectorisation import load_chapter_embeddings, run
 from guess_arc.vectorisation.cli import MissingSettingError, embedding_model, main
 from guess_arc.vectorisation.sentence_encoder import MissingExtraError, SentenceTransformerEncoder
 
-from test_vectorisation import DIM, LONG_2, LONG_7, LONG_10, HashEncoder, chapter
+from test_vectorisation import DIM, LONG_2, LONG_7, LONG_10, CountingEncoder, HashEncoder, chapter
 
 PIP_COMMAND = "pip install -e .[vectorisation]"
 
@@ -79,10 +79,10 @@ class CliTest(unittest.TestCase):
         self.built_with.append(model_name)
         return HashEncoder()
 
-    def main(self, *argv: str) -> str:
+    def main(self, *argv: str, make_encoder=None) -> str:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            main(list(argv), environ={}, env_file=self.env_file, make_encoder=self.make_encoder)
+            main(list(argv), environ={}, env_file=self.env_file, make_encoder=make_encoder or self.make_encoder)
         return out.getvalue()
 
     def test_data_dir_option_vectorises_that_directory(self):
@@ -101,6 +101,22 @@ class CliTest(unittest.TestCase):
         self.assertIn("7 (complete: false)", output)
         self.assertIn("chapter_embeddings.npz", output)
         self.assertIn("embeddings_quality.json", output)
+
+    def test_second_run_reports_kept_chapters(self):
+        self.main("--data-dir", str(self.data_dir))
+        output = self.main("--data-dir", str(self.data_dir))
+
+        self.assertIn("vectorisés : 0", output)
+        self.assertIn("conservés : 2", output)
+
+    def test_rebuild_option_revectorises_every_chapter(self):
+        self.main("--data-dir", str(self.data_dir))
+        encoder = CountingEncoder()
+        output = self.main("--data-dir", str(self.data_dir), "--rebuild", make_encoder=lambda _: encoder)
+
+        self.assertEqual(len(encoder.calls), 2)  # chapitres 2 et 10
+        self.assertIn("vectorisés : 2", output)
+        self.assertIn("conservés : 0", output)
 
     def test_missing_embedding_model_exits_with_message_and_writes_nothing(self):
         self.env_file.write_text("LLM_MODEL=x\n", encoding="utf-8")

@@ -4,7 +4,8 @@ Pour chaque chapitre complet de la silver, le Long Summary est découpé en
 Scenes, une Scene plus longue que la fenêtre de l'encodeur est découpée en
 fenêtres qui se chevauchent, chaque Chunk est encodé, et le Chapter embedding
 est la moyenne des vecteurs de Chunks pondérée par leur nombre de tokens,
-normalisée L2.
+normalisée L2. La mise à jour est incrémentale : un chapitre inchangé
+garde son Chapter embedding.
 Voir docs/vectorisation.md et l'ADR 0003.
 """
 
@@ -19,7 +20,7 @@ import numpy as np
 
 from guess_arc import paths
 
-from .dataset import ChapterEmbeddings, Metadata, dataset_path, write_dataset
+from .dataset import ChapterEmbeddings, Metadata, dataset_path, load_chapter_embeddings, write_dataset
 from .encoder import Encoder
 from .quality import quality_report, report_path, write_report
 
@@ -132,18 +133,37 @@ def chapter_embedding(scene_texts: list[str], encoder: Encoder) -> np.ndarray:
 class RunResult:
     path: Path  # le dataset écrit
     quality_path: Path  # le rapport qualité écrit à côté
-    vectorised: list[int]
+    vectorised: list[int]  # passés par l'encodeur à cette exécution
+    kept: list[int]  # repris tels quels du dataset précédent
     skipped: dict[int, str]  # chapitre -> raison
 
 
-def run(data_dir: Path, encoder: Encoder) -> RunResult:
-    """Vectorise tous les chapitres complets de la silver, écrit le dataset et
-    son rapport qualité.
+def _previous_dataset(data_dir: Path, encoder: Encoder, rebuild: bool) -> ChapterEmbeddings | None:
+    """Le dataset précédent, si ses vecteurs peuvent être conservés : ni
+    `rebuild`, ni changement de modèle ou de pooling (des vecteurs de deux
+    modèles ne sont pas comparables)."""
+    if rebuild or not dataset_path(data_dir).exists():
+        return None
+    previous = load_chapter_embeddings(data_dir)
+    if (previous.metadata.model, previous.metadata.pooling) != (encoder.model_name, POOLING):
+        return None
+    return previous
 
-    Un chapitre `complete: false`, ou sans Scene, n'a aucune entrée dans le dataset.
+
+def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult:
+    """Met à jour le dataset des chapitres complets de la silver, et son rapport qualité.
+
+    Incrémental par défaut : un chapitre déjà dans le dataset avec le même
+    revision_id est conservé avec son Chapter embedding, les autres sont (re)vectorisés.
+    Tout est recalculé si `rebuild`, ou si le modèle de l'encodeur diffère de
+    celui du dataset. Un chapitre `complete: false`, sans Scene, ou absent de la
+    silver, n'a aucune entrée dans le dataset.
     """
+    previous = _previous_dataset(data_dir, encoder, rebuild)
     embeddings: dict[int, np.ndarray] = {}
     revision_ids: dict[int, int] = {}
+    vectorised: list[int] = []
+    kept: list[int] = []
     skipped: dict[int, str] = {}
     arcs: dict[int, str] = {}
     for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md")):
@@ -156,7 +176,12 @@ def run(data_dir: Path, encoder: Encoder) -> RunResult:
         if not scene_texts:
             skipped[chapter.number] = "Long Summary vide"
             continue
-        embeddings[chapter.number] = chapter_embedding(scene_texts, encoder)
+        if previous is not None and previous.revision_ids.get(chapter.number) == chapter.revision_id:
+            embeddings[chapter.number] = previous[chapter.number]
+            kept.append(chapter.number)
+        else:
+            embeddings[chapter.number] = chapter_embedding(scene_texts, encoder)
+            vectorised.append(chapter.number)
         revision_ids[chapter.number] = chapter.revision_id
 
     dimensions = {v.shape[0] for v in embeddings.values()}
@@ -169,8 +194,14 @@ def run(data_dir: Path, encoder: Encoder) -> RunResult:
         created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     )
     dataset = ChapterEmbeddings(embeddings, revision_ids, metadata)
-    report = quality_report(dataset, arcs, kept=[], skipped=skipped)
+    report = quality_report(dataset, arcs, kept=kept, skipped=skipped)
     target, quality_target = dataset_path(data_dir), report_path(data_dir)
     write_dataset(target, dataset)
     write_report(quality_target, report)
-    return RunResult(path=target, quality_path=quality_target, vectorised=sorted(embeddings), skipped=skipped)
+    return RunResult(
+        path=target,
+        quality_path=quality_target,
+        vectorised=sorted(vectorised),
+        kept=sorted(kept),
+        skipped=skipped,
+    )

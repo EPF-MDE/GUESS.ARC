@@ -99,11 +99,15 @@ Pourquoi un fichier unique plutôt qu'un fichier par chapitre : écriture atomiq
 
 ## 7. Mise à jour incrémentale
 
-Comme l'ingestion, la vectorisation tourne chaque semaine :
+Comme l'ingestion, la vectorisation tourne chaque semaine. Par défaut, `run` part du dataset existant :
 
-- par défaut, seuls les chapitres absents du dataset, ou dont le `revision_id` en silver diffère de celui stocké, sont (re)vectorisés ;
-- si le modèle configuré diffère de celui du dataset, tout est recalculé (des vecteurs de deux modèles différents ne sont pas comparables) ;
-- `--rebuild` force le recalcul complet.
+- un chapitre absent du dataset, ou dont le `revision_id` en silver diffère de celui stocké, est (re)vectorisé ;
+- un chapitre inchangé est conservé tel quel, avec le même Chapter embedding, sans appel à l'encodeur ;
+- un chapitre devenu `complete: false`, ou disparu de la silver, est retiré du dataset ;
+- si le modèle configuré (ou la méthode de pooling) diffère de celui du dataset, tout est recalculé : des vecteurs de deux modèles différents ne sont pas comparables ;
+- `run(..., rebuild=True)` et l'option `--rebuild` de la CLI forcent le recalcul complet. Il faut l'utiliser après tout changement du découpage (Scenes, Chunks) qui ne change ni le modèle ni le nom du pooling : un chapitre n'est « modifié » que si son `revision_id` change.
+
+Le résumé de la CLI et le rapport qualité (`vectorised` / `kept`) distinguent les chapitres vectorisés à cette exécution des chapitres conservés.
 
 ## 8. Contrôle qualité
 

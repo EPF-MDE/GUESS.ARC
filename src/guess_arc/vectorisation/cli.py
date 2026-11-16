@@ -2,6 +2,9 @@
 
 Le modèle se règle dans le .env (EMBEDDING_MODEL). Nécessite l'extra
 [vectorisation] : pip install -e .[vectorisation]
+
+Incrémental par défaut : seuls les chapitres nouveaux, ou dont le revision_id
+silver a changé, passent par l'encodeur. --rebuild recalcule tout.
 """
 
 from __future__ import annotations
@@ -63,6 +66,8 @@ def main(
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", type=Path, default=paths.DATA_DIR,
                    help="racine des couches silver/gold (défaut : data/ à la racine du repo)")
+    p.add_argument("--rebuild", action="store_true",
+                   help="revectorise tous les chapitres, sans reprendre le dataset existant")
     args = p.parse_args(argv)
 
     try:
@@ -70,8 +75,9 @@ def main(
     except (MissingSettingError, MissingExtraError) as exc:
         raise SystemExit(f"erreur : {exc}") from exc
 
-    result = run(args.data_dir, encoder)
-    print(f"chapitres vectorisés : {len(result.vectorised)}, sautés : {len(result.skipped)} "
+    result = run(args.data_dir, encoder, rebuild=args.rebuild)
+    print(f"chapitres vectorisés : {len(result.vectorised)}, conservés : {len(result.kept)}, "
+          f"sautés : {len(result.skipped)} "
           f"-> {result.path}")
     if result.skipped:
         print("sautés : " + ", ".join(f"{c} ({why})" for c, why in sorted(result.skipped.items())))

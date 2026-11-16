@@ -1,7 +1,8 @@
 """Vectorisation de la silver en Chapter embeddings, dans data/gold/vector/.
 
     encoder   -> protocole Encoder, injecté dans `run`
-    pipeline  -> `run(data_dir, encoder)` : silver -> Scenes -> Chapter embeddings
+    pipeline  -> `run(data_dir, encoder, rebuild=False)` : silver -> Scenes -> Chapter embeddings,
+                 incrémental (un chapitre inchangé garde son Chapter embedding)
     dataset   -> écriture atomique du .npz et `load_chapter_embeddings`
     quality   -> rapport qualité embeddings_quality.json, à côté du dataset
     sentence_encoder -> l'Encoder réel (sentence-transformers, extra [vectorisation])

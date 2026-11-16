@@ -220,7 +220,7 @@ class VectorisationTest(SilverTestCase):
         vector_dir = paths.vector_dir(data_dir)
         previous = {p.name: p.read_bytes() for p in vector_dir.iterdir()}
 
-        write_markdown(chapter(2, "Zoro is freed by Luffy."), paths.silver_dir(data_dir))
+        write_markdown(chapter(2, "Zoro is freed by Luffy.", revision_id=5000), paths.silver_dir(data_dir))
         with self.assertRaises(RuntimeError):
             run(data_dir, FailingEncoder())
 
@@ -275,6 +275,119 @@ class VectorisationTest(SilverTestCase):
 
         vector_dir = paths.vector_dir(data_dir)
         self.assertEqual(list(vector_dir.iterdir()) if vector_dir.exists() else [], [])
+
+
+class CountingEncoder(HashEncoder):
+    """Compte les appels à `encode` et les textes reçus, appel par appel."""
+
+    def __init__(self, model_name: str = HashEncoder.model_name):
+        super().__init__()
+        self.model_name = model_name
+        self.calls: list[list[str]] = []
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        self.calls.append(list(texts))
+        return super().encode(texts)
+
+
+class IncrementalUpdateTest(SilverTestCase):
+    """Un `run` part du dataset existant : seuls les chapitres nouveaux ou
+    modifiés passent par l'encodeur (docs/vectorisation.md, section 7)."""
+
+    def setUp(self):
+        super().setUp()
+        self.data_dir = self.data_dir("data", [chapter(10, LONG_10), chapter(2, LONG_2), chapter(7, LONG_7)])
+        run(self.data_dir, HashEncoder())
+        self.first = load_chapter_embeddings(self.data_dir)
+
+    def write(self, ch: Chapter) -> None:
+        write_markdown(ch, paths.silver_dir(self.data_dir))
+
+    def rerun(self, encoder=None, **options):
+        encoder = encoder or CountingEncoder()
+        result = run(self.data_dir, encoder, **options)
+        return encoder, result, load_chapter_embeddings(self.data_dir)
+
+    def assertKept(self, emb, chapters):
+        for c in chapters:
+            np.testing.assert_array_equal(emb[c], self.first[c])
+            self.assertEqual(emb.revision_ids[c], self.first.revision_ids[c])
+
+    def test_second_run_without_change_does_not_call_the_encoder(self):
+        encoder, result, emb = self.rerun()
+
+        self.assertEqual(encoder.calls, [])
+        self.assertEqual(sorted(emb), [2, 7, 10])
+        self.assertKept(emb, [2, 7, 10])
+        self.assertEqual(result.vectorised, [])
+        self.assertEqual(result.kept, [2, 7, 10])
+
+    def test_new_chapter_is_vectorised_and_the_others_kept(self):
+        self.write(chapter(11, "Luffy meets Koby."))
+
+        encoder, result, emb = self.rerun()
+
+        self.assertEqual(encoder.seen, ["Luffy meets Koby."])
+        self.assertEqual(sorted(emb), [2, 7, 10, 11])
+        self.assertKept(emb, [2, 7, 10])
+        self.assertEqual(emb.revision_ids[11], 1011)
+        self.assertEqual((result.vectorised, result.kept), ([11], [2, 7, 10]))
+
+    def test_chapter_with_a_new_revision_id_is_revectorised_and_only_it(self):
+        self.write(chapter(2, "Zoro is freed by Luffy.", revision_id=5000))
+
+        encoder, result, emb = self.rerun()
+
+        self.assertEqual(encoder.seen, ["Zoro is freed by Luffy."])
+        self.assertEqual(emb.revision_ids[2], 5000)
+        self.assertFalse(np.allclose(emb[2], self.first[2]))
+        self.assertKept(emb, [7, 10])
+        self.assertEqual((result.vectorised, result.kept), ([2], [7, 10]))
+
+    def test_chapter_turned_incomplete_leaves_the_dataset(self):
+        self.write(chapter(7, LONG_7, complete=False))
+
+        encoder, result, emb = self.rerun()
+
+        self.assertEqual(encoder.calls, [])
+        self.assertEqual(sorted(emb), [2, 10])
+        self.assertEqual(result.skipped, {7: "complete: false"})
+
+    def test_chapter_removed_from_the_silver_leaves_the_dataset(self):
+        (paths.silver_dir(self.data_dir) / "chapter_0007.md").unlink()
+
+        encoder, _, emb = self.rerun()
+
+        self.assertEqual(encoder.calls, [])
+        self.assertEqual(sorted(emb), [2, 10])
+        self.assertNotIn(7, emb.revision_ids)
+
+    def test_model_change_revectorises_every_chapter(self):
+        encoder, result, emb = self.rerun(CountingEncoder("fake/another-model"))
+
+        self.assertEqual(sorted(encoder.seen), sorted(LONG_10.split("\n\n") + LONG_7.split("\n\n") + [LONG_2]))
+        self.assertEqual(emb.metadata.model, "fake/another-model")
+        self.assertEqual((result.vectorised, result.kept), ([2, 7, 10], []))
+
+    def test_rebuild_revectorises_every_chapter(self):
+        encoder, result, emb = self.rerun(rebuild=True)
+
+        self.assertEqual(len(encoder.seen), 6)  # 3 + 1 + 2 Scenes
+        self.assertEqual((result.vectorised, result.kept), ([2, 7, 10], []))
+        for c in (2, 7, 10):
+            np.testing.assert_allclose(emb[c], self.first[c], rtol=1e-6)
+
+    def test_quality_report_separates_vectorised_from_kept_chapters(self):
+        self.write(chapter(11, "Luffy meets Koby."))
+        self.write(chapter(7, LONG_7, complete=False))
+
+        self.rerun()
+
+        chapters = report(self.data_dir)["chapters"]
+        self.assertEqual(chapters["vectorised"], [11])
+        self.assertEqual(chapters["kept"], [2, 10])
+        self.assertEqual(chapters["skipped"], {"7": "complete: false"})
+        self.assertEqual(chapters["total"], 3)
 
 
 
