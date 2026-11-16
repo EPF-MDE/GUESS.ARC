@@ -23,6 +23,12 @@ _Avoid_: panier, basket, tags du chapitre
 Paragraphe du Long Summary d'un chapitre. Unité de lieu et d'action dans le texte.
 _Avoid_: paragraphe, passage
 
+## Représentation du texte
+
+**Chapter embedding**:
+Vecteur de taille fixe qui représente le sens du Long Summary d'un chapitre, produit par un encodeur pré-entraîné gelé. Il ne dépend que du texte du chapitre t, jamais d'un autre chapitre.
+_Avoid_: vecteur, encoding, représentation
+
 ## Entités
 
 **Entity**:
