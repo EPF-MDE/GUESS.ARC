@@ -227,6 +227,11 @@ message, and nothing is written.
   dimension, pooling, date). Read it with
   `guess_arc.vectorisation.load_chapter_embeddings()`, which returns
   `{chapter: vector}`.
+- `data/gold/vector/embeddings_quality.json`: quality report, rewritten on every
+  run (chapters vectorised, kept and skipped with their reason; dimension, NaN
+  count, min and max norm; semantic coherence: mean cosine similarity between
+  chapters of the same Arc and between chapters of different Arcs, each Arc
+  weighing the same, and the gap between the two).
 
 ## Quality checks
 
