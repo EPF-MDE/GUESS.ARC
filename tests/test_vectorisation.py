@@ -204,7 +204,7 @@ class VectorisationTest(unittest.TestCase):
         self.assertEqual(emb.revision_ids, {2: 42, 10: 1010})
         self.assertEqual(emb.metadata.model, "fake/hash-encoder")
         self.assertEqual(emb.metadata.dimension, DIM)
-        self.assertEqual(emb.metadata.pooling, "scene-mean-token-weighted-l2")
+        self.assertEqual(emb.metadata.pooling, "chunk-mean-token-weighted-l2")
         created = datetime.datetime.fromisoformat(emb.metadata.created_at)
         self.assertIsNotNone(created.tzinfo)
         self.assertGreaterEqual(created, before)

@@ -22,7 +22,7 @@ from guess_arc import paths
 from .dataset import ChapterEmbeddings, Metadata, dataset_path, write_dataset
 from .encoder import Encoder
 
-POOLING = "scene-mean-token-weighted-l2"
+POOLING = "chunk-mean-token-weighted-l2"
 # Les fenêtres d'une Scene trop longue se chevauchent d'environ 1/4 de fenêtre.
 OVERLAP_DIVISOR = 4
 
