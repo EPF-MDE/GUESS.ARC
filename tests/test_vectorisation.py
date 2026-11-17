@@ -25,7 +25,7 @@ import numpy as np
 
 from guess_arc import paths
 from guess_arc.ingestion.parser import Chapter
-from guess_arc.ingestion.silver import write_markdown
+from guess_arc.ingestion.silver import read_chapter, write_markdown
 from guess_arc.vectorisation import CorruptDatasetError, load_chapter_embeddings, run
 from guess_arc.vectorisation.pipeline import main
 from guess_arc.vectorisation.sentence_encoder import MissingExtraError, SentenceTransformerEncoder
@@ -831,18 +831,22 @@ class SentenceTransformerEncoderTest(unittest.TestCase):
 
 @unittest.skipUnless(paths.silver_dir().is_dir(), "data/silver/ absent : lancer d'abord l'ingestion")
 class RealSilverTest(unittest.TestCase):
-    def silver(self):
-        from guess_arc.vectorisation.pipeline import read_silver_chapter, scenes
+    """Les chapitres attendus sont calculés par le lecteur silver de l'ingestion,
+    jamais par du code de la vectorisation : de la vectorisation, ce test
+    n'utilise que `main` et le chargeur."""
 
-        chapters = [read_silver_chapter(p) for p in paths.silver_dir().glob("chapter_*.md")]
-        return {c.number: bool(c.complete and scenes(c.long_summary)) for c in chapters}
+    @classmethod
+    def setUpClass(cls):
+        chapters = [read_chapter(p) for p in paths.silver_dir().glob("chapter_*.md")]
+        cls.usable = {c.number: c.complete and bool(c.long_summary) for c in chapters}
 
     def complete_chapters(self) -> set[int]:
-        return {number for number, usable in self.silver().items() if usable}
+        """Les chapitres `complete: true` dont le Long Summary n'est pas vide."""
+        return {number for number, usable in self.usable.items() if usable}
 
     def skipped_chapters(self) -> set[int]:
         """Les chapitres de la silver sautés à raison (`complete: false`, Long Summary vide)."""
-        return {number for number, usable in self.silver().items() if not usable}
+        return {number for number, usable in self.usable.items() if not usable}
 
     def test_one_finite_chapter_embedding_per_complete_silver_chapter(self):
         tmp = tempfile.TemporaryDirectory()
@@ -850,7 +854,9 @@ class RealSilverTest(unittest.TestCase):
         data_dir = pathlib.Path(tmp.name)
         shutil.copytree(paths.silver_dir(), paths.silver_dir(data_dir))
 
-        run(data_dir, HashEncoder())
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["--data-dir", str(data_dir)], environ={"EMBEDDING_MODEL": "fake/hash-encoder"},
+                 env_file=data_dir / ".env", make_encoder=lambda model: HashEncoder())
 
         emb = load_chapter_embeddings(data_dir)
         self.assertEqual(set(emb), self.complete_chapters())

@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from guess_arc import paths
+from guess_arc.ingestion.silver import SilverChapter, read_chapter
 
 from .dataset import (
     ChapterEmbeddings,
@@ -43,47 +44,7 @@ POOLING = "chunk-mean-token-weighted-l2"
 # Les fenêtres d'une Scene trop longue se chevauchent d'environ 1/4 de fenêtre.
 OVERLAP_DIVISOR = 4
 
-FRONT_MATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
-LONG_SUMMARY_RE = re.compile(r"^## Long Summary[ \t]*\n(.*?)(?=^## |\Z)", re.DOTALL | re.MULTILINE)
 PARAGRAPH_BREAK_RE = re.compile(r"\n[ \t]*\n")
-# Ce que le writer silver met à la place d'un Long Summary vide.
-ABSENT = "_(absent)_"
-
-
-@dataclass(frozen=True)
-class SilverChapter:
-    number: int
-    arc: str
-    revision_id: int
-    complete: bool
-    long_summary: str
-
-
-def _field(front_matter: str, name: str, path: Path) -> str:
-    match = re.search(rf"^{name}:[ \t]*(.*?)[ \t]*$", front_matter, re.MULTILINE)
-    if match is None:
-        raise ValueError(f"{path.name} : champ '{name}' absent du front-matter")
-    value = match.group(1)
-    if len(value) >= 2 and value[0] == value[-1] == '"':
-        value = value[1:-1].replace('\\"', '"').replace("\\\\", "\\")
-    return value
-
-
-def read_silver_chapter(path: Path) -> SilverChapter:
-    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
-    front = FRONT_MATTER_RE.match(text)
-    if front is None:
-        raise ValueError(f"{path.name} : front-matter absent")
-    body = text[front.end():]
-    section = LONG_SUMMARY_RE.search(body)
-    long_summary = section.group(1).strip() if section else ""
-    return SilverChapter(
-        number=int(_field(front.group(1), "chapter", path)),
-        arc=_field(front.group(1), "arc", path),
-        revision_id=int(_field(front.group(1), "revision_id", path)),
-        complete=_field(front.group(1), "complete", path) == "true",
-        long_summary="" if long_summary == ABSENT else long_summary,
-    )
 
 
 def scenes(long_summary: str) -> list[str]:
@@ -219,7 +180,7 @@ def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult
     `complete: false`, sans Scene, ou absent de la silver, n'a aucune entrée
     dans le dataset.
     """
-    silver = [read_silver_chapter(path) for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md"))]
+    silver = [read_chapter(path) for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md"))]
     previous, rebuild_reason = _previous_dataset(data_dir, encoder, rebuild)
 
     # Un chapitre n'est encodé qu'une fois, même si l'on recommence sans reprise.

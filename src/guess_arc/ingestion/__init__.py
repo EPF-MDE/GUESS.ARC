@@ -2,7 +2,8 @@
 
     wiki_client  -> appels à l'API MediaWiki
     parser       -> wikitexte d'une page de chapitre -> Chapter
-    silver       -> Chapter -> data/silver/chapter_NNNN.md
+    silver       -> Chapter -> data/silver/chapter_NNNN.md, et `read_chapter`,
+                    le lecteur partagé de ces fichiers -> SilverChapter
     validation   -> contrat de format des couches bronze et silver
     pipeline     -> orchestration, état incrémental, CLI
 

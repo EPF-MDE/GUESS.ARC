@@ -103,7 +103,8 @@ Outputs always go under `data/` at the repo root (override with `--data-dir`):
 - `data/bronze/chapters.jsonl`: the archived raw wikitext, one line per chapter
 - `data/silver/chapter_NNNN.md`: one file per chapter, a YAML front-matter (title,
   arc, characters with their faction and `on_panel`) followed by the short summary,
-  the long summary and the notes
+  the long summary and the notes. Read them back with
+  `guess_arc.ingestion.silver.read_chapter`, the shared reader of this format
 - `data/state.json`: the known `revid`s, for incremental runs
 
 ## Entity extraction
@@ -241,8 +242,8 @@ python scripts/quality/check_silver.py [--silver PATH] [--expected 1193]
 
 Checks that the silver corpus is a sound input for the next stages: no missing
 chapters, a valid front-matter in every file, a non-empty long summary, and a
-`character_count` that matches the listed characters. Standard library only, no
-network; exits with code 1 if anything fails. By default it reads `data/silver/`
+`character_count` that matches the listed characters. It reads each file with
+`read_chapter` (needs the `guess_arc` package installed), no network; exits with code 1 if anything fails. By default it reads `data/silver/`
 at the repo root, whatever the current directory. The requirements it covers
 (REQ-5 to REQ-8) and the results are tracked in [QUALITY.md](QUALITY.md).
 

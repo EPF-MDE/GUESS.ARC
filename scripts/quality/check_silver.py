@@ -1,6 +1,8 @@
 """Vérifie que le corpus silver est une entrée saine pour l'Embedding Gold (QUALITY.md, REQ-5 à REQ-8).
 
-Bibliothèque standard uniquement, sans réseau. Code de sortie 0 si tout passe, 1 sinon.
+Lit chaque fichier avec `read_chapter`, le lecteur silver de l'ingestion
+(paquet guess_arc installé : pip install -r requirements.txt). Sans réseau.
+Code de sortie 0 si tout passe, 1 sinon.
 
     python scripts/quality/check_silver.py [--silver data/silver] [--expected 1193]
 """
@@ -12,55 +14,31 @@ import re
 import sys
 from pathlib import Path
 
+from guess_arc.ingestion.silver import read_chapter
+
 # Ancré sur la racine du repo (comme guess_arc.paths), pas sur le dossier courant :
 # le script donne le même résultat d'où qu'on le lance.
 DEFAULT_SILVER = Path(__file__).resolve().parents[2] / "data" / "silver"
 
-SECTION = re.compile(r"^## (.+)$", re.MULTILINE)
 FILE_NAME = re.compile(r"chapter_(\d{4})\.md")
 
 
-def split_front_matter(text: str) -> tuple[str, str]:
-    """Sépare le front-matter YAML (entre les deux `---`) du corps Markdown."""
-    if not text.startswith("---"):
-        raise ValueError("pas de front-matter")
-    _, header, body = text.split("---", 2)
-    return header, body
+def check_file(path: Path, number: int) -> tuple[list[str], int | None]:
+    """Renvoie les problèmes du fichier et le nombre de mots de son Long Summary
+    (None si le fichier est illisible : front-matter, champ ou section manquant)."""
+    try:
+        chapter = read_chapter(path)
+    except ValueError as exc:
+        return [str(exc).removeprefix(f"{path.name} : ")], None
 
-
-def scalar(header: str, key: str) -> str | None:
-    match = re.search(rf"^{key}: (.+)$", header, re.MULTILINE)
-    return match.group(1).strip().strip('"') if match else None
-
-
-def sections(body: str) -> dict[str, str]:
-    """Associe chaque titre `## ...` au texte qui le suit jusqu'au titre suivant."""
-    parts = SECTION.split(body)
-    return {parts[i].strip(): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
-
-
-def check_file(path: Path, number: int) -> tuple[list[str], int]:
-    """Renvoie les problèmes du fichier et le nombre de mots de son Long Summary."""
     problems: list[str] = []
-    header, body = split_front_matter(path.read_text(encoding="utf-8"))
-
-    if scalar(header, "chapter") != str(number):
-        problems.append(f"champ chapter={scalar(header, 'chapter')} ≠ nom de fichier")
-    if scalar(header, "complete") != "true":
+    if chapter.number != number:
+        problems.append(f"champ chapter={chapter.number} ≠ nom de fichier")
+    if not chapter.complete:
         problems.append("complete n'est pas true")
-    if not scalar(header, "revision_id"):
-        problems.append("revision_id manquant")
-
-    declared = scalar(header, "character_count")
-    listed = len(re.findall(r"^  - name: ", header, re.MULTILINE))
-    if declared is None or int(declared) != listed:
-        problems.append(f"character_count={declared} mais {listed} personnages listés")
-
-    found = sections(body)
-    for name in ("Short Summary", "Long Summary", "Chapter Notes"):
-        if name not in found:
-            problems.append(f"section « {name} » absente")
-    words = len(found.get("Long Summary", "").split())
+    if chapter.character_count != len(chapter.characters):
+        problems.append(f"character_count={chapter.character_count} mais {len(chapter.characters)} personnages listés")
+    words = len(chapter.long_summary.split())
     if words == 0:
         problems.append("Long Summary vide")
     return problems, words
@@ -82,7 +60,8 @@ def main() -> int:
     word_counts: list[int] = []
     for path, number in zip(files, numbers):
         problems, words = check_file(path, number)
-        word_counts.append(words)
+        if words is not None:
+            word_counts.append(words)
         if problems:
             failures[path.name] = problems
 
