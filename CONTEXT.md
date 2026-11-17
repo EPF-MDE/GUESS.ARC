@@ -107,5 +107,13 @@ Les deux rôles des Participants d'un Event orienté : celui qui agit et celui q
 **Event phase**:
 Moment d'un Event qui s'étend sur plusieurs chapitres, tel que le chapitre le montre : start, ongoing ou end.
 
+**Taxonomy**:
+Liste fermée et versionnée des Event types, chacun avec sa définition et son orientation. Découverte par un LLM sur un échantillon de chapitres, relue par un humain, puis figée sous un numéro de version. Changer de version impose de ré-extraire tous les Events.
+_Avoid_: ontologie, liste de types, Taxonomy Gold (ancienne approche abandonnée)
+
+**Prompt version**:
+Identifiant figé d'un prompt envoyé à un LLM et de son schéma de sortie (`extraction-v1`). Toute modification du texte ou du schéma impose une nouvelle Prompt version. Avec le modèle, la version de la Taxonomy et le chapitre, elle forme la clé du cache des réponses LLM.
+_Avoid_: version du template
+
 **Flashback event**:
 Event raconté au chapitre t mais situé dans le passé de l'histoire. Signal pour l'état de l'histoire, jamais une cible de prédiction ni une vérité terrain.

@@ -20,10 +20,14 @@ src/guess_arc/
 │   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
 │   ├── validation.py     # bronze / silver format contract
 │   └── pipeline.py       # orchestration, incremental state, CLI
-└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
-    ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
-    ├── pipeline.py       # reads bronze, writes gold, CLI
-    └── common_words.txt  # common words: link text starting with one of them is not an Alias
+├── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
+│   ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
+│   ├── pipeline.py       # reads bronze, writes gold, CLI
+│   └── common_words.txt  # common words: link text starting with one of them is not an Alias
+└── events/               # Event type discovery and Event extraction (in progress)
+    └── llm.py            # pluggable LLM backend: config, schema validation, response cache
+configs/
+└── events.json           # LLM model of each Event task (no secrets)
 reference/                # versioned reference data
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
 ├── concepts.txt          # Concepts and Titles, excluded from Registry(t)
@@ -175,6 +179,76 @@ Plain-language account of the step, its results, problems and decisions:
   Chapter Notes. Regenerated on every run: real Disguises are confirmed by hand,
   with their Revelation chapter, then copied into `reference/disguises.csv`.
 
+## LLM backend (Events)
+
+Event type discovery and Event extraction call an LLM through one shared backend
+(`src/guess_arc/events/llm.py`). Each call sends a prompt and a JSON schema and gets
+back structured output that is checked against the schema: an answer that is not
+JSON, does not match the schema, or stopped early (refusal, `max_tokens`) raises
+`StructuredOutputError`. It is never accepted as is, and never cached. Error
+messages are in French, like the rest of the pipeline.
+
+**Choosing the model.** The model of each task is set in `configs/events.json`, as
+`provider:model-name`:
+
+```json
+{
+  "discovery_model": "anthropic:claude-opus-5-5",
+  "extraction_model": ""
+}
+```
+
+`extraction_model` has **no default**: running the extraction on the 1193 chapters
+costs too much to happen with a model nobody chose. The team picks it by comparing
+candidates on the validation sample (#114), then writes it here. While it is empty,
+asking for the extraction backend stops with an explicit message
+(`extraction_model est vide dans …/configs/events.json : y mettre le modèle choisi…`).
+`discovery_model` defaults to `anthropic:claude-opus-5-5`, the best model affordable
+for the ~30 discovery chapters.
+
+Switching model means editing this file, nothing else. Known providers: `anthropic`.
+Adding one (another API, a local model) means writing one adapter class with a
+`model` attribute and a `complete(prompt, schema) -> str` method, and adding it to
+`PROVIDERS` in `llm.py`; callers don't change.
+
+**API keys** come from the environment, never from a committed file. For Anthropic,
+set `ANTHROPIC_API_KEY` in the shell that runs the pipeline:
+
+| OS / shell | Command |
+|---|---|
+| macOS / Linux, Git Bash | `export ANTHROPIC_API_KEY=sk-ant-...` |
+| Windows, PowerShell | `$env:ANTHROPIC_API_KEY = "sk-ant-..."` |
+| Windows, cmd | `set ANTHROPIC_API_KEY=sk-ant-...` |
+
+If you keep the key in a `.env` file, it is git-ignored; the code does not read it
+itself, so load it into the environment first.
+
+**Temperature.** Adapters send temperature 0 when their API accepts it. The
+Anthropic API no longer does: since API version `2026-10-21`, any `temperature`,
+`top_p` or `top_k` is rejected (HTTP 400) on every model, so the Anthropic adapter
+sends none. Reproducibility comes from the cache below. The adapter requests no
+server-side fallback to another model, so an answer always comes from the model
+named in the cache key.
+
+**Response cache.** Every validated answer is stored under `data/bronze/llm/`, like
+the raw wikitext (an external source we archive), one file per key
+(model, Prompt version, Taxonomy version, chapter; see [CONTEXT.md](CONTEXT.md)):
+
+```
+data/bronze/llm/<provider>/<model-name>/<prompt_version>/<taxonomy_version>/chapter_NNNN.json
+```
+
+A second run with the same key makes no network call. Changing any of the four
+parts (another model, a new prompt version, a new taxonomy version) makes a fresh
+call; the old answers stay on disk. The prompt text and the schema are not part of
+the key, but each cached file stores their SHA-256 (`prompt_sha256`). If the prompt
+or the schema changed while the Prompt version did not, the cached answer is refused
+with `StructuredOutputError` (and no new call is made): **bump the Prompt version
+whenever you change a prompt or schema**. The cache is never rewritten: like the rest of bronze, it is
+append-only (ADR 0002); to get new answers, use a new version. `data/` is not
+committed, so each machine has its own cache: share it (copy the folder) rather than
+paying twice for the same calls.
+
 ## Quality checks
 
 ```bash
@@ -208,6 +282,9 @@ corpus are skipped (`pytest -rs` shows why). The tests cover:
   precision proxies, Entity types from the datasets, wiki categories and
   overrides, category cache, confirmed Disguises, Registry(t) over 3 chapters,
   Disguise candidates);
+- the LLM backend, with a fake backend that counts its calls and a fake Anthropic
+  SDK client (no network): schema validation, the response cache and its
+  four-part key, the model chosen from the config, the request sent to Claude;
 - a check of every file in `data/bronze/` and `data/silver/`
   (skipped if the data hasn't been generated yet).
 
