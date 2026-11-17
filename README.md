@@ -24,8 +24,10 @@ src/guess_arc/
 │   ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
 │   ├── pipeline.py       # reads bronze, writes gold, CLI
 │   └── common_words.txt  # common words: link text starting with one of them is not an Alias
-└── vectorisation/        # silver -> Scenes -> Chapter embeddings in data/gold/vector/
-    ├── pipeline.py       # run(data_dir, encoder): Scenes, token-weighted mean, L2; CLI (EMBEDDING_MODEL from .env)
+└── vectorisation/        # silver -> Chunks -> Chapter embeddings in data/gold/vector/
+    ├── __init__.py       # public API: run, load_chapter_embeddings, Encoder
+    ├── __main__.py       # python -m guess_arc.vectorisation
+    ├── pipeline.py       # run(data_dir, encoder): Chunks, token-weighted mean, L2; CLI (EMBEDDING_MODEL from .env)
     ├── encoder.py        # Encoder protocol, injected into run
     ├── sentence_encoder.py  # the real Encoder: sentence-transformers on CPU (optional extra)
     ├── dataset.py        # .npz written together with its report, load_chapter_embeddings
@@ -198,7 +200,8 @@ pip install -e .[vectorisation]
 On Linux, plain `pip` installs the CUDA build of `torch` (~2 GB); the CPU build is
 enough: `pip install -e .[vectorisation] --extra-index-url https://download.pytorch.org/whl/cpu`.
 
-The model is set in `.env` at the repo root, never in the code. Recommended:
+The model is set in `.env` at the repo root; the code has no default model. Copy
+[`.env.example`](.env.example), which documents an example:
 
 ```
 EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
@@ -214,8 +217,9 @@ python -m guess_arc.vectorisation --rebuild
 ```
 
 On the first run the model is downloaded from Hugging Face (~130 MB), then cached:
-later runs work offline. Each Scene of the Long Summary is encoded;
-the Chapter embedding is their mean weighted by token count, L2-normalised
+later runs work offline. Each Chunk of the Long Summary is encoded (a Scene, or a
+window of a Scene too long for the encoder); the Chapter embedding is the mean of
+the Chunks weighted by their token count, then L2-normalised
 (dimension 384 for `bge-small-en-v1.5`). An unchanged chapter keeps its Chapter embedding
 without calling the encoder; a model change in `.env` re-encodes everything. The
 run ends with the number of chapters vectorised, kept and skipped, and a

@@ -29,7 +29,7 @@ Exemple : « Luffy affronte Kaido sur le toit d'Onigashima » et « Le combat en
 | API d'embeddings (serveur LLM de l'école) | Idem, mais distant | Sémantique | Non | Dépend du réseau de l'école, pas reproductible hors ligne |
 | Encodeur fine-tuné avec le GRU | Les poids de l'encodeur s'entraînent avec le GRU | Sémantique, adapté à la tâche | Maîtrisable, mais aucun dataset à produire | GPU nécessaire, ~1 200 exemples seulement |
 
-**Choix retenu : encodeur pré-entraîné gelé, exécuté en local** (ADR 0003). Modèle par défaut : `BAAI/bge-small-en-v1.5`, 384 dimensions, fenêtre de 512 tokens. Le nom du modèle se règle dans le `.env` (`EMBEDDING_MODEL`), jamais dans le code. 384 dimensions restent raisonnables face à ~1 200 exemples d'entraînement : un vecteur plus grand favoriserait le surapprentissage du GRU.
+**Choix retenu : encodeur pré-entraîné gelé, exécuté en local** (ADR 0003). Le nom du modèle se règle dans le `.env` (`EMBEDDING_MODEL`), sans défaut dans le code : sans lui, la commande s'arrête. L'exemple documenté dans `.env.example` est `BAAI/bge-small-en-v1.5`, 384 dimensions, fenêtre de 512 tokens. 384 dimensions restent raisonnables face à ~1 200 exemples d'entraînement : un vecteur plus grand favoriserait le surapprentissage du GRU.
 
 ## 4. Quel texte vectoriser ?
 
@@ -58,12 +58,12 @@ Tronquer le chapitre à 512 tokens ferait perdre la fin, souvent le cliffhanger,
 5. Le résultat est **normalisé L2** (norme 1), pour que la similarité cosinus se réduise à un produit scalaire et que tous les chapitres aient la même échelle.
 
 ```
-Long Summary ──► Scene 1 ──► encodeur ──► v₁ (384) ─┐
-             ├─► Scene 2 ──► encodeur ──► v₂ (384) ─┼─► moyenne pondérée ─► L2 ─► Chapter embedding (384)
-             └─► Scene k ──► encodeur ──► vₖ (384) ─┘
+Long Summary ──► Chunk 1 ──► encodeur ──► v₁ (384) ─┐
+             ├─► Chunk 2 ──► encodeur ──► v₂ (384) ─┼─► moyenne pondérée par tokens ─► L2 ─► Chapter embedding (384)
+             └─► Chunk k ──► encodeur ──► vₖ (384) ─┘
 ```
 
-Les vecteurs par Scene ne sont pas conservés en v1.
+Les vecteurs par Chunk ne sont pas conservés en v1.
 
 ## 6. Format de sortie
 
@@ -146,7 +146,7 @@ Les dépendances de la vectorisation (`sentence-transformers`, qui installe `tor
 pip install -e .[vectorisation]
 ```
 
-Dans le `.env` :
+Copier `.env.example` en `.env` à la racine du repo. Il contient :
 
 ```
 EMBEDDING_MODEL=BAAI/bge-small-en-v1.5

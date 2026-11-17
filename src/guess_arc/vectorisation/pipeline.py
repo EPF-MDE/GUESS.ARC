@@ -256,7 +256,7 @@ def _embedding_model(environ: Mapping[str, str], env_file: Path) -> str:
     if not model:
         raise _MissingSettingError(
             f"{SETTING} absent : l'ajouter au fichier {env_file}, par exemple "
-            f"{SETTING}=<identifiant Hugging Face du modèle> (voir le README)"
+            f"{SETTING}=<identifiant Hugging Face du modèle> (exemple documenté dans .env.example)"
         )
     return model
 

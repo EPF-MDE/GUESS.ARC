@@ -29,7 +29,7 @@ from guess_arc import paths
 from guess_arc.ingestion.parser import Chapter
 from guess_arc.ingestion.silver import read_chapter, write_markdown
 from guess_arc.vectorisation import CorruptDatasetError, load_chapter_embeddings, run
-from guess_arc.vectorisation.pipeline import main
+from guess_arc.vectorisation.pipeline import _embedding_model, main
 from guess_arc.vectorisation.sentence_encoder import MissingExtraError, SentenceTransformerEncoder
 
 DIM = 8
@@ -876,6 +876,23 @@ class MissingExtraTest(unittest.TestCase):
                 SentenceTransformerEncoder("org/model")
 
         self.assertIn(PIP_COMMAND, str(ctx.exception))
+
+
+class EnvExampleTest(unittest.TestCase):
+    """Le modèle est documenté dans .env.example, jamais codé en dur dans le code."""
+
+    def example_model(self) -> str:
+        """Le modèle que la commande lirait si .env.example était le .env."""
+        return _embedding_model({}, paths.REPO_ROOT / ".env.example")
+
+    def test_env_example_documents_the_embedding_model(self):
+        self.assertTrue(self.example_model())
+
+    def test_example_model_is_not_hard_coded_in_src(self):
+        model = self.example_model()
+        offenders = [str(path) for path in (paths.REPO_ROOT / "src").rglob("*.py")
+                     if model in path.read_text(encoding="utf-8")]
+        self.assertEqual(offenders, [])
 
 
 class _ModelFound(Exception):
