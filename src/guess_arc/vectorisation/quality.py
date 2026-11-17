@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+from typing import BinaryIO
 
 import numpy as np
 
 from guess_arc import paths
 
-from .dataset import ChapterEmbeddings, atomic_write
+from .dataset import ChapterEmbeddings, Writer
 
 FILENAME = "embeddings_quality.json"
 
@@ -102,6 +103,10 @@ def quality_report(
     }
 
 
-def write_report(path: Path, report: dict) -> None:
-    text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
-    atomic_write(path, lambda fh: fh.write(text.encode("utf-8")))
+def report_writer(report: dict) -> Writer:
+    """Ce qui écrit le rapport en JSON dans un fichier ouvert (voir `write_together`)."""
+    def write(fh: BinaryIO) -> None:
+        text = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+        fh.write(text.encode("utf-8"))
+
+    return write

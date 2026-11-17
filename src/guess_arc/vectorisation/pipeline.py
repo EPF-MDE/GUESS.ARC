@@ -33,11 +33,12 @@ from .dataset import (
     CorruptDatasetError,
     Metadata,
     dataset_path,
+    dataset_writer,
     load_chapter_embeddings,
-    write_dataset,
+    write_together,
 )
 from .encoder import Encoder
-from .quality import quality_report, report_path, write_report
+from .quality import quality_report, report_path, report_writer
 from .sentence_encoder import MissingExtraError, SentenceTransformerEncoder
 
 POOLING = "chunk-mean-token-weighted-l2"
@@ -213,8 +214,8 @@ def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult
     arcs = {chapter.number: chapter.arc for chapter in silver}
     report = quality_report(dataset, arcs, kept=update.kept)
     target, quality_target = dataset_path(data_dir), report_path(data_dir)
-    write_dataset(target, dataset)
-    write_report(quality_target, report)
+    # Le dataset et son rapport sont remplacés ensemble, une fois tous deux prêts.
+    write_together({target: dataset_writer(dataset), quality_target: report_writer(report)})
     return RunResult(
         path=target,
         quality_path=quality_target,

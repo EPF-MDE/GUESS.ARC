@@ -28,7 +28,7 @@ src/guess_arc/
     ├── pipeline.py       # run(data_dir, encoder): Scenes, token-weighted mean, L2; CLI (EMBEDDING_MODEL from .env)
     ├── encoder.py        # Encoder protocol, injected into run
     ├── sentence_encoder.py  # the real Encoder: sentence-transformers on CPU (optional extra)
-    ├── dataset.py        # atomic .npz writing, load_chapter_embeddings
+    ├── dataset.py        # .npz written together with its report, load_chapter_embeddings
     └── quality.py        # quality report embeddings_quality.json
 reference/                # versioned reference data
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)

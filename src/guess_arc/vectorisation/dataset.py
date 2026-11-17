@@ -54,26 +54,43 @@ class ChapterEmbeddings(dict[int, np.ndarray]):
         self.skipped = skipped
 
 
-def atomic_write(path: Path, write: Callable[[BinaryIO], None]) -> None:
-    """Écriture atomique : un fichier temporaire du même dossier, renommé à la
-    fin. En cas d'erreur, l'ancien fichier reste intact et rien d'autre ne reste."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+Writer = Callable[[BinaryIO], None]
+
+
+def write_together(writers: Mapping[Path, Writer]) -> None:
+    """Écrit plusieurs fichiers ensemble : chacun est d'abord écrit en entier
+    dans un fichier temporaire de son dossier, puis, une fois tous prêts, ils
+    remplacent les anciens l'un après l'autre. Si l'écriture d'un fichier
+    temporaire échoue, aucun ancien fichier n'est touché et aucun fichier
+    temporaire ne reste. Seul un échec entre deux remplacements laisse un
+    nouveau fichier à côté d'un ancien."""
+    temporaries: dict[Path, Path] = {}
     try:
-        with os.fdopen(fd, "wb") as fh:
-            write(fh)
-        os.replace(tmp_name, path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+        for path, write in writers.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+            temporaries[path] = Path(tmp_name)
+            try:
+                fh = os.fdopen(fd, "wb")
+            except BaseException:
+                os.close(fd)
+                raise
+            with fh:
+                write(fh)
+        for path, tmp in temporaries.items():
+            os.replace(tmp, path)
+    finally:
+        for tmp in temporaries.values():
+            tmp.unlink(missing_ok=True)
 
 
-def write_dataset(path: Path, embeddings: ChapterEmbeddings) -> None:
+def dataset_writer(embeddings: ChapterEmbeddings) -> Writer:
+    """Ce qui écrit le .npz du dataset dans un fichier ouvert (voir `write_together`)."""
     chapters = sorted(embeddings)
     dimension = embeddings.metadata.dimension
     matrix = np.array([embeddings[c] for c in chapters], dtype=np.float32).reshape(len(chapters), dimension)
     skipped = sorted(embeddings.skipped)
-    atomic_write(path, lambda fh: np.savez(
+    return lambda fh: np.savez(
         fh,
         chapters=np.array(chapters, dtype=np.int64),
         revision_ids=np.array([embeddings.revision_ids[c] for c in chapters], dtype=np.int64),
@@ -85,7 +102,7 @@ def write_dataset(path: Path, embeddings: ChapterEmbeddings) -> None:
         skipped_chapters=np.array(skipped, dtype=np.int64),
         # dtype=str : un tableau vide reste un tableau de textes.
         skipped_reasons=np.array([embeddings.skipped[c] for c in skipped], dtype=str),
-    ))
+    )
 
 
 class CorruptDatasetError(ValueError):

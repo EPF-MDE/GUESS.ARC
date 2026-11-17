@@ -264,6 +264,30 @@ class VectorisationTest(SilverTestCase):
 
         self.assertEqual({p.name: p.read_bytes() for p in vector_dir.iterdir()}, previous)
 
+    def assert_failed_write_keeps_previous_files(self, failing_call: str):
+        data_dir = self.data_dir("data", [chapter(10, LONG_10), chapter(2, LONG_2)])
+        run(data_dir, HashEncoder())
+        vector_dir = paths.vector_dir(data_dir)
+        previous = {p.name: p.read_bytes() for p in vector_dir.iterdir()}
+
+        write_markdown(chapter(2, "Zoro is freed by Luffy.", revision_id=5000), paths.silver_dir(data_dir))
+        with mock.patch(failing_call, side_effect=OSError("disque plein")), self.assertRaises(OSError):
+            run(data_dir, HashEncoder())
+
+        self.assertEqual({p.name: p.read_bytes() for p in vector_dir.iterdir()}, previous)
+
+    def test_failed_quality_report_write_keeps_previous_dataset_and_report(self):
+        self.assert_failed_write_keeps_previous_files("json.dumps")
+
+    def test_failed_dataset_write_keeps_previous_dataset_and_report(self):
+        self.assert_failed_write_keeps_previous_files("numpy.savez")
+
+    def test_quality_report_carries_the_created_at_of_its_dataset(self):
+        data_dir = self.data_dir("data", [chapter(10, LONG_10), chapter(2, LONG_2)])
+        run(data_dir, HashEncoder())
+
+        self.assertEqual(report(data_dir)["created_at"], load_chapter_embeddings(data_dir).metadata.created_at)
+
     def test_scene_longer_than_the_window_is_split_into_overlapping_chunks(self):
         encoder = SmallWindowEncoder()
         scene = words(30)
