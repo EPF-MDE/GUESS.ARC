@@ -16,9 +16,11 @@ import io
 import json
 import pathlib
 import shutil
+import struct
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 import numpy as np
@@ -356,6 +358,22 @@ class CorruptDatasetTest(SilverTestCase):
         with self.npz.open("wb") as fh:
             np.savez(fh, **arrays)
 
+    def damage_compressed_stream(self) -> None:
+        """Archive compressée dont le flux deflate du premier tableau est abîmé :
+        np.load lève zlib.error, pas une erreur de zip."""
+        with self.npz.open("wb") as fh:
+            np.savez_compressed(fh, **self.arrays)
+        with zipfile.ZipFile(self.npz) as archive:
+            member = archive.infolist()[0]
+        data = bytearray(self.npz.read_bytes())
+        # En-tête local : 30 octets, puis le nom et le champ extra, dont les
+        # longueurs sont aux octets 26 et 28.
+        header = member.header_offset
+        name_length, extra_length = struct.unpack("<HH", data[header + 26:header + 30])
+        start = header + 30 + name_length + extra_length
+        data[start:start + 4] = bytes(b ^ 0xFF for b in data[start:start + 4])
+        self.npz.write_bytes(bytes(data))
+
     CORRUPTIONS = {
         "archive illisible": None,
         "tableau manquant": dict(revision_ids=None),
@@ -364,13 +382,29 @@ class CorruptDatasetTest(SilverTestCase):
         "chapitre en double": dict(chapters=np.array([2, 2], dtype=np.int64)),
         "NaN": dict(embeddings=np.full((2, DIM), np.nan, dtype=np.float32)),
         "norme différente de 1": dict(embeddings=np.full((2, DIM), 3.0, dtype=np.float32)),
+        "dimension en chaîne": dict(dimension=np.array("huit")),
+        "dimension en tableau 1-D": dict(dimension=np.array([DIM, DIM], dtype=np.int64)),
+        "dimension en tableau 1-D d'un élément": dict(dimension=np.array([DIM], dtype=np.int64)),
+        "dimension non entière": dict(dimension=np.array(DIM + 0.5)),
+        "chapitres en chaînes": dict(chapters=np.array(["a", "b"])),
+        "chapitres non entiers": dict(chapters=np.array([2.5, 10.0])),
+        "revision_ids en chaînes": dict(revision_ids=np.array(["a", "b"])),
+        "embeddings en chaînes": dict(embeddings=np.full((2, DIM), "x")),
+        "embeddings 1-D": dict(embeddings=np.ones(2 * DIM, dtype=np.float32)),
+        "embeddings 3-D": dict(embeddings=np.ones((2, DIM, 1), dtype=np.float32)),
+        "modèle en tableau 1-D": dict(model=np.array(["a", "b"])),
+        "chapitres 2-D": dict(chapters=np.array([[2, 10]], dtype=np.int64)),
+        "flux compressé abîmé": damage_compressed_stream,
     }
 
     def apply(self, name: str) -> None:
-        if self.CORRUPTIONS[name] is None:
+        corruption = self.CORRUPTIONS[name]
+        if corruption is None:
             self.npz.write_bytes(b"not a zip archive")
+        elif callable(corruption):
+            corruption(self)
         else:
-            self.corrupt(**self.CORRUPTIONS[name])
+            self.corrupt(**corruption)
 
     def test_loader_refuses_a_corrupt_dataset_and_names_rebuild(self):
         for name in self.CORRUPTIONS:
@@ -384,6 +418,8 @@ class CorruptDatasetTest(SilverTestCase):
         for name in self.CORRUPTIONS:
             with self.subTest(name):
                 self.apply(name)
+                with self.assertRaises(CorruptDatasetError) as ctx:
+                    load_chapter_embeddings(self.data_dir)
                 encoder = CountingEncoder()
 
                 result = run(self.data_dir, encoder)
@@ -392,6 +428,7 @@ class CorruptDatasetTest(SilverTestCase):
                 self.assertEqual(sorted(emb), [2, 10])
                 self.assertEqual((result.vectorised, result.kept), ([2, 10], []))
                 self.assertIn("corrompu", result.rebuild_reason)
+                self.assertIn(str(ctx.exception), result.rebuild_reason)
 
 
 class IncrementalUpdateTest(SilverTestCase):
