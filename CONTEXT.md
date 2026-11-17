@@ -91,21 +91,25 @@ Notion générique de l'univers (Pirate, Haki, le Devil Fruit en général). Jam
 ## Événements
 
 **Event**:
-Fait narratif survenu dans un chapitre, décrit par un Event type et ses Participants. C'est ce que le modèle cherche à prédire pour le chapitre n+1.
-_Avoid_: événement nommé (Buster Call, Levely : ce sont des Entities), action, fait
+Fait narratif survenu dans un chapitre, décrit par un Event type et ses Participants. C'est ce que le modèle cherche à prédire pour le chapitre n+1. Un Event qui s'étend sur plusieurs chapitres est un Event distinct dans chacun d'eux, sans identifiant commun (ADR 0004) ; dans un même chapitre, il n'est compté qu'une fois, avec la liste de ses Scenes.
+_Avoid_: événement nommé (Buster Call, Levely : ce sont des Entities), action, fait, relation
 
 **Event type**:
-Catégorie d'un Event (combat, alliance…), prise dans une liste fermée. Chaque Event type est soit orienté (des Sources vers des Targets), soit non orienté, une fois pour toutes.
+Catégorie d'un Event (combat, alliance…), prise dans une liste fermée, figée et versionnée (`event_types.json`). Chaque Event type est soit orienté (des Sources vers des Targets), soit non orienté, une fois pour toutes. Il n'y a pas de type « Other » : un Event qui ne rentre dans aucun type n'est pas extrait.
+_Avoid_: catégorie, label
 
 **Participant**:
-Entity de Registry(t) impliquée dans un Event, désignée par les Aliases connus au chapitre t (un Disguise reste un Participant distinct jusqu'à sa Revelation). Un Event a de 1 à n Participants. Dans un Event orienté, chaque Participant est soit Source, soit Target.
-_Avoid_: acteur, argument
+Entity de Registry(t) impliquée dans un Event, désignée par son Canonical name ; ses Aliases connus au chapitre t servent à la reconnaître dans le texte. Au chapitre t, seules sont autorisées les Entities ayant une Mention dans le chapitre et les Characters de son Cast. Un Disguise reste un Participant distinct jusqu'à sa Revelation. Un Event a de 1 à n Participants. Dans un Event orienté, chaque Participant est soit Source, soit Target.
+_Avoid_: acteur, protagoniste, argument
 
 **Source** / **Target**:
-Les deux rôles des Participants d'un Event orienté : celui qui agit et celui qui subit (vainqueur → vaincu, traître → trahi). 1 à n de chaque côté.
+Les deux rôles des Participants d'un Event orienté : celui qui agit et celui qui subit (vainqueur → vaincu, traître → trahi). 1 à n de chaque côté. Un Event non orienté n'a ni Source ni Target.
+_Avoid_: sujet / objet, agent / patient
 
 **Event phase**:
-Moment d'un Event qui s'étend sur plusieurs chapitres, tel que le chapitre le montre : start, ongoing ou end.
+Moment d'un Event qui s'étend sur plusieurs chapitres, tel que le chapitre le montre : `start`, `ongoing` ou `end`. Le LLM la déduit du seul texte du chapitre, jamais d'un lien avec un autre chapitre (ADR 0004).
+_Avoid_: statut, état
 
 **Flashback event**:
-Event raconté au chapitre t mais situé dans le passé de l'histoire. Signal pour l'état de l'histoire, jamais une cible de prédiction ni une vérité terrain.
+Event raconté au chapitre t mais situé dans le passé de l'histoire. Extrait et marqué `flashback: true`, c'est un signal pour l'état de l'histoire, jamais une cible de prédiction ni une vérité terrain. À ne pas confondre avec un Recall, qui est la présence d'un Character.
+_Avoid_: événement passé, backstory

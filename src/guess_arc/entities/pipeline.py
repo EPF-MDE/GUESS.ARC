@@ -2,8 +2,10 @@
 One Piece — extraction des Entities, du bronze à Registry(t) dans la gold.
 
 Gold (data/gold/entities/) : registry.jsonl (une ligne par Entity et par changement, datée par
-valid_from / valid_to), registry_quality.json (rapport qualité) et
-disguise_candidates.csv (Disguises possibles, à relire par un humain).
+valid_from / valid_to), chapter_context.jsonl (une ligne par chapitre : Scenes
+numérotées et Participants autorisés, pour l'extracteur d'Events),
+registry_quality.json (rapport qualité) et disguise_candidates.csv (Disguises
+possibles, à relire par un humain).
 
 Usage :
     python -m guess_arc.entities
@@ -21,7 +23,8 @@ from pathlib import Path
 from guess_arc import paths
 from guess_arc.ingestion.pipeline import load_bronze
 
-from .extraction import Disguise, DisguiseCandidate, Extraction, Reference, extract_entities
+from .extraction import (ChapterContext, Disguise, DisguiseCandidate, Extraction, Participant,
+                         Reference, Scene, extract_entities)
 from .wiki_categories import load_category_cache, update_category_cache
 
 
@@ -31,11 +34,34 @@ def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
     with registry_path.open("w", encoding="utf-8") as fh:
         for row in sorted(extraction.registry, key=lambda r: (r.valid_from, r.canonical_name)):
             fh.write(json.dumps(asdict(row), ensure_ascii=False) + "\n")
+    with (gold_dir / CHAPTER_CONTEXT).open("w", encoding="utf-8") as fh:
+        for t in sorted(extraction.chapter_contexts):
+            fh.write(json.dumps(asdict(extraction.chapter_context(t)), ensure_ascii=False) + "\n")
     (gold_dir / "registry_quality.json").write_text(
         json.dumps(asdict(extraction.quality), indent=2), encoding="utf-8"
     )
     write_disguise_candidates(extraction, gold_dir / "disguise_candidates.csv")
     return registry_path
+
+
+CHAPTER_CONTEXT = "chapter_context.jsonl"
+
+
+def read_chapter_contexts(path: Path) -> dict[int, ChapterContext]:
+    """chapter_context.jsonl -> contexte de chaque chapitre, sans relancer l'extraction."""
+    contexts = {}
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            row = json.loads(line)
+            contexts[row["chapter"]] = ChapterContext(
+                chapter=row["chapter"],
+                scenes=tuple(Scene(**s) for s in row["scenes"]),
+                participants=tuple(
+                    Participant(p["canonical_name"], p["entity_type"], tuple(p["aliases"]))
+                    for p in row["participants"]
+                ),
+            )
+    return contexts
 
 
 def write_disguise_candidates(extraction: Extraction, path: Path) -> None:
