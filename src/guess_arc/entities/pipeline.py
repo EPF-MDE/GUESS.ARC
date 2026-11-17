@@ -28,6 +28,9 @@ from .extraction import (ChapterContext, Disguise, DisguiseCandidate, Extraction
 from .wiki_categories import load_category_cache, update_category_cache
 
 
+CHAPTER_CONTEXT = "chapter_context.jsonl"
+
+
 def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
     gold_dir.mkdir(parents=True, exist_ok=True)
     registry_path = gold_dir / "registry.jsonl"
@@ -35,16 +38,13 @@ def write_gold(extraction: Extraction, gold_dir: Path) -> Path:
         for row in sorted(extraction.registry, key=lambda r: (r.valid_from, r.canonical_name)):
             fh.write(json.dumps(asdict(row), ensure_ascii=False) + "\n")
     with (gold_dir / CHAPTER_CONTEXT).open("w", encoding="utf-8") as fh:
-        for t in sorted(extraction.chapter_contexts):
-            fh.write(json.dumps(asdict(extraction.chapter_context(t)), ensure_ascii=False) + "\n")
+        for _, context in sorted(extraction.chapter_contexts.items()):
+            fh.write(json.dumps(asdict(context), ensure_ascii=False) + "\n")
     (gold_dir / "registry_quality.json").write_text(
         json.dumps(asdict(extraction.quality), indent=2), encoding="utf-8"
     )
     write_disguise_candidates(extraction, gold_dir / "disguise_candidates.csv")
     return registry_path
-
-
-CHAPTER_CONTEXT = "chapter_context.jsonl"
 
 
 def read_chapter_contexts(path: Path) -> dict[int, ChapterContext]:

@@ -192,8 +192,9 @@ class Participant:
 class ChapterContext:
     """Tout ce que l'extracteur d'Events sait du chapitre t.
 
-    participants : Entities ayant au moins une Mention dans le chapitre, plus
-    les Characters de son Cast, triés par Canonical name.
+    scenes : texte lu par le lecteur, sans cible de lien, note ni image.
+    participants : Entities ayant au moins une Mention dans ce texte, plus les
+    Characters de son Cast (Appearance seulement), triés par Canonical name.
     """
     chapter: int
     scenes: tuple[Scene, ...]
@@ -205,12 +206,13 @@ class Extraction:
     registry: list[RegistryRow]
     quality: QualityReport
     disguise_candidates: list[DisguiseCandidate]
-    chapter_contexts: dict[int, ChapterContext] = field(default_factory=dict)
+    chapter_contexts: dict[int, ChapterContext]
     # Pages parentes, sous-pages liées et entrées de catalogue dont les catégories
     # du wiki manquent au cache : à demander au wiki, puis à extraire de nouveau.
     pages_without_categories: frozenset[str] = frozenset()
 
     def chapter_context(self, t: int) -> ChapterContext:
+        """Contexte du chapitre t ; KeyError si t n'est pas dans le bronze extrait."""
         return self.chapter_contexts[t]
 
     def registry_at(self, t: int) -> list[RegistryRow]:
@@ -702,8 +704,12 @@ def _disguise_candidates(chapters: list[dict], resolve: Resolve,
     return sorted(candidates, key=lambda c: (-c.link_count, c.alias, c.canonical_name))
 
 
-# Liens qui ne s'affichent pas comme du texte dans la page.
-HIDDEN_LINK_PREFIXES = {"file", "image", "category"}
+# Liens qui ne s'affichent pas comme du texte dans la page, légende comprise (un
+# niveau de liens imbriqués : [[File:x.png|thumb|[[Luffy]] kicks Hody]]). Sous-ensemble
+# de NON_ARTICLE_PREFIXES : un lien Wikipédia s'affiche, lui ; [[:Category:X]] aussi.
+HIDDEN_LINK_RE = re.compile(
+    r"\[\[\s*(?:File|Image|Category)\s*:(?:[^\[\]]|\[\[[^\[\]]*\]\])*\]\]", re.I
+)
 # Notes de bas de page : elles citent souvent des volumes ou des SBS postérieurs
 # au chapitre (ADR 0002).
 REF_RE = re.compile(r"<ref\b[^>]*/>|<ref\b[^>]*>.*?</ref>", re.I | re.S)
@@ -713,23 +719,19 @@ BERRY_RE = re.compile(r"\{\{\s*[Bb]\s*\}\}")
 BARE_TEMPLATE_RE = re.compile(r"\{\{[^{}|]*\}\}")
 
 
+def _reader_prose(wikitext: str) -> str:
+    """Wikitexte d'une Scene sans ce que l'extracteur d'Events ne lit pas : notes,
+    images (légendes comprises) et catégories. Les autres liens restent."""
+    return HIDDEN_LINK_RE.sub("", REF_RE.sub("", wikitext))
+
+
 def _rendered_text(wikitext: str) -> str:
     """Wikitexte d'une Scene -> texte lu par le lecteur : chaque lien devient son
     texte affiché, sans sa cible ; images, catégories, notes, balises HTML et
     modèles de mise en page disparaissent, {{B}} devient le symbole du Berry."""
-    wikitext = REF_RE.sub("", wikitext)
-    wikitext = BARE_TEMPLATE_RE.sub("", BERRY_RE.sub("฿", wikitext))
+    wikitext = BARE_TEMPLATE_RE.sub("", BERRY_RE.sub("฿", _reader_prose(wikitext)))
     wikitext = HTML_TAG_RE.sub("", wikitext)
-
-    def render(m: re.Match) -> str:
-        target, text = m.group(1), m.group(2)
-        if target.lstrip(":").split(":", 1)[0].strip().lower() in HIDDEN_LINK_PREFIXES:
-            return ""
-        return target if text is None else text
-
-    # Une légende d'image peut contenir des liens : on rend de l'intérieur vers l'extérieur.
-    while (rendered := LINK_RE.sub(render, wikitext)) != wikitext:
-        wikitext = rendered
+    wikitext = LINK_RE.sub(lambda m: m.group(1) if m.group(2) is None else m.group(2), wikitext)
     # Une image ôtée en milieu de phrase laisse deux espaces.
     return re.sub(r"[ \t]{2,}", " ", WIKI_EMPHASIS_RE.sub("", wikitext)).strip()
 
@@ -737,13 +739,13 @@ def _rendered_text(wikitext: str) -> str:
 def _chapter_contexts(scenes: dict[int, list[_Scene]], mentions: list[_Mention],
                       cast: list[_CastEntry], registry: list[RegistryRow]
                       ) -> dict[int, ChapterContext]:
-    allowed: dict[int, set[str]] = {n: set() for n in scenes}
+    participant_names: dict[int, set[str]] = {n: set() for n in scenes}
     for m in mentions:
-        allowed[m.chapter].add(m.canonical_name)
+        participant_names[m.chapter].add(m.canonical_name)
     # Cast seulement : ni Recall, ni Cover appearance, ni en-tête de Group.
     for e in cast:
         if e.appearance:
-            allowed[e.chapter].add(e.canonical_name)
+            participant_names[e.chapter].add(e.canonical_name)
     rows_by_name: dict[str, list[RegistryRow]] = {}
     for row in registry:
         rows_by_name.setdefault(row.canonical_name, []).append(row)
@@ -760,7 +762,7 @@ def _chapter_contexts(scenes: dict[int, list[_Scene]], mentions: list[_Mention],
                          for i, scene in enumerate(scenes[t], start=1)),
             participants=tuple(participant(name, t) for name in sorted(names)),
         )
-        for t, names in allowed.items()
+        for t, names in participant_names.items()
     }
 
 
@@ -809,6 +811,20 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
             item = dataclasses.replace(item, canonical_name=item.alias, alias=None)
         return item
 
+    def links(scenes: list[_Scene]) -> list[_Mention]:
+        return [
+            m for s in scenes
+            for m in map(resolved, _mentions(s, link_target, reference.common_words))
+            if kept(m)
+        ]
+
+    def all_mentions(scenes_by_chapter: dict[int, list[_Scene]],
+                     linked: dict[int, list[_Mention]]) -> list[_Mention]:
+        return [m for ms in linked.values() for m in ms] + [
+            m for number, scenes in scenes_by_chapter.items()
+            for m in _alias_matches(number, scenes, linked[number], alias_first_use)
+        ]
+
     scenes_by_chapter = {}
     arcs = {}
     linked: dict[int, list[_Mention]] = {}
@@ -819,10 +835,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
         scenes_by_chapter[number] = scenes
         arc = ARC_RE.search(wikitext)
         arcs[number] = arc.group(1) if arc else "Unknown"
-        linked[number] = [
-            m for s in scenes for m in map(resolved, _mentions(s, link_target, reference.common_words))
-            if kept(m)
-        ]
+        linked[number] = links(scenes)
         cast += [e for e in map(resolved, _cast(number, section(wikitext, "Characters"), link_target))
                  if kept(e)]
 
@@ -832,10 +845,12 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
     # Un Disguise devient un Alias de son Canonical name à sa Revelation.
     for d in reference.disguises:
         alias_first_use.setdefault(d.canonical_name, {})[d.alias] = d.revelation
-    mentions = link_mentions + [
-        m for number, scenes in scenes_by_chapter.items()
-        for m in _alias_matches(number, scenes, linked[number], alias_first_use)
-    ]
+    mentions = all_mentions(scenes_by_chapter, linked)
+    # Participants : les mêmes Mentions, mais sur la seule prose lue par l'extracteur
+    # d'Events. Registry(t) garde toutes les Mentions, notes comprises.
+    prose = {n: [_Scene(n, _reader_prose(s.wikitext)) for s in scenes]
+             for n, scenes in scenes_by_chapter.items()}
+    prose_mentions = all_mentions(prose, {n: links(scenes) for n, scenes in prose.items()})
 
     # Une entrée prend le catalogue de ses liens (le premier par ordre alphabétique
     # si plusieurs catalogues la listent), et son type quand rien d'autre n'en donne.
@@ -890,7 +905,7 @@ def extract_entities(chapters: list[dict], reference: Reference) -> Extraction:
             ],
         ),
         disguise_candidates=_disguise_candidates(chapters, link_target, reference.common_words),
-        chapter_contexts=_chapter_contexts(scenes_by_chapter, mentions, cast, registry),
+        chapter_contexts=_chapter_contexts(scenes_by_chapter, prose_mentions, cast, registry),
         pages_without_categories=(parents | subpages | set(entry_catalogs))
         - set(reference.wiki_categories),
     )

@@ -1259,8 +1259,6 @@ class TestDisguiseCandidates(unittest.TestCase):
         self.assertEqual(self.extraction.disguise_candidates[0].alias, "Komurasaki")
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 def participants(extraction, t):
@@ -1352,3 +1350,15 @@ class TestChapterContext(unittest.TestCase):
             "Higuma boasts that he is a wanted criminal worth ฿8,000,000. People in snowy "
             "countries do not sleep because, if they fall asleep, they die. The tattoo reads 3D2Y."
         ))
+
+    def test_entity_named_only_in_a_footnote_or_image_caption_is_not_allowed(self):
+        # Le LLM ne lit pas les notes ni les légendes, souvent postérieures au chapitre.
+        extraction = extract_entities([bronze_record(134, (
+            "[[Marshall D. Teach|Teach]] never sleeps.<ref>[[Volume 96|Vol. 96]] SBS, "
+            "[[Kozuki Oden|Oden]]</ref> [[File:Teach.png|thumb|[[Jesus Burgess|Burgess]]]]"
+        ))], Reference())
+        self.assertEqual(participants(extraction, 134), {"Marshall D. Teach"})
+
+
+if __name__ == "__main__":
+    unittest.main()
