@@ -56,7 +56,7 @@ def test_call_returns_the_backend_structured_output(tmp_path):
 def test_output_that_does_not_match_the_schema_is_an_error(tmp_path, bad_output):
     client = LlmClient(FakeBackend(bad_output), cache_dir=tmp_path)
 
-    with pytest.raises(StructuredOutputError, match="chapter 93"):
+    with pytest.raises(StructuredOutputError, match="chapitre 93"):
         client.call(request())
 
 
@@ -103,7 +103,7 @@ def test_an_invalid_response_is_not_cached(tmp_path):
     {"prompt_version": ""},
 ])
 def test_cache_key_parts_must_be_safe_folder_names(tmp_path, unsafe):
-    with pytest.raises(ValueError, match="cache key"):
+    with pytest.raises(ValueError, match="clé du cache"):
         LlmClient(FakeBackend({"events": []}), cache_dir=tmp_path).call(request(**unsafe))
 
 
@@ -139,9 +139,18 @@ def test_an_unknown_provider_is_reported_with_the_known_ones(tmp_path):
         backend_from_config("extraction", config)
 
 
-def test_the_committed_config_names_a_model_for_each_task():
-    for task in ("discovery", "extraction"):
-        assert backend_from_config(task).model.startswith("anthropic:")
+def test_an_empty_model_is_reported_with_where_to_set_it(tmp_path):
+    config = write_config(tmp_path, extraction_model="")
+
+    with pytest.raises(ValueError, match=r"extraction_model est vide.*events\.json"):
+        backend_from_config("extraction", config)
+
+
+def test_the_committed_config_leaves_the_extraction_model_to_choose():
+    assert backend_from_config("discovery").model.startswith("anthropic:")
+    # Pas de défaut : le modèle d'extraction se choisit sur l'échantillon de validation (#114).
+    with pytest.raises(ValueError, match="extraction_model est vide"):
+        backend_from_config("extraction")
 
 
 class FakeAnthropicSdk:
@@ -179,7 +188,7 @@ def test_an_unfinished_anthropic_answer_is_an_error(tmp_path, stop_reason):
     sdk = FakeAnthropicSdk(text='{"events": [', stop_reason=stop_reason)
     client = LlmClient(AnthropicBackend("claude-opus-5-5", client=sdk), cache_dir=tmp_path)
 
-    with pytest.raises(StructuredOutputError, match=f"chapter 93.*{stop_reason}"):
+    with pytest.raises(StructuredOutputError, match=f"chapitre 93.*{stop_reason}"):
         client.call(request())
 
 
@@ -188,17 +197,23 @@ def test_an_anthropic_answer_without_text_is_an_error(tmp_path):
     sdk._message.content = [SimpleNamespace(type="thinking", thinking="")]
     client = LlmClient(AnthropicBackend("claude-opus-5-5", client=sdk), cache_dir=tmp_path)
 
-    with pytest.raises(StructuredOutputError, match="no text"):
+    with pytest.raises(StructuredOutputError, match="aucun bloc de texte"):
         client.call(request())
 
 
-def test_a_cached_answer_that_no_longer_matches_the_schema_is_an_error(tmp_path):
+@pytest.mark.parametrize("change", [
+    {"prompt": "Scene 1: Luffy and Nami ally against Arlong."},
+    {"schema": {**SCHEMA, "required": []}},
+])
+def test_a_cached_answer_for_another_prompt_or_schema_is_refused(tmp_path, change):
     LlmClient(FakeBackend({"events": ["fight"]}), cache_dir=tmp_path).call(request())
-    # Schéma changé sans changer la version du prompt : l'ancienne réponse ne doit pas passer.
-    new_schema = {**SCHEMA, "required": ["events", "scenes"]}
+    # Prompt ou schéma modifié sans changer la version du prompt : l'ancienne réponse ne doit pas
+    # être servie, et on ne paie pas non plus un nouvel appel en silence.
+    backend = FakeBackend({"events": ["alliance"]})
 
-    with pytest.raises(StructuredOutputError, match="prompt version"):
-        LlmClient(FakeBackend({}), cache_dir=tmp_path).call(request(schema=new_schema))
+    with pytest.raises(StructuredOutputError, match="ne correspond pas.*version du prompt"):
+        LlmClient(backend, cache_dir=tmp_path).call(request(**change))
+    assert backend.calls == 0
 
 
 def test_an_unknown_task_is_reported(tmp_path):

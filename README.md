@@ -185,7 +185,8 @@ Event type discovery and Event extraction call an LLM through one shared backend
 (`src/guess_arc/events/llm.py`). Each call sends a prompt and a JSON schema and gets
 back structured output that is checked against the schema: an answer that is not
 JSON, does not match the schema, or stopped early (refusal, `max_tokens`) raises
-`StructuredOutputError`. It is never accepted as is, and never cached.
+`StructuredOutputError`. It is never accepted as is, and never cached. Error
+messages are in French, like the rest of the pipeline.
 
 **Choosing the model.** The model of each task is set in `configs/events.json`, as
 `provider:model-name`:
@@ -193,15 +194,22 @@ JSON, does not match the schema, or stopped early (refusal, `max_tokens`) raises
 ```json
 {
   "discovery_model": "anthropic:claude-opus-5-5",
-  "extraction_model": "anthropic:claude-opus-5-5"
+  "extraction_model": ""
 }
 ```
+
+`extraction_model` has **no default**: running the extraction on the 1193 chapters
+costs too much to happen with a model nobody chose. The team picks it by comparing
+candidates on the validation sample (#114), then writes it here. While it is empty,
+asking for the extraction backend stops with an explicit message
+(`extraction_model est vide dans …/configs/events.json : y mettre le modèle choisi…`).
+`discovery_model` defaults to `anthropic:claude-opus-5-5`, the best model affordable
+for the ~30 discovery chapters.
 
 Switching model means editing this file, nothing else. Known providers: `anthropic`.
 Adding one (another API, a local model) means writing one adapter class with a
 `model` attribute and a `complete(prompt, schema) -> str` method, and adding it to
-`PROVIDERS` in `llm.py`; callers don't change. The default models are a placeholder:
-the team picks them by comparing candidates on the validation sample (#114).
+`PROVIDERS` in `llm.py`; callers don't change.
 
 **API keys** come from the environment, never from a committed file. For Anthropic,
 set `ANTHROPIC_API_KEY` in the shell that runs the pipeline:
@@ -224,7 +232,7 @@ named in the cache key.
 
 **Response cache.** Every validated answer is stored under `data/bronze/llm/`, like
 the raw wikitext (an external source we archive), one file per key
-(model, prompt version, taxonomy version, chapter):
+(model, Prompt version, Taxonomy version, chapter; see [CONTEXT.md](CONTEXT.md)):
 
 ```
 data/bronze/llm/<provider>/<model-name>/<prompt_version>/<taxonomy_version>/chapter_NNNN.json
@@ -232,11 +240,11 @@ data/bronze/llm/<provider>/<model-name>/<prompt_version>/<taxonomy_version>/chap
 
 A second run with the same key makes no network call. Changing any of the four
 parts (another model, a new prompt version, a new taxonomy version) makes a fresh
-call; the old answers stay on disk. The prompt text itself is not part of the key:
-**bump the prompt version whenever you change a prompt or schema**, otherwise the
-old answers are served. A cached answer is checked against the schema again when it
-is read, so a schema change without a new prompt version fails loudly instead of
-serving stale answers. The cache is never rewritten: like the rest of bronze, it is
+call; the old answers stay on disk. The prompt text and the schema are not part of
+the key, but each cached file stores their SHA-256 (`prompt_sha256`). If the prompt
+or the schema changed while the Prompt version did not, the cached answer is refused
+with `StructuredOutputError` (and no new call is made): **bump the Prompt version
+whenever you change a prompt or schema**. The cache is never rewritten: like the rest of bronze, it is
 append-only (ADR 0002); to get new answers, use a new version. `data/` is not
 committed, so each machine has its own cache: share it (copy the folder) rather than
 paying twice for the same calls.

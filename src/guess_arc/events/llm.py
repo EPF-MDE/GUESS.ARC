@@ -5,13 +5,16 @@
 - Un appel = un prompt + un schéma JSON ; la réponse est validée contre le schéma, sinon
   StructuredOutputError (jamais acceptée en silence, jamais mise en cache).
 - Température 0 partout où le fournisseur l'accepte (voir AnthropicBackend pour l'exception).
-- Cache des réponses par (modèle, version du prompt, version de la taxonomie, chapitre) dans
-  data/bronze/llm/ : un second run identique ne fait aucun appel réseau.
+- Cache des réponses par (modèle, Prompt version, version de la Taxonomy, chapitre) dans
+  data/bronze/llm/ : un second run identique ne fait aucun appel réseau. Chaque réponse garde
+  l'empreinte du prompt et du schéma : si l'un change sans nouvelle Prompt version, la réponse
+  en cache est refusée au lieu d'être servie.
 - FakeBackend : réponses écrites d'avance, pour les tests.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -26,7 +29,8 @@ EVENTS_CONFIG = paths.CONFIG_DIR / "events.json"
 
 
 class StructuredOutputError(ValueError):
-    """La réponse du modèle n'est pas du JSON conforme au schéma demandé."""
+    """Réponse inutilisable : pas du JSON, hors schéma, inachevée, ou en cache pour un autre
+    prompt ou schéma que ceux de la requête."""
 
 
 # Chaque partie de la clé devient un dossier du cache : lettres, chiffres, '.', '_' et '-' seulement.
@@ -37,7 +41,7 @@ def split_model(model: str) -> tuple[str, str]:
     """'anthropic:claude-opus-5-5' -> ('anthropic', 'claude-opus-5-5')."""
     provider, sep, name = model.partition(":")
     if not sep or not provider or not name:
-        raise ValueError(f"model {model!r} must be written 'provider:model-name'")
+        raise ValueError(f"modèle {model!r} : à écrire 'fournisseur:nom-du-modèle'")
     return provider, name
 
 
@@ -48,6 +52,12 @@ class LlmRequest:
     prompt_version: str
     taxonomy_version: str
     chapter: int
+
+    def fingerprint(self) -> str:
+        """Empreinte SHA-256 du prompt et du schéma, pour vérifier qu'une réponse en cache est la leur."""
+        payload = json.dumps({"prompt": self.prompt, "schema": self.schema},
+                             sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class Backend(Protocol):
@@ -85,12 +95,15 @@ class LlmClient:
         """La sortie structurée validée, depuis le cache si cette clé a déjà été appelée."""
         path = self.cache_path(request)
         if path.exists():
-            output = json.loads(path.read_text(encoding="utf-8"))["response"]
-            # Revalidée : un schéma changé sans nouvelle version du prompt ne passe pas en silence.
-            self._validate(output, request.schema,
-                           f"{self.backend.model}, chapter {request.chapter}: cached answer {path}",
-                           hint="; bump the prompt version after changing a prompt or schema")
-            return output
+            entry = json.loads(path.read_text(encoding="utf-8"))
+            if entry.get("prompt_sha256") != request.fingerprint():
+                # Ni servie (elle répond à un autre prompt) ni remplacée (le cache est append-only).
+                raise StructuredOutputError(
+                    f"{self._where(request)} : la réponse en cache {path} ne correspond pas au "
+                    f"prompt ou au schéma actuels ; changer la version du prompt "
+                    f"({request.prompt_version!r}) après toute modification du prompt ou du schéma"
+                )
+            return entry["response"]
         output = self._complete_and_validate(request)
         path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
@@ -98,6 +111,7 @@ class LlmClient:
             "prompt_version": request.prompt_version,
             "taxonomy_version": request.taxonomy_version,
             "chapter": request.chapter,
+            "prompt_sha256": request.fingerprint(),
             "response": output,
         }
         # Écrit à côté puis renommé : un run interrompu ne laisse pas de fichier tronqué en cache.
@@ -112,30 +126,29 @@ class LlmClient:
         parts = [provider, name, request.prompt_version, request.taxonomy_version]
         for part in parts:
             if not _SAFE_PART.fullmatch(part) or part.strip(".") == "":
-                raise ValueError(f"cache key part {part!r} is not a safe folder name")
+                raise ValueError(f"partie de la clé du cache {part!r} : pas un nom de dossier sûr")
         return self.cache_dir.joinpath(*parts, f"chapter_{request.chapter:04d}.json")
 
+    def _where(self, request: LlmRequest) -> str:
+        return f"{self.backend.model}, chapitre {request.chapter}"
+
     def _complete_and_validate(self, request: LlmRequest) -> dict:
-        where = f"{self.backend.model}, chapter {request.chapter}"
+        where = self._where(request)
         try:
             raw = self.backend.complete(request.prompt, request.schema)
         except StructuredOutputError as exc:
-            raise StructuredOutputError(f"{where}: {exc}") from exc
+            raise StructuredOutputError(f"{where} : {exc}") from exc
         try:
             output = json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise StructuredOutputError(f"{where}: response is not JSON ({exc})") from exc
-        self._validate(output, request.schema, where)
-        return output
-
-    @staticmethod
-    def _validate(output, schema: dict, where: str, hint: str = "") -> None:
+            raise StructuredOutputError(f"{where} : la réponse n'est pas du JSON ({exc})") from exc
         try:
-            jsonschema.validate(output, schema)
+            jsonschema.validate(output, request.schema)
         except jsonschema.ValidationError as exc:
             raise StructuredOutputError(
-                f"{where}: response does not match the schema ({exc.message}){hint}"
+                f"{where} : la réponse ne respecte pas le schéma ({exc.message})"
             ) from exc
+        return output
 
 
 class AnthropicBackend:
@@ -166,10 +179,10 @@ class AnthropicBackend:
             output_config={"format": {"type": "json_schema", "schema": schema}},
         )
         if message.stop_reason != "end_turn":
-            raise StructuredOutputError(f"answer stopped early (stop_reason {message.stop_reason!r})")
+            raise StructuredOutputError(f"réponse interrompue (stop_reason {message.stop_reason!r})")
         text = next((block.text for block in message.content if block.type == "text"), None)
         if text is None:
-            raise StructuredOutputError("answer has no text block")
+            raise StructuredOutputError("la réponse ne contient aucun bloc de texte")
         return text
 
 
@@ -182,8 +195,14 @@ def backend_from_config(task: str, config_path: Path = EVENTS_CONFIG) -> Backend
     config = json.loads(config_path.read_text(encoding="utf-8"))
     key = f"{task}_model"
     if key not in config:
-        raise ValueError(f"{config_path} has no {key!r}; it has {sorted(config)}")
+        raise ValueError(f"{config_path} n'a pas de réglage {key!r} ; réglages présents : {sorted(config)}")
+    if not config[key].strip():
+        # Pas de modèle par défaut : un run sur tout le corpus coûte cher, le choix doit être explicite.
+        raise ValueError(
+            f"{key} est vide dans {config_path} : y mettre le modèle choisi, au format "
+            f"'fournisseur:nom-du-modèle', par exemple 'anthropic:claude-opus-5-5' (voir le README)"
+        )
     provider, name = split_model(config[key])
     if provider not in PROVIDERS:
-        raise ValueError(f"unknown LLM provider {provider!r}; known providers: {sorted(PROVIDERS)}")
+        raise ValueError(f"fournisseur LLM inconnu {provider!r} ; fournisseurs connus : {sorted(PROVIDERS)}")
     return PROVIDERS[provider](name)

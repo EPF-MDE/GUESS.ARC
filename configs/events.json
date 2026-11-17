@@ -1,4 +1,4 @@
 {
   "discovery_model": "anthropic:claude-opus-5-5",
-  "extraction_model": "anthropic:claude-opus-5-5"
+  "extraction_model": ""
 }
