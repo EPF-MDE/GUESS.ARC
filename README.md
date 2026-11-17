@@ -162,6 +162,16 @@ Plain-language account of the step, its results, problems and decisions:
   Entity type, the catalog it is an entry of (`"Animal Species"` for Bananawani,
   `null` otherwise), the Aliases used so far, the first and last chapter seen and
   the number of Mentions up to t
+- `data/gold/entities/chapter_context.jsonl`: what the Event extractor knows about each
+  chapter t, one line per chapter, read back with
+  `guess_arc.entities.pipeline.read_chapter_contexts`. `scenes`: the Long Summary's
+  Scenes, numbered from 1, as the text a reader sees (link texts without their
+  targets, so a Disguise doesn't leak; no footnotes, images or markup).
+  `participants`: the allowed Participants, i.e. the Entities with a Mention in
+  that text plus the Characters with an Appearance in the CharTable, each with its
+  Entity type and its Aliases in Registry(t). Before its Revelation a Disguise is
+  its own Participant. Vocabulary and decision: [CONTEXT.md](CONTEXT.md) (Événements),
+  [ADR 0004](docs/adr/0004-one-event-per-chapter.md)
 - `data/gold/entities/registry_quality.json`: quality report (Scenes per chapter; recall
   proxy, overall and per arc: share of Characters with an Appearance in the
   CharTable that have at least one Mention in the chapter's Long Summary; Mentions

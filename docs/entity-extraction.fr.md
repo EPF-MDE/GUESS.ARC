@@ -455,6 +455,7 @@ pytest                                  # 127 tests, hors ligne
 | `reference/disguises.csv` | Disguises confirmés et leur chapitre de Revelation | humain |
 | `reference/wiki_categories.json` | Cache des catégories du wiki | pipeline |
 | `data/gold/entities/registry.jsonl` | Registry(t) | pipeline |
+| `data/gold/entities/chapter_context.jsonl` | Contexte de chaque chapitre pour l'extracteur d'Events : Scenes numérotées, Participants autorisés et leurs Aliases à t | pipeline |
 | `data/gold/entities/registry_quality.json` | Rapport de qualité | pipeline |
 | `data/gold/entities/disguise_candidates.csv` | Candidats Disguise à relire | pipeline |
 

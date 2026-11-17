@@ -5,6 +5,7 @@ import unittest
 from dataclasses import asdict
 
 from guess_arc.entities import Disguise, Reference, extract_entities
+from guess_arc.entities.pipeline import read_chapter_contexts, write_gold
 from guess_arc.entities.wiki_categories import load_category_cache, update_category_cache
 
 # Extrait réel du chapitre 552
@@ -1256,6 +1257,107 @@ class TestDisguiseCandidates(unittest.TestCase):
         self.assertEqual(counts, sorted(counts, reverse=True))
         # Komurasaki : CharTable du 909, Long Summary et note du 927, note du 929
         self.assertEqual(self.extraction.disguise_candidates[0].alias, "Komurasaki")
+
+
+
+
+def participants(extraction, t):
+    return {p.canonical_name for p in extraction.chapter_context(t).participants}
+
+
+class TestChapterContext(unittest.TestCase):
+    """Contexte du chapitre t pour l'extracteur d'Events : Scenes numérotées,
+    Participants autorisés et leurs Aliases valides à t."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.extraction = extract_entities([
+            bronze_record(1027, CH1027_LONG_SUMMARY, characters=CH1027_CHARACTERS),
+            bronze_record(1028, CH444_SCENE),
+        ], Reference())
+
+    def test_entity_mentioned_in_the_chapter_is_allowed(self):
+        # Oden n'est que nommé (Recall de Yamato et Momonosuke), absent de la CharTable.
+        self.assertIn("Kouzuki Oden", participants(self.extraction, 1027))
+
+    def test_entity_whose_first_mention_is_after_t_is_not_allowed(self):
+        self.assertNotIn("Thousand Sunny", participants(self.extraction, 1027))
+        self.assertIn("Thousand Sunny", participants(self.extraction, 1028))
+
+    def test_character_of_the_cast_never_named_in_the_long_summary_is_allowed(self):
+        self.assertIn("Roronoa Zoro", participants(self.extraction, 1027))
+
+    def test_char_table_presence_without_appearance_is_not_allowed(self):
+        names = participants(self.extraction, 1027)
+        self.assertNotIn("Buggy", names)            # (cover)
+        self.assertNotIn("Kin'emon", names)         # (flashback)
+        self.assertNotIn("Beasts Pirates", names)   # en-tête de faction
+        self.assertIn("Gol D. Roger", names)        # (cover), mais nommé dans le Long Summary
+
+    def test_disguise_is_its_own_participant_until_its_revelation(self):
+        extraction = extract_entities([
+            bronze_record(919, CH919_KYOSHIRO, characters=CH919_CHARACTERS),
+            bronze_record(980, CH919_SCENE),
+        ], Reference(disguises=(KYOSHIRO,)))
+        before = {p.canonical_name: p for p in extraction.chapter_context(919).participants}
+        self.assertIn("Kyoshiro", before)
+        self.assertNotIn("Denjiro", before)
+        after = {p.canonical_name: p for p in extraction.chapter_context(980).participants}
+        self.assertNotIn("Kyoshiro", after)
+        self.assertIn("Kyoshiro", after["Denjiro"].aliases)
+
+    def test_scenes_are_numbered_in_long_summary_order(self):
+        scenes = self.extraction.chapter_context(1027).scenes
+        self.assertEqual([s.number for s in scenes], [1, 2])
+        self.assertTrue(scenes[0].text.startswith("Following his victory, Nekomamushi covers"))
+
+    def test_scene_text_shows_link_texts_only(self):
+        # Pas de cible de lien : [[Denjiro|Kyoshiro]] trahirait le Disguise (ADR 0002).
+        extraction = extract_entities([bronze_record(919, CH919_SCENE)],
+                                      Reference(disguises=(KYOSHIRO,)))
+        self.assertEqual(extraction.chapter_context(919).scenes[0].text, (
+            "Meanwhile, the money changer Kyoshiro, while intoxicated, starts to laugh as "
+            "he recalls a situation that Orochi has found himself in."
+        ))
+        text = self.extraction.chapter_context(1027).scenes[1].text
+        self.assertIn("watch in awe at Luffy and Kaidou's clash", text)
+
+    def test_scene_text_drops_emphasis_and_inline_images(self):
+        extraction = extract_entities([bronze_record(
+            1, "[[File:Gear 5.png|thumb|Luffy.]]Luffy declares his new form "
+               "\"[[Gomu Gomu no Mi/Gear 5 Techniques|'''Gear 5''']]\".",
+        )], Reference())
+        self.assertEqual(extraction.chapter_context(1).scenes[0].text,
+                         'Luffy declares his new form "Gear 5".')
+
+    def test_gold_chapter_context_reads_back_without_re_extracting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_gold(self.extraction, pathlib.Path(tmp))
+            contexts = read_chapter_contexts(pathlib.Path(tmp) / "chapter_context.jsonl")
+        self.assertEqual(contexts, self.extraction.chapter_contexts)
+        self.assertIn("Roronoa Zoro", {p.canonical_name for p in contexts[1027].participants})
+
+    def test_scene_text_drops_footnotes_and_renders_berries(self):
+        # Extraits réels des ch. 1 et 134 : la note du 134 cite le volume 96, un fait
+        # que le lecteur du chapitre 134 ne connaît pas (ADR 0002).
+        extraction = extract_entities([bronze_record(134, (
+            "Higuma boasts that he is a wanted criminal worth {{B}}8,000,000.{{-}} "
+            "People in snowy countries do not sleep<ref name=\":0\">One Piece Manga and "
+            "Anime — [[Volume 96|Vol. 96]] [[Chapter 966]] (p. 8)</ref> because, if they "
+            "fall asleep, they die.<ref name=\":0\" /> The tattoo reads <s>3D</s>2Y."
+        ))], Reference())
+        self.assertEqual(extraction.chapter_context(134).scenes[0].text, (
+            "Higuma boasts that he is a wanted criminal worth ฿8,000,000. People in snowy "
+            "countries do not sleep because, if they fall asleep, they die. The tattoo reads 3D2Y."
+        ))
+
+    def test_entity_named_only_in_a_footnote_or_image_caption_is_not_allowed(self):
+        # Le LLM ne lit pas les notes ni les légendes, souvent postérieures au chapitre.
+        extraction = extract_entities([bronze_record(134, (
+            "[[Marshall D. Teach|Teach]] never sleeps.<ref>[[Volume 96|Vol. 96]] SBS, "
+            "[[Kozuki Oden|Oden]]</ref> [[File:Teach.png|thumb|[[Jesus Burgess|Burgess]]]]"
+        ))], Reference())
+        self.assertEqual(participants(extraction, 134), {"Marshall D. Teach"})
 
 
 if __name__ == "__main__":
