@@ -20,10 +20,10 @@ src/guess_arc/
 │   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
 │   ├── validation.py     # bronze / silver format contract
 │   └── pipeline.py       # orchestration, incremental state, CLI
-└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
-    ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
-    ├── pipeline.py       # reads bronze, writes gold, CLI
-    └── common_words.txt  # common words: link text starting with one of them is not an Alias
+├── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
+│   ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
+│   ├── pipeline.py       # reads bronze, writes gold, CLI
+│   └── common_words.txt  # common words: link text starting with one of them is not an Alias
 └── events/               # Event type discovery and Event extraction (in progress)
     └── llm.py            # pluggable LLM backend: config, schema validation, response cache
 configs/
@@ -218,8 +218,9 @@ itself, so load it into the environment first.
 **Temperature.** Adapters send temperature 0 when their API accepts it. The
 Anthropic API no longer does: since API version `2026-10-21`, any `temperature`,
 `top_p` or `top_k` is rejected (HTTP 400) on every model, so the Anthropic adapter
-sends none. Reproducibility comes from the cache below. Server-side fallback to
-another model is off, so an answer always comes from the model named in the cache key.
+sends none. Reproducibility comes from the cache below. The adapter requests no
+server-side fallback to another model, so an answer always comes from the model
+named in the cache key.
 
 **Response cache.** Every validated answer is stored under `data/bronze/llm/`, like
 the raw wikitext (an external source we archive), one file per key
@@ -233,7 +234,12 @@ A second run with the same key makes no network call. Changing any of the four
 parts (another model, a new prompt version, a new taxonomy version) makes a fresh
 call; the old answers stay on disk. The prompt text itself is not part of the key:
 **bump the prompt version whenever you change a prompt or schema**, otherwise the
-old answers are served. Delete a folder to force new calls.
+old answers are served. A cached answer is checked against the schema again when it
+is read, so a schema change without a new prompt version fails loudly instead of
+serving stale answers. The cache is never rewritten: like the rest of bronze, it is
+append-only (ADR 0002); to get new answers, use a new version. `data/` is not
+committed, so each machine has its own cache: share it (copy the folder) rather than
+paying twice for the same calls.
 
 ## Quality checks
 

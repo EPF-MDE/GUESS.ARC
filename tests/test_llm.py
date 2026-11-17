@@ -181,3 +181,28 @@ def test_an_unfinished_anthropic_answer_is_an_error(tmp_path, stop_reason):
 
     with pytest.raises(StructuredOutputError, match=f"chapter 93.*{stop_reason}"):
         client.call(request())
+
+
+def test_an_anthropic_answer_without_text_is_an_error(tmp_path):
+    sdk = FakeAnthropicSdk()
+    sdk._message.content = [SimpleNamespace(type="thinking", thinking="")]
+    client = LlmClient(AnthropicBackend("claude-opus-5-5", client=sdk), cache_dir=tmp_path)
+
+    with pytest.raises(StructuredOutputError, match="no text"):
+        client.call(request())
+
+
+def test_a_cached_answer_that_no_longer_matches_the_schema_is_an_error(tmp_path):
+    LlmClient(FakeBackend({"events": ["fight"]}), cache_dir=tmp_path).call(request())
+    # Schéma changé sans changer la version du prompt : l'ancienne réponse ne doit pas passer.
+    new_schema = {**SCHEMA, "required": ["events", "scenes"]}
+
+    with pytest.raises(StructuredOutputError, match="prompt version"):
+        LlmClient(FakeBackend({}), cache_dir=tmp_path).call(request(schema=new_schema))
+
+
+def test_an_unknown_task_is_reported(tmp_path):
+    config = write_config(tmp_path, extraction_model="anthropic:claude-opus-5-5")
+
+    with pytest.raises(ValueError, match="extrction_model"):
+        backend_from_config("extrction", config)

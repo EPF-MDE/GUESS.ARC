@@ -85,8 +85,13 @@ class LlmClient:
         """La sortie structurée validée, depuis le cache si cette clé a déjà été appelée."""
         path = self.cache_path(request)
         if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))["response"]
-        output = self._complete(request)
+            output = json.loads(path.read_text(encoding="utf-8"))["response"]
+            # Revalidée : un schéma changé sans nouvelle version du prompt ne passe pas en silence.
+            self._validate(output, request.schema,
+                           f"{self.backend.model}, chapter {request.chapter}: cached answer {path}",
+                           hint="; bump the prompt version after changing a prompt or schema")
+            return output
+        output = self._complete_and_validate(request)
         path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "model": self.backend.model,
@@ -95,7 +100,10 @@ class LlmClient:
             "chapter": request.chapter,
             "response": output,
         }
-        path.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
+        # Écrit à côté puis renommé : un run interrompu ne laisse pas de fichier tronqué en cache.
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(entry, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
         return output
 
     def cache_path(self, request: LlmRequest) -> Path:
@@ -107,7 +115,7 @@ class LlmClient:
                 raise ValueError(f"cache key part {part!r} is not a safe folder name")
         return self.cache_dir.joinpath(*parts, f"chapter_{request.chapter:04d}.json")
 
-    def _complete(self, request: LlmRequest) -> dict:
+    def _complete_and_validate(self, request: LlmRequest) -> dict:
         where = f"{self.backend.model}, chapter {request.chapter}"
         try:
             raw = self.backend.complete(request.prompt, request.schema)
@@ -117,11 +125,17 @@ class LlmClient:
             output = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise StructuredOutputError(f"{where}: response is not JSON ({exc})") from exc
-        try:
-            jsonschema.validate(output, request.schema)
-        except jsonschema.ValidationError as exc:
-            raise StructuredOutputError(f"{where}: response does not match the schema ({exc.message})") from exc
+        self._validate(output, request.schema, where)
         return output
+
+    @staticmethod
+    def _validate(output, schema: dict, where: str, hint: str = "") -> None:
+        try:
+            jsonschema.validate(output, schema)
+        except jsonschema.ValidationError as exc:
+            raise StructuredOutputError(
+                f"{where}: response does not match the schema ({exc.message}){hint}"
+            ) from exc
 
 
 class AnthropicBackend:
@@ -129,8 +143,8 @@ class AnthropicBackend:
 
     Pas de `temperature` : depuis la version d'API 2026-10-21, l'API Anthropic refuse tout
     paramètre d'échantillonnage (erreur 400), sur tous les modèles. La reproductibilité vient
-    du cache de LlmClient. Pas de repli (*fallback*) vers un autre modèle non plus : la réponse
-    doit venir du modèle nommé dans la clé du cache.
+    du cache de LlmClient. Aucun repli (*fallback*) vers un autre modèle n'est demandé : la
+    réponse doit venir du modèle nommé dans la clé du cache.
     """
 
     MAX_TOKENS = 16000
@@ -153,7 +167,10 @@ class AnthropicBackend:
         )
         if message.stop_reason != "end_turn":
             raise StructuredOutputError(f"answer stopped early (stop_reason {message.stop_reason!r})")
-        return next(block.text for block in message.content if block.type == "text")
+        text = next((block.text for block in message.content if block.type == "text"), None)
+        if text is None:
+            raise StructuredOutputError("answer has no text block")
+        return text
 
 
 # Un fournisseur de plus = un adaptateur de plus ici, sans toucher aux appelants.
@@ -163,7 +180,10 @@ PROVIDERS = {"anthropic": AnthropicBackend}
 def backend_from_config(task: str, config_path: Path = EVENTS_CONFIG) -> Backend:
     """Le backend du modèle que la config donne à `task` ('discovery' ou 'extraction')."""
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    provider, name = split_model(config[f"{task}_model"])
+    key = f"{task}_model"
+    if key not in config:
+        raise ValueError(f"{config_path} has no {key!r}; it has {sorted(config)}")
+    provider, name = split_model(config[key])
     if provider not in PROVIDERS:
         raise ValueError(f"unknown LLM provider {provider!r}; known providers: {sorted(PROVIDERS)}")
     return PROVIDERS[provider](name)
