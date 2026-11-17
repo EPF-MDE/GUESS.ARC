@@ -227,6 +227,19 @@ class VectorisationTest(SilverTestCase):
 
         self.assertEqual(sorted(emb), [1])
 
+    def test_skipped_chapters_are_stored_with_their_reason_and_have_no_chapter_embedding(self):
+        emb = self.embeddings([chapter(1, LONG_2), chapter(2, LONG_7, complete=False), chapter(4, "")])
+
+        self.assertEqual(emb.skipped, {2: "complete: false", 4: "Long Summary vide"})
+        self.assertEqual(sorted(emb), [1])
+        # Pas de vecteur nul en guise de marqueur : chaque Chapter embedding stocké a une norme de 1.
+        np.testing.assert_allclose([np.linalg.norm(v) for v in emb.values()], 1.0, rtol=1e-5)
+
+    def test_without_skipped_chapter_the_loader_gives_an_empty_mapping(self):
+        emb = self.embeddings([chapter(1, LONG_2)])
+
+        self.assertEqual(emb.skipped, {})
+
     def test_revision_ids_and_metadata_are_stored_and_read_back(self):
         before = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
         emb = self.embeddings([chapter(10, LONG_10), chapter(2, LONG_2, revision_id=42)])
@@ -395,6 +408,21 @@ class CorruptDatasetTest(SilverTestCase):
         "modèle en tableau 1-D": dict(model=np.array(["a", "b"])),
         "chapitres 2-D": dict(chapters=np.array([[2, 10]], dtype=np.int64)),
         "flux compressé abîmé": damage_compressed_stream,
+        "chapitres sautés manquants": dict(skipped_chapters=None),
+        "raisons des chapitres sautés manquantes": dict(skipped_reasons=None),
+        "chapitres sautés et raisons désalignés": dict(
+            skipped_chapters=np.array([3, 4], dtype=np.int64), skipped_reasons=np.array(["complete: false"])),
+        "chapitre sauté en double": dict(
+            skipped_chapters=np.array([3, 3], dtype=np.int64),
+            skipped_reasons=np.array(["complete: false", "Long Summary vide"])),
+        "chapitre sauté aussi vectorisé": dict(
+            skipped_chapters=np.array([2], dtype=np.int64), skipped_reasons=np.array(["complete: false"])),
+        "chapitres sautés en chaînes": dict(
+            skipped_chapters=np.array(["3"]), skipped_reasons=np.array(["complete: false"])),
+        "raisons non textuelles": dict(
+            skipped_chapters=np.array([3], dtype=np.int64), skipped_reasons=np.array([1], dtype=np.int64)),
+        "chapitres sautés 2-D": dict(
+            skipped_chapters=np.array([[3]], dtype=np.int64), skipped_reasons=np.array([["complete: false"]])),
     }
 
     def apply(self, name: str) -> None:
@@ -493,6 +521,20 @@ class IncrementalUpdateTest(SilverTestCase):
         self.assertEqual(encoder.calls, [])
         self.assertEqual(sorted(emb), [2, 10])
         self.assertEqual(result.skipped, {7: "complete: false"})
+        self.assertEqual(emb.skipped, {7: "complete: false"})
+
+    def test_skipped_chapter_that_becomes_complete_is_vectorised_and_no_longer_skipped(self):
+        self.write(chapter(7, LONG_7, complete=False, revision_id=6000))
+        self.rerun()
+        self.write(chapter(7, LONG_7, revision_id=6001))
+
+        encoder, result, emb = self.rerun()
+
+        self.assertEqual(sorted(encoder.seen), sorted(LONG_7.split("\n\n")))
+        self.assertEqual((result.vectorised, result.kept), ([7], [2, 10]))
+        self.assertEqual(result.skipped, {})
+        self.assertEqual(emb.skipped, {})
+        self.assertEqual(emb.revision_ids[7], 6001)
 
     def test_chapter_removed_from_the_silver_leaves_the_dataset(self):
         (paths.silver_dir(self.data_dir) / "chapter_0007.md").unlink()
@@ -743,6 +785,21 @@ class CliTest(unittest.TestCase):
         self.assertIn("chapter_embeddings.npz", output)
         self.assertIn("embeddings_quality.json", output)
 
+    def test_warns_with_the_number_and_list_of_skipped_chapters(self):
+        write_markdown(chapter(4, ""), paths.silver_dir(self.data_dir))
+
+        output = self.main("--data-dir", str(self.data_dir))
+
+        warning = [line for line in output.splitlines() if line.startswith("AVERTISSEMENT")]
+        self.assertEqual(warning, ["AVERTISSEMENT : 2 chapitres sautés : 4 (Long Summary vide), 7 (complete: false)"])
+
+    def test_no_warning_without_skipped_chapter(self):
+        (paths.silver_dir(self.data_dir) / "chapter_0007.md").unlink()
+
+        output = self.main("--data-dir", str(self.data_dir))
+
+        self.assertNotIn("AVERTISSEMENT", output)
+
     def test_second_run_reports_kept_chapters(self):
         self.main("--data-dir", str(self.data_dir))
         output = self.main("--data-dir", str(self.data_dir))
@@ -876,6 +933,10 @@ class RealSilverTest(unittest.TestCase):
     def setUpClass(cls):
         chapters = [read_chapter(p) for p in paths.silver_dir().glob("chapter_*.md")]
         cls.usable = {c.number: c.complete and bool(c.long_summary) for c in chapters}
+        cls.skipped_reasons = {
+            c.number: "complete: false" if not c.complete else "Long Summary vide"
+            for c in chapters if not cls.usable[c.number]
+        }
 
     def complete_chapters(self) -> set[int]:
         """Les chapitres `complete: true` dont le Long Summary n'est pas vide."""
@@ -897,6 +958,7 @@ class RealSilverTest(unittest.TestCase):
 
         emb = load_chapter_embeddings(data_dir)
         self.assertEqual(set(emb), self.complete_chapters())
+        self.assertEqual(emb.skipped, self.skipped_reasons)
         self.assertEqual(unexplained_gaps(emb, self.skipped_chapters()), [],
                          "trous dans la suite des chapitres (absents de la silver)")
         matrix = np.stack(list(emb.values()))
@@ -909,6 +971,7 @@ class RealSilverTest(unittest.TestCase):
         emb = load_chapter_embeddings()
 
         self.assertEqual(set(emb), self.complete_chapters())
+        self.assertEqual(emb.skipped, self.skipped_reasons)
         self.assertEqual(unexplained_gaps(emb, self.skipped_chapters()), [],
                          "trous dans la suite des chapitres (absents de la silver)")
         matrix = np.stack(list(emb.values()))

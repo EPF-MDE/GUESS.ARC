@@ -218,16 +218,19 @@ later runs work offline. Each Scene of the Long Summary is encoded;
 the Chapter embedding is their mean weighted by token count, L2-normalised
 (dimension 384 for `bge-small-en-v1.5`). An unchanged chapter keeps its Chapter embedding
 without calling the encoder; a model change in `.env` re-encodes everything. The
-run ends with the number of chapters vectorised, kept and skipped
-(`complete: false` or empty Long Summary: no entry).
+run ends with the number of chapters vectorised, kept and skipped, and a
+visible `AVERTISSEMENT` listing each skipped chapter with its reason
+(`complete: false` or empty Long Summary: no row in the matrix).
 A missing `EMBEDDING_MODEL` or a missing extra stops the run with an explicit
 message, and nothing is written.
 
 - `data/gold/vector/chapter_embeddings.npz`: `chapters`, `revision_ids`,
-  `embeddings` (N × d, row i is chapter `chapters[i]`) and the metadata (model,
-  dimension, pooling, date). Read it with
+  `embeddings` (N × d, row i is chapter `chapters[i]`), `skipped_chapters` and
+  `skipped_reasons` (chapters without a Chapter embedding, and why) and the
+  metadata (model, dimension, pooling, date). Read it with
   `guess_arc.vectorisation.load_chapter_embeddings()`, which returns
-  `{chapter: vector}`.
+  `{chapter: Chapter embedding}`, with `.skipped` (`{chapter: reason}`),
+  `.revision_ids` and `.metadata`.
 - `data/gold/vector/embeddings_quality.json`: quality report, rewritten on every
   run (chapters vectorised, kept and skipped with their reason; dimension, NaN
   count, min and max norm; semantic coherence: mean cosine similarity between

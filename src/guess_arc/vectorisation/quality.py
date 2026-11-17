@@ -74,11 +74,11 @@ def quality_report(
     embeddings: ChapterEmbeddings,
     arcs: dict[int, str],
     kept: list[int],
-    skipped: dict[int, str],
 ) -> dict:
     """Le rapport sur le dataset tel qu'écrit. Ses chapitres sont les `kept`,
     repris du dataset précédent, et les vectorisés à cette exécution ; `arcs`
-    donne l'arc silver de chacun."""
+    donne l'arc silver de chacun. Les chapitres sautés et leurs raisons sont
+    ceux du dataset."""
     chapters = sorted(embeddings)
     matrix = np.array([embeddings[c] for c in chapters], dtype=np.float64).reshape(
         len(chapters), embeddings.metadata.dimension
@@ -92,7 +92,7 @@ def quality_report(
             "total": len(chapters),
             "vectorised": sorted(set(chapters) - set(kept)),
             "kept": sorted(kept),
-            "skipped": {str(c): why for c, why in sorted(skipped.items())},
+            "skipped": {str(c): why for c, why in sorted(embeddings.skipped.items())},
         },
         "dimension": embeddings.metadata.dimension,
         "nan_count": int(np.isnan(matrix).sum()),

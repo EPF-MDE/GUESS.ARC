@@ -177,8 +177,9 @@ def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult
     (re)vectorisés. Tout est recalculé si `rebuild`, si le dataset précédent est
     corrompu, si le modèle de l'encodeur diffère de celui du dataset, ou si
     l'encodeur rend désormais des vecteurs d'une autre dimension. Un chapitre
-    `complete: false`, sans Scene, ou absent de la silver, n'a aucune entrée
-    dans le dataset.
+    `complete: false` ou sans Scene n'a pas de Chapter embedding : il est
+    listé dans les chapitres sautés du dataset, avec sa raison. Un chapitre
+    absent de la silver n'a aucune entrée dans le dataset.
     """
     silver = [read_chapter(path) for path in sorted(paths.silver_dir(data_dir).glob("chapter_*.md"))]
     previous, rebuild_reason = _previous_dataset(data_dir, encoder, rebuild)
@@ -208,9 +209,9 @@ def run(data_dir: Path, encoder: Encoder, *, rebuild: bool = False) -> RunResult
         pooling=POOLING,
         created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     )
-    dataset = ChapterEmbeddings(update.embeddings, update.revision_ids, metadata)
+    dataset = ChapterEmbeddings(update.embeddings, update.revision_ids, metadata, skipped=update.skipped)
     arcs = {chapter.number: chapter.arc for chapter in silver}
-    report = quality_report(dataset, arcs, kept=update.kept, skipped=update.skipped)
+    report = quality_report(dataset, arcs, kept=update.kept)
     target, quality_target = dataset_path(data_dir), report_path(data_dir)
     write_dataset(target, dataset)
     write_report(quality_target, report)
@@ -286,7 +287,8 @@ def main(
           f"sautés : {len(result.skipped)} "
           f"-> {result.path}")
     if result.skipped:
-        print("sautés : " + ", ".join(f"{c} ({why})" for c, why in sorted(result.skipped.items())))
+        listed = ", ".join(f"{c} ({why})" for c, why in sorted(result.skipped.items()))
+        print(f"AVERTISSEMENT : {len(result.skipped)} chapitres sautés : {listed}")
     print(f"rapport qualité -> {result.quality_path}")
 
 

@@ -77,6 +77,8 @@ revision_ids = [ ...,  ...,  ..., ...,  ...]     # int, N : revision_id de la si
 embeddings   = [[0.12, -0.40, ...],              # float32, N × 384
                 [0.03,  0.91, ...],              # ligne i ↔ chapitre chapters[i]
                 ...]
+skipped_chapters = [1196]                        # int, M chapitres sans Chapter embedding
+skipped_reasons  = ["complete: false"]           # texte, M : raison du saut, même indice
 + métadonnées : modèle, dimension, méthode de pooling, date de génération
 ```
 
@@ -87,15 +89,16 @@ Pour ne pas manipuler d'indices, le module fournit un chargeur :
 ```python
 from guess_arc.vectorisation import load_chapter_embeddings
 
-emb = load_chapter_embeddings()   # dict[int, np.ndarray] : {1: vecteur, 2: vecteur, ...}
+emb = load_chapter_embeddings()   # dict[int, np.ndarray] : {1: Chapter embedding, 2: Chapter embedding, ...}
 emb[500].shape                    # (384,)
+emb.skipped                       # {1196: "complete: false"} : chapitres sautés et raison
 ```
 
 La Fusion joint ensuite les étapes **par numéro de chapitre** : `X[t] = concat(emb[t], events[t], ...)`.
 
 Pourquoi un fichier unique plutôt qu'un fichier par chapitre : écriture atomique (pas de désynchronisation entre les vecteurs et leurs métadonnées), un seul `np.load` pour le GRU, et le fichier entier ne pèse que ~2 Mo (1 200 × 384 × 4 octets).
 
-**Chapitres absents.** Un chapitre marqué `complete: false` dans la silver (résumé trop court, repassé la semaine suivante par l'ingestion) n'est pas vectorisé : il n'a pas d'entrée dans le dataset. La vectorisation ne comble aucun trou. Le traitement des trous dans la séquence (vecteur nul, masque, saut) est une décision de l'étape de Fusion.
+**Chapitres sautés.** Un chapitre marqué `complete: false` dans la silver (résumé trop court, repassé la semaine suivante par l'ingestion) ou dont le Long Summary est vide n'est pas vectorisé : il n'a pas de ligne dans `embeddings`, mais il est listé dans `skipped_chapters` avec sa raison (`complete: false`, `Long Summary vide`) dans `skipped_reasons`. Le chargeur l'expose dans `emb.skipped`, la commande affiche un `AVERTISSEMENT` avec le nombre et la liste des chapitres sautés, et le rapport qualité les liste aussi. La matrice ne contient aucune ligne de zéros : chaque Chapter embedding stocké a une norme de 1. La vectorisation ne comble aucun trou. Le traitement des trous dans la séquence (vecteur nul accompagné d'un masque, saut) est une décision de l'étape de Fusion, au moment de construire X(t). Un chapitre sauté n'a pas de `revision_id` stocké : il est vectorisé au premier run où il devient utilisable, et sort alors des chapitres sautés. Un dataset écrit avant l'ajout de `skipped_chapters` et `skipped_reasons` n'a pas ces tableaux : il est traité comme corrompu et entièrement recalculé au premier run.
 
 ## 7. Mise à jour incrémentale
 
@@ -105,7 +108,7 @@ Comme l'ingestion, la vectorisation tourne chaque semaine. Par défaut, `run` pa
 - un chapitre inchangé est conservé tel quel, avec le même Chapter embedding, sans appel à l'encodeur ;
 - un chapitre devenu `complete: false`, ou disparu de la silver, est retiré du dataset ;
 - si le modèle configuré (ou la méthode de pooling) diffère de celui du dataset, tout est recalculé : des vecteurs de deux modèles différents ne sont pas comparables ;
-- si le dataset existant est corrompu, tout est recalculé. `dataset_problem` (dans `dataset.py`) décrit le problème au lieu de lever une exception : tableau manquant, tableau d'une forme ou d'un type inattendu (dimension qui n'est pas un entier scalaire, chapitres ou `revision_ids` qui ne sont pas des entiers 1-D, matrice qui n'est pas 2-D de flottants), lignes désalignées avec `chapters`, dimension différente des métadonnées, chapitre en double, NaN, norme différente de 1. Le chargeur transforme ce problème, comme une archive illisible, en `CorruptDatasetError` qui nomme `--rebuild`, et `run` en fait une raison de recalcul complet ;
+- si le dataset existant est corrompu, tout est recalculé. `dataset_problem` (dans `dataset.py`) décrit le problème au lieu de lever une exception : tableau manquant, tableau d'une forme ou d'un type inattendu (dimension qui n'est pas un entier scalaire, chapitres ou `revision_ids` qui ne sont pas des entiers 1-D, matrice qui n'est pas 2-D de flottants), lignes désalignées avec `chapters`, dimension différente des métadonnées, chapitre en double, NaN, norme différente de 1, chapitres sautés et raisons désalignés, chapitre sauté en double ou aussi vectorisé. Le chargeur transforme ce problème, comme une archive illisible, en `CorruptDatasetError` qui nomme `--rebuild`, et `run` en fait une raison de recalcul complet ;
 - si l'encodeur rend des vecteurs d'une autre dimension sous le même nom de modèle, tout est recalculé plutôt que de mélanger deux dimensions. Les chapitres déjà encodés à cette exécution ne repassent pas par l'encodeur ;
 - `run(..., rebuild=True)` et l'option `--rebuild` de la CLI forcent le recalcul complet. Il faut l'utiliser après tout changement du découpage (Scenes, Chunks) qui ne change ni le modèle ni le nom du pooling : un chapitre n'est « modifié » que si son `revision_id` change.
 
