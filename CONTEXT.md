@@ -2,6 +2,12 @@
 
 Prédiction des Events du chapitre n+1 de *One Piece* à partir des chapitres 1 à n (texte, Events, graphe de connaissances temporel).
 
+## Récit
+
+**Arc**:
+Collection de chapitres connectés entre eux, qui racontent une histoire complète avec une intrigue, des enjeux et un dénouement propres (Arlong Park Arc, Wano Country Arc). Chaque chapitre appartient à un seul Arc, lu dans le front-matter silver.
+_Avoid_: saga, partie
+
 ## Apparitions
 
 **Appearance**:
@@ -22,6 +28,16 @@ _Avoid_: panier, basket, tags du chapitre
 **Scene**:
 Paragraphe du Long Summary d'un chapitre. Unité de lieu et d'action dans le texte.
 _Avoid_: paragraphe, passage
+
+## Représentation du texte
+
+**Chapter embedding**:
+Vecteur de taille fixe qui représente le sens du Long Summary d'un chapitre, produit par un encodeur pré-entraîné gelé. Il ne dépend que du texte du chapitre t, jamais d'un autre chapitre.
+_Avoid_: vecteur (comme synonyme de Chapter embedding ; le mot reste correct pour la notion mathématique), encoding, représentation
+
+**Chunk**:
+Texte encodé en un seul vecteur pour former le Chapter embedding : une Scene entière, ou, si elle dépasse la fenêtre de l'encodeur, l'une des fenêtres qui se chevauchent et la découpent.
+_Avoid_: morceau, segment, passage
 
 ## Entités
 

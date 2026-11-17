@@ -20,10 +20,18 @@ src/guess_arc/
 │   ├── silver.py         # Chapter -> data/silver/chapter_NNNN.md
 │   ├── validation.py     # bronze / silver format contract
 │   └── pipeline.py       # orchestration, incremental state, CLI
-└── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
-    ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
-    ├── pipeline.py       # reads bronze, writes gold, CLI
-    └── common_words.txt  # common words: link text starting with one of them is not an Alias
+├── entities/             # bronze -> Scenes -> Mentions -> Registry(t) in gold
+│   ├── extraction.py     # extract_entities(chapters, reference): pure, single entry point
+│   ├── pipeline.py       # reads bronze, writes gold, CLI
+│   └── common_words.txt  # common words: link text starting with one of them is not an Alias
+└── vectorisation/        # silver -> Chunks -> Chapter embeddings in data/gold/vector/
+    ├── __init__.py       # public API: run, load_chapter_embeddings, Encoder
+    ├── __main__.py       # python -m guess_arc.vectorisation
+    ├── pipeline.py       # run(data_dir, encoder): Chunks, token-weighted mean, L2; CLI (EMBEDDING_MODEL from .env)
+    ├── encoder.py        # Encoder protocol, injected into run
+    ├── sentence_encoder.py  # the real Encoder: sentence-transformers on CPU (optional extra)
+    ├── dataset.py        # .npz written together with its report, load_chapter_embeddings
+    └── quality.py        # quality report embeddings_quality.json
 reference/                # versioned reference data
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
 ├── concepts.txt          # Concepts and Titles, excluded from Registry(t)
@@ -97,7 +105,8 @@ Outputs always go under `data/` at the repo root (override with `--data-dir`):
 - `data/bronze/chapters.jsonl`: the archived raw wikitext, one line per chapter
 - `data/silver/chapter_NNNN.md`: one file per chapter, a YAML front-matter (title,
   arc, characters with their faction and `on_panel`) followed by the short summary,
-  the long summary and the notes
+  the long summary and the notes. Read them back with
+  `guess_arc.ingestion.silver.read_chapter`, the shared reader of this format
 - `data/state.json`: the known `revid`s, for incremental runs
 
 ## Entity extraction
@@ -175,6 +184,63 @@ Plain-language account of the step, its results, problems and decisions:
   Chapter Notes. Regenerated on every run: real Disguises are confirmed by hand,
   with their Revelation chapter, then copied into `reference/disguises.csv`.
 
+## Vectorisation
+
+Turns the Long Summary of every complete silver chapter into a Chapter embedding,
+with a frozen pre-trained sentence encoder run locally on CPU
+([ADR 0003](docs/adr/0003-chapter-embeddings-encodeur-gele.md), details in
+[docs/vectorisation.md](docs/vectorisation.md)). Its dependencies
+(`sentence-transformers`, which pulls in `torch`, ~200 MB) are an optional extra,
+so ingestion, entity extraction and `pytest` don't need them:
+
+```bash
+pip install -e .[vectorisation]
+```
+
+On Linux, plain `pip` installs the CUDA build of `torch` (~2 GB); the CPU build is
+enough: `pip install -e .[vectorisation] --extra-index-url https://download.pytorch.org/whl/cpu`.
+
+The model is set in `.env` at the repo root; the code has no default model. Copy
+[`.env.example`](.env.example), which documents an example:
+
+```
+EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+```
+
+```bash
+# incremental: new chapters and chapters whose revision_id changed -> data/gold/vector/
+# (override with --data-dir)
+python -m guess_arc.vectorisation
+
+# after a change to Scene/Chunk splitting: re-encode every chapter
+python -m guess_arc.vectorisation --rebuild
+```
+
+On the first run the model is downloaded from Hugging Face (~130 MB), then cached:
+later runs work offline. Each Chunk of the Long Summary is encoded (a Scene, or a
+window of a Scene too long for the encoder); the Chapter embedding is the mean of
+the Chunks weighted by their token count, then L2-normalised
+(dimension 384 for `bge-small-en-v1.5`). An unchanged chapter keeps its Chapter embedding
+without calling the encoder; a model change in `.env` re-encodes everything. The
+run ends with the number of chapters vectorised, kept and skipped, and a
+visible `AVERTISSEMENT` listing each skipped chapter with its reason
+(`complete: false` or empty Long Summary: no row in the matrix).
+A missing `EMBEDDING_MODEL` or a missing extra stops the run with an explicit
+message, and nothing is written.
+
+- `data/gold/vector/chapter_embeddings.npz`: `chapters`, `revision_ids`,
+  `embeddings` (N × d, row i is chapter `chapters[i]`), `skipped_chapters` and
+  `skipped_reasons` (chapters without a Chapter embedding, and why) and the
+  metadata (model, dimension, pooling, date). Read it with
+  `guess_arc.vectorisation.load_chapter_embeddings()`, which returns
+  `{chapter: Chapter embedding}`, with `.skipped` (`{chapter: reason}`),
+  `.revision_ids` and `.metadata`.
+- `data/gold/vector/embeddings_quality.json`: quality report, rewritten on every
+  run (chapters vectorised, kept and skipped with their reason; dimension, NaN
+  count, min and max norm; semantic coherence: mean cosine similarity between
+  chapters of the same Arc and between chapters of different Arcs, each Arc
+  weighing the same, and the gap between the two).
+
 ## Quality checks
 
 ```bash
@@ -183,8 +249,8 @@ python scripts/quality/check_silver.py [--silver PATH] [--expected 1193]
 
 Checks that the silver corpus is a sound input for the next stages: no missing
 chapters, a valid front-matter in every file, a non-empty long summary, and a
-`character_count` that matches the listed characters. Standard library only, no
-network; exits with code 1 if anything fails. By default it reads `data/silver/`
+`character_count` that matches the listed characters. It reads each file with
+`read_chapter` (needs the `guess_arc` package installed), no network; exits with code 1 if anything fails. By default it reads `data/silver/`
 at the repo root, whatever the current directory. The requirements it covers
 (REQ-5 to REQ-8) and the results are tracked in [QUALITY.md](QUALITY.md).
 
@@ -208,6 +274,9 @@ corpus are skipped (`pytest -rs` shows why). The tests cover:
   precision proxies, Entity types from the datasets, wiki categories and
   overrides, category cache, confirmed Disguises, Registry(t) over 3 chapters,
   Disguise candidates);
+- vectorisation through `run` and the CLI, with fake encoders (no network, no
+  extra); the real encoder is tested only if the extra is installed and the model
+  cached;
 - a check of every file in `data/bronze/` and `data/silver/`
   (skipped if the data hasn't been generated yet).
 

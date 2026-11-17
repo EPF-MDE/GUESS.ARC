@@ -28,3 +28,8 @@ def gold_dir(data_dir: Path = DATA_DIR) -> Path:
 
 def state_path(data_dir: Path = DATA_DIR) -> Path:
     return data_dir / "state.json"
+
+
+def vector_dir(data_dir: Path = DATA_DIR) -> Path:
+    """Dataset des Chapter embeddings (vectorisation)."""
+    return gold_dir(data_dir) / "vector"

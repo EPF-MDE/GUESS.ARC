@@ -14,6 +14,18 @@ confused with the grid criteria Q1–Q3. IDs are never reused.
 
 ## 1. Requirements (Q1)
 
+### Delivery Fri 2026-11-20: Chapter embeddings
+
+Committed: the vectorisation dataset (`data/gold/vector/chapter_embeddings.npz`), the first input of
+the GRU ([ADR 0003](docs/adr/0003-chapter-embeddings-encodeur-gele.md),
+[docs/vectorisation.md](docs/vectorisation.md)).
+
+| ID | Requirement | Characteristic | Metric & threshold | Why it matters (client need) | Validated by client? |
+|---|---|---|---|---|---|
+| REQ-9 | Each complete chapter with a Long Summary has exactly one Chapter embedding, and the others are listed with their reason. | Functional suitability | Over the silver corpus: the set of chapters with a Chapter embedding = the set of `complete: true` chapters whose Long Summary has at least one Scene; every other silver chapter is in `skipped_chapters` with a reason (`complete: false`, `Long Summary vide`); 0 duplicates, 0 NaN, every norm = 1 (± 1e-5). | The GRU reads one vector per chapter, in order; a missing or extra vector shifts the story, and an unexplained gap can't be handled when the GRU input is built. | ☐ |
+| REQ-10 | The manifest is the dataset's metadata: model, pooling, chapters, `revision_id`s, `created_at`. | Maintainability | 5/5 fields stored in the `.npz` and read back by `load_chapter_embeddings`; the quality report carries the same `created_at`. | Konrad must be able to tell which model and which silver revision produced the vectors a forecast was trained on. | ☐ |
+| REQ-11 | Re-running the vectorisation on the same inputs gives the same Chapter embeddings. | Reliability | Two runs from scratch on the same silver with the same model: same chapter list, max absolute difference between vectors ≤ 1e-6. | Results shown to Konrad must be reproducible; otherwise a score change can't be told apart from noise in the inputs. | ☐ |
+
 ### Delivery Thu 2026-11-12 (entities) and Fri 2026-11-13 (mid-term defense)
 
 | ID | Requirement | Characteristic | Metric & threshold | Why it matters (client need) | Validated by client? |
@@ -56,9 +68,6 @@ are carried over to 2026-11-12 (see above).
 
 Kept here so the IDs stay reserved. Each comes back into a delivery when a sprint commits to it.
 
-- **REQ-9**: each chapter gets exactly one Chapter Embedding, built from its Long Summary only.
-- **REQ-10**: every set of vectors comes with a manifest (model, chunking rule, chapter list, silver `revision_id`s).
-- **REQ-11**: re-running vectorisation on the same input gives identical vectors.
 - **REQ-14**: events are extracted from each chapter's Long Summary (who did what to whom), each traceable to its source sentence.
 
 ## 2. Verification (Q2 → Q3)
@@ -71,6 +80,18 @@ Ubuntu and Windows with Python 3.10 and 3.12. "Automatic (test suite)" in the ta
 means this run. `data/` is never committed, so the two tests that read the real bronze/silver
 corpus are skipped in CI; REQ-5–8 on the real corpus are still checked locally with
 `scripts/quality/check_silver.py`.
+
+### Delivery Fri 2026-11-20
+
+Tests are in `tests/test_vectorisation.py`. In CI they run with fake encoders. The tests marked
+*local* need the real corpus (`data/`) or the `[vectorisation]` extra with the model in cache,
+so CI skips them; they were run locally.
+
+| ID | Verification method | Pass criterion | When | Owner | Result | Evidence |
+|---|---|---|---|---|---|---|
+| REQ-9 | Tests: `VectorisationTest.test_one_unit_chapter_embedding_of_dimension_d_per_complete_chapter`, `test_skipped_chapters_are_stored_with_their_reason_and_have_no_chapter_embedding`, `test_chapter_sequence_has_no_unexplained_gap`. On the real corpus (*local*): `RealSilverTest.test_one_finite_chapter_embedding_per_complete_silver_chapter` and `test_real_dataset_if_generated`, which compute the expected chapters with the ingestion's silver reader, not with vectorisation code. | Chapters with a Chapter embedding = complete chapters with a Long Summary; others skipped with their reason; 0 NaN; norms = 1 | Automatic (test suite) + before delivery (20/11) | Team | ✅ | 2026-11-17, `pytest`: 202 passed, 0 skipped (local tests included). Real dataset (`embeddings_quality.json`, `created_at` 2026-11-17T14:35:51Z): 1196 silver chapters, 1196 Chapter embeddings (1–1196), 0 skipped, 0 NaN, norms in [0.99999997, 1.00000003]. |
+| REQ-10 | Tests: `VectorisationTest.test_revision_ids_and_metadata_are_stored_and_read_back` (model, pooling, chapters, `revision_id`s, timezone-aware `created_at`), `test_quality_report_carries_the_created_at_of_its_dataset`; `CorruptDatasetTest` (metadata that doesn't match the vectors → full rebuild). | 5/5 fields stored and read back | Automatic (test suite) | Team | ✅ | 2026-11-17, `pytest`: 202 passed, 0 skipped. The real `.npz` holds `chapters`, `revision_ids`, `embeddings`, `model`, `dimension`, `pooling`, `created_at`, `skipped_chapters`, `skipped_reasons`. |
+| REQ-11 | Tests: `IncrementalUpdateTest.test_rebuild_revectorises_every_chapter` (fake encoder); `SentenceTransformerEncoderTest.test_rerun_on_the_same_silver_gives_the_same_chapter_embeddings` (real encoder, *local*). On the real corpus: `python -m guess_arc.vectorisation --data-dir <copy>` from scratch on a copy of `data/silver/`, then compare with `data/gold/vector/` through `load_chapter_embeddings`. | Same chapter list; max absolute difference ≤ 1e-6 | Automatic (test suite) + before delivery (20/11) | Team | ✅ | 2026-11-17: both tests pass (`pytest`: 202 passed, 0 skipped). Real corpus, `BAAI/bge-small-en-v1.5` on CPU (8 min 17 s): same 1196 chapters, same `revision_id`s, **max absolute difference 0.0** (bit-identical) against the dataset of 14:35:51Z, itself a full build (its report: 1196 vectorised, 0 kept). |
 
 ### Delivery Thu 2026-11-12 and Fri 2026-11-13
 
@@ -121,6 +142,12 @@ emptied and `--expected 3`. It reported `Chapitres manquants : [3]` and
 | REQ-4 | Present the alternative to the client. | Inputs, outputs and trade-offs presented | Before demo | Team | ✅ | GRU pipeline proposed: forecast chapter n+1 from vectorised past chapters plus extracted entities and events, without a full LLM taxonomy. |
 
 ## 3. Log (one entry per project week)
+
+### Week of 16/11 (delivery Fri 20/11)
+- Added: REQ-9, REQ-10, REQ-11 out of the backlog, committed for 20/11 with measurable thresholds. REQ-9 now covers the skipped chapters (listed with their reason) and REQ-10 names the dataset's metadata as the manifest.
+- Checked (2026-11-17): REQ-9, REQ-10, REQ-11 ✅. Full test suite passes locally, real-corpus and real-encoder tests included. A from-scratch rerun on the real corpus is bit-identical to the existing dataset (REQ-11).
+- Planned to show: the Chapter embeddings dataset (1196 chapters, 384 dimensions), its quality report (`embeddings_quality.json`, 2026-11-17: semantic coherence intra-arc 0.879 vs inter-arc 0.844), and the reproducibility check.
+- Next: run the checks of REQ-12, 13 and 17–21, still ⏳; act on REQ-15 ⚠️ and REQ-16 ❌. Build the GRU input from the Chapter embeddings and the entities.
 
 ### Weeks of 02/11 & 09/11 (entities Thu 12/11, mid-term defense Fri 13/11)
 - Added: REQ-19, REQ-20, REQ-21. REQ-12 and REQ-13 carried over with measurable thresholds. REQ-9–11 and REQ-14 moved to the backlog: they were never committed.
