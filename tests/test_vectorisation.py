@@ -244,6 +244,7 @@ class VectorisationTest(SilverTestCase):
         before = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
         emb = self.embeddings([chapter(10, LONG_10), chapter(2, LONG_2, revision_id=42)])
 
+        self.assertEqual(sorted(emb), [2, 10])
         self.assertEqual(emb.revision_ids, {2: 42, 10: 1010})
         self.assertEqual(emb.metadata.model, "fake/hash-encoder")
         self.assertEqual(emb.metadata.dimension, DIM)
@@ -927,7 +928,7 @@ def _cached_model() -> str | None:
 
 
 @unittest.skipUnless(_cached_model(), "extra [vectorisation] non installé, EMBEDDING_MODEL absent ou modèle pas en cache")
-class SentenceTransformerEncoderTest(unittest.TestCase):
+class SentenceTransformerEncoderTest(SilverTestCase):
     @classmethod
     def setUpClass(cls):
         cls.encoder = SentenceTransformerEncoder(_cached_model())
@@ -953,6 +954,18 @@ class SentenceTransformerEncoderTest(unittest.TestCase):
         self.assertEqual(emb.metadata.dimension, dimension)
         self.assertAlmostEqual(float(np.linalg.norm(emb[10])), 1.0, places=5)
         self.assertEqual(emb.metadata.model, self.encoder.model_name)
+
+    def test_rerun_on_the_same_silver_gives_the_same_chapter_embeddings(self):
+        """REQ-11 avec le vrai encodeur : deux exécutions indépendantes, mêmes vecteurs."""
+        def vectorise(name: str):
+            data_dir = self.data_dir(name, [chapter(10, LONG_10), chapter(7, LONG_7)])
+            run(data_dir, self.encoder)
+            return load_chapter_embeddings(data_dir)
+
+        first, second = vectorise("first"), vectorise("second")
+        self.assertEqual(sorted(first), sorted(second))
+        for c in first:
+            np.testing.assert_allclose(first[c], second[c], rtol=0, atol=1e-6)
 
     def test_tokens_are_counted_with_the_model_tokenizer(self):
         self.assertGreater(self.encoder.count_tokens("Gomu Gomu no Pistol"), len("Gomu Gomu no Pistol".split()))
