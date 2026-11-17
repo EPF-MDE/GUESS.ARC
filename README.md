@@ -25,11 +25,11 @@ src/guess_arc/
 │   ├── pipeline.py       # reads bronze, writes gold, CLI
 │   └── common_words.txt  # common words: link text starting with one of them is not an Alias
 └── vectorisation/        # silver -> Scenes -> Chapter embeddings in data/gold/vector/
-    ├── pipeline.py       # run(data_dir, encoder): Scenes, token-weighted mean, L2
+    ├── pipeline.py       # run(data_dir, encoder): Scenes, token-weighted mean, L2; CLI (EMBEDDING_MODEL from .env)
     ├── encoder.py        # Encoder protocol, injected into run
     ├── sentence_encoder.py  # the real Encoder: sentence-transformers on CPU (optional extra)
     ├── dataset.py        # atomic .npz writing, load_chapter_embeddings
-    └── cli.py            # reads EMBEDDING_MODEL from .env, CLI
+    └── quality.py        # quality report embeddings_quality.json
 reference/                # versioned reference data
 ├── characters.json, islands.json, devil_fruits.json   # datasets (Entity types)
 ├── concepts.txt          # Concepts and Titles, excluded from Registry(t)

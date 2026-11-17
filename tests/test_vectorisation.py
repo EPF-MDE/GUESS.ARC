@@ -1,14 +1,25 @@
-"""Tests de la vectorisation via `run`, `load_chapter_embeddings` et le rapport qualité uniquement.
+"""Tests de la vectorisation via `run`, `load_chapter_embeddings`, le rapport
+qualité et la commande `python -m guess_arc.vectorisation` (`main`).
 
 Silver synthétique écrite par le vrai writer de l'ingestion, dans un dossier
-temporaire. Encodeurs factices : ni réseau, ni sentence-transformers.
+temporaire. Encodeurs factices : ni réseau, ni sentence-transformers. La
+commande est testée via `main`, avec un `make_encoder` espion et un .env
+temporaire. L'adaptateur sentence-transformers n'est testé que si l'extra
+[vectorisation] est installé et le modèle déjà en cache ; le test sur les vraies
+données, que si data/silver/ existe.
 """
+import contextlib
 import datetime
 import hashlib
+import importlib.util
+import io
 import json
 import pathlib
+import shutil
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -16,6 +27,8 @@ from guess_arc import paths
 from guess_arc.ingestion.parser import Chapter
 from guess_arc.ingestion.silver import write_markdown
 from guess_arc.vectorisation import CorruptDatasetError, load_chapter_embeddings, run
+from guess_arc.vectorisation.pipeline import main
+from guess_arc.vectorisation.sentence_encoder import MissingExtraError, SentenceTransformerEncoder
 
 DIM = 8
 
@@ -138,14 +151,14 @@ class VectorisationTest(SilverTestCase):
         run(data_dir, encoder or HashEncoder())
         return load_chapter_embeddings(data_dir)
 
-    def test_one_unit_vector_of_dimension_d_per_complete_chapter(self):
+    def test_one_unit_chapter_embedding_of_dimension_d_per_complete_chapter(self):
         emb = self.embeddings([chapter(10, LONG_10), chapter(2, LONG_2), chapter(7, LONG_7)])
 
         self.assertEqual(sorted(emb), [2, 7, 10])
-        for vector in emb.values():
-            self.assertEqual(vector.shape, (DIM,))
-            self.assertEqual(vector.dtype, np.float32)
-            self.assertAlmostEqual(float(np.linalg.norm(vector)), 1.0, places=5)
+        for embedding in emb.values():
+            self.assertEqual(embedding.shape, (DIM,))
+            self.assertEqual(embedding.dtype, np.float32)
+            self.assertAlmostEqual(float(np.linalg.norm(embedding)), 1.0, places=5)
 
     def test_dataset_is_a_single_npz_under_gold_vector_next_to_its_quality_report(self):
         data_dir = self.data_dir("data", [chapter(1, LONG_2)])
@@ -154,7 +167,7 @@ class VectorisationTest(SilverTestCase):
         files = sorted(p.name for p in paths.vector_dir(data_dir).iterdir())
         self.assertEqual(files, ["chapter_embeddings.npz", "embeddings_quality.json"])
 
-    def test_each_vector_is_found_by_its_chapter_number(self):
+    def test_each_chapter_embedding_is_found_by_its_chapter_number(self):
         corpus = self.embeddings([chapter(10, LONG_10), chapter(2, LONG_2), chapter(7, LONG_7)])
 
         for number, long_summary in ((10, LONG_10), (2, LONG_2), (7, LONG_7)):
@@ -167,7 +180,7 @@ class VectorisationTest(SilverTestCase):
 
         self.assertEqual(encoder.seen, LONG_10.split("\n\n"))
 
-    def test_other_sections_and_front_matter_do_not_change_the_vector(self):
+    def test_other_sections_and_front_matter_do_not_change_the_chapter_embedding(self):
         reference = self.embeddings([chapter(10, LONG_10)], name="reference")[10]
         variants = {
             "short_summary": dict(short_summary="A completely different short summary."),
@@ -183,11 +196,11 @@ class VectorisationTest(SilverTestCase):
         }
         for name, overrides in variants.items():
             with self.subTest(name):
-                vector = self.embeddings([chapter(10, LONG_10, **overrides)], name=name)[10]
-                np.testing.assert_array_equal(vector, reference)
+                embedding = self.embeddings([chapter(10, LONG_10, **overrides)], name=name)[10]
+                np.testing.assert_array_equal(embedding, reference)
 
-    def test_chapter_embedding_is_the_length_weighted_mean_of_scenes_then_l2(self):
-        # Scene 1 : 3 tokens sur l'axe 0 ; Scene 2 : 1 token sur l'axe 1.
+    def test_chapter_embedding_is_the_token_weighted_mean_of_chunks_then_l2(self):
+        # Chunk 1 (une Scene entière) : 3 tokens sur l'axe 0 ; Chunk 2 : 1 token sur l'axe 1.
         long_summary = "alpha alpha alpha\n\nbeta"
         emb = self.embeddings([chapter(1, long_summary)], encoder=KeywordEncoder())
 
@@ -254,7 +267,7 @@ class VectorisationTest(SilverTestCase):
         self.assertEqual(covered, scene.split())
         self.assertEqual(chunks[-1][-1], "w29")
 
-    def test_changing_the_last_words_of_a_long_scene_changes_the_vector(self):
+    def test_changing_the_last_words_of_a_long_scene_changes_the_chapter_embedding(self):
         long_scene = words(30)
         cliffhanger = words(27) + " Luffy is defeated"
         reference = self.embeddings([chapter(1, long_scene)], encoder=SmallWindowEncoder(), name="a")[1]
@@ -504,7 +517,6 @@ class IncrementalUpdateTest(SilverTestCase):
         self.assertEqual(chapters["total"], 3)
 
 
-
 def report(data_dir: pathlib.Path) -> dict:
     return json.loads((paths.vector_dir(data_dir) / "embeddings_quality.json").read_text(encoding="utf-8"))
 
@@ -614,6 +626,253 @@ class QualityReportTest(SilverTestCase):
         self.assertEqual(quality["chapters"]["vectorised"], [])
         self.assertIsNone(quality["norm_min"])
         self.assertIsNone(quality["semantic_coherence"]["inter_arc_mean"])
+
+
+
+PIP_COMMAND = "pip install -e .[vectorisation]"
+
+
+class CliTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+        self.env_file = self.root / ".env"
+        self.env_file.write_text("EMBEDDING_MODEL=fake/hash-encoder\n", encoding="utf-8")
+        self.data_dir = self.root / "data"
+        for ch in (chapter(10, LONG_10), chapter(2, LONG_2), chapter(7, LONG_7, complete=False)):
+            write_markdown(ch, paths.silver_dir(self.data_dir))
+        self.built_with: list[str] = []
+
+    def make_encoder(self, model_name: str) -> HashEncoder:
+        self.built_with.append(model_name)
+        return HashEncoder()
+
+    def main(self, *argv: str, make_encoder=None, environ=None) -> str:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            main(list(argv), environ=environ or {}, env_file=self.env_file,
+                 make_encoder=make_encoder or self.make_encoder)
+        return out.getvalue()
+
+    def test_model_is_read_from_the_env_file(self):
+        self.env_file.write_text("# commentaire\nLLM_MODEL=x\nEMBEDDING_MODEL = org/model \n", encoding="utf-8")
+
+        self.main("--data-dir", str(self.data_dir))
+
+        self.assertEqual(self.built_with, ["org/model"])
+
+    def test_quoted_model_in_the_env_file(self):
+        self.env_file.write_text('EMBEDDING_MODEL="org/model"\n', encoding="utf-8")
+
+        self.main("--data-dir", str(self.data_dir))
+
+        self.assertEqual(self.built_with, ["org/model"])
+
+    def test_process_environment_wins_over_the_env_file(self):
+        self.env_file.write_text("EMBEDDING_MODEL=org/from-file\n", encoding="utf-8")
+
+        self.main("--data-dir", str(self.data_dir), environ={"EMBEDDING_MODEL": "org/from-env"})
+
+        self.assertEqual(self.built_with, ["org/from-env"])
+
+    def test_model_absent_everywhere_exits_naming_the_setting_and_the_env_file(self):
+        for content in (None, "LLM_MODEL=x\n", "EMBEDDING_MODEL=\n"):
+            with self.subTest(content=content):
+                if content is None:
+                    self.env_file.unlink(missing_ok=True)
+                else:
+                    self.env_file.write_text(content, encoding="utf-8")
+                with self.assertRaises(SystemExit) as ctx:
+                    self.main("--data-dir", str(self.data_dir))
+                self.assertIn("EMBEDDING_MODEL", str(ctx.exception.code))
+                self.assertIn(".env", str(ctx.exception.code))
+                self.assertEqual(self.built_with, [])
+
+    def test_data_dir_option_vectorises_that_directory(self):
+        self.main("--data-dir", str(self.data_dir))
+
+        self.assertEqual(self.built_with, ["fake/hash-encoder"])
+        emb = load_chapter_embeddings(self.data_dir)
+        self.assertEqual(sorted(emb), [2, 10])
+        self.assertEqual(emb[2].shape, (DIM,))
+
+    def test_prints_a_summary_of_vectorised_and_skipped_chapters(self):
+        output = self.main("--data-dir", str(self.data_dir))
+
+        self.assertIn("vectorisés : 2", output)
+        self.assertIn("sautés : 1", output)
+        self.assertIn("7 (complete: false)", output)
+        self.assertIn("chapter_embeddings.npz", output)
+        self.assertIn("embeddings_quality.json", output)
+
+    def test_second_run_reports_kept_chapters(self):
+        self.main("--data-dir", str(self.data_dir))
+        output = self.main("--data-dir", str(self.data_dir))
+
+        self.assertIn("vectorisés : 0", output)
+        self.assertIn("conservés : 2", output)
+
+    def test_rebuild_option_revectorises_every_chapter(self):
+        self.main("--data-dir", str(self.data_dir))
+        encoder = CountingEncoder()
+        output = self.main("--data-dir", str(self.data_dir), "--rebuild", make_encoder=lambda _: encoder)
+
+        self.assertEqual(len(encoder.calls), 2)  # chapitres 2 et 10
+        self.assertIn("vectorisés : 2", output)
+        self.assertIn("conservés : 0", output)
+        self.assertIn("recalcul complet : --rebuild demandé", output)
+
+    def test_corrupt_dataset_is_rebuilt_and_says_so(self):
+        self.main("--data-dir", str(self.data_dir))
+        (paths.vector_dir(self.data_dir) / "chapter_embeddings.npz").write_bytes(b"not a zip archive")
+
+        output = self.main("--data-dir", str(self.data_dir))
+
+        self.assertIn("recalcul complet : dataset précédent corrompu", output)
+        self.assertEqual(sorted(load_chapter_embeddings(self.data_dir)), [2, 10])
+
+    def test_missing_embedding_model_exits_with_message_and_writes_nothing(self):
+        self.env_file.write_text("LLM_MODEL=x\n", encoding="utf-8")
+
+        with self.assertRaises(SystemExit) as ctx:
+            self.main("--data-dir", str(self.data_dir))
+
+        self.assertIn("EMBEDDING_MODEL", str(ctx.exception.code))
+        self.assertEqual(self.built_with, [])
+        self.assertFalse(paths.vector_dir(self.data_dir).exists())
+
+    def test_missing_extra_exits_with_the_pip_command(self):
+        with mock.patch.dict(sys.modules, {"sentence_transformers": None}):
+            with self.assertRaises(SystemExit) as ctx:
+                main(["--data-dir", str(self.data_dir)], environ={}, env_file=self.env_file)
+
+        self.assertIn(PIP_COMMAND, str(ctx.exception.code))
+        self.assertFalse(paths.vector_dir(self.data_dir).exists())
+
+
+class MissingExtraTest(unittest.TestCase):
+    def test_adapter_without_the_extra_names_the_pip_command(self):
+        with mock.patch.dict(sys.modules, {"sentence_transformers": None}):
+            with self.assertRaises(MissingExtraError) as ctx:
+                SentenceTransformerEncoder("org/model")
+
+        self.assertIn(PIP_COMMAND, str(ctx.exception))
+
+
+class _ModelFound(Exception):
+    """Levée par l'encodeur espion de `_configured_model`, avec le nom de modèle
+    reçu : arrête `main` avant le pipeline."""
+
+
+def _configured_model() -> str | None:
+    """Le modèle que la commande lirait (environnement, puis .env du repo), sinon None."""
+    def spy(model_name: str):
+        raise _ModelFound(model_name)
+
+    try:
+        main([], make_encoder=spy)
+    except _ModelFound as found:
+        return found.args[0]
+    except SystemExit:
+        return None
+    return None
+
+
+def _cached_model() -> str | None:
+    """Le modèle du .env s'il est utilisable hors ligne, sinon None."""
+    if importlib.util.find_spec("sentence_transformers") is None:
+        return None
+    model = _configured_model()
+    if model is None:
+        return None
+    from huggingface_hub import try_to_load_from_cache
+
+    return model if isinstance(try_to_load_from_cache(model, "config.json"), str) else None
+
+
+@unittest.skipUnless(_cached_model(), "extra [vectorisation] non installé, EMBEDDING_MODEL absent ou modèle pas en cache")
+class SentenceTransformerEncoderTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.encoder = SentenceTransformerEncoder(_cached_model())
+
+    def test_one_vector_per_text_of_the_model_dimension(self):
+        vectors = self.encoder.encode(["Luffy fights Kaido.", "Nami draws a map."])
+
+        self.assertEqual(vectors.shape[0], 2)
+        self.assertGreater(vectors.shape[1], 0)
+        self.assertTrue(np.isfinite(vectors).all())
+
+    def test_chapter_embedding_has_model_dimension_and_unit_norm(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data_dir = pathlib.Path(tmp.name)
+        write_markdown(chapter(10, LONG_10), paths.silver_dir(data_dir))
+
+        run(data_dir, self.encoder)
+
+        emb = load_chapter_embeddings(data_dir)
+        dimension = self.encoder.encode(["Luffy."]).shape[1]
+        self.assertEqual(emb[10].shape, (dimension,))
+        self.assertEqual(emb.metadata.dimension, dimension)
+        self.assertAlmostEqual(float(np.linalg.norm(emb[10])), 1.0, places=5)
+        self.assertEqual(emb.metadata.model, self.encoder.model_name)
+
+    def test_tokens_are_counted_with_the_model_tokenizer(self):
+        self.assertGreater(self.encoder.count_tokens("Gomu Gomu no Pistol"), len("Gomu Gomu no Pistol".split()))
+        self.assertGreater(self.encoder.max_tokens, 0)
+
+    def test_max_tokens_is_the_text_window_without_special_tokens(self):
+        too_long = " ".join(["pirate"] * 2000)
+        kept = self.encoder._model.tokenize([too_long])["input_ids"].shape[1]
+        self.assertEqual(self.encoder.max_tokens, kept - 2)
+
+
+@unittest.skipUnless(paths.silver_dir().is_dir(), "data/silver/ absent : lancer d'abord l'ingestion")
+class RealSilverTest(unittest.TestCase):
+    def silver(self):
+        from guess_arc.vectorisation.pipeline import read_silver_chapter, scenes
+
+        chapters = [read_silver_chapter(p) for p in paths.silver_dir().glob("chapter_*.md")]
+        return {c.number: bool(c.complete and scenes(c.long_summary)) for c in chapters}
+
+    def complete_chapters(self) -> set[int]:
+        return {number for number, usable in self.silver().items() if usable}
+
+    def skipped_chapters(self) -> set[int]:
+        """Les chapitres de la silver sautés à raison (`complete: false`, Long Summary vide)."""
+        return {number for number, usable in self.silver().items() if not usable}
+
+    def test_one_finite_chapter_embedding_per_complete_silver_chapter(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data_dir = pathlib.Path(tmp.name)
+        shutil.copytree(paths.silver_dir(), paths.silver_dir(data_dir))
+
+        run(data_dir, HashEncoder())
+
+        emb = load_chapter_embeddings(data_dir)
+        self.assertEqual(set(emb), self.complete_chapters())
+        self.assertEqual(unexplained_gaps(emb, self.skipped_chapters()), [],
+                         "trous dans la suite des chapitres (absents de la silver)")
+        matrix = np.stack(list(emb.values()))
+        self.assertFalse(np.isnan(matrix).any())
+        np.testing.assert_allclose(np.linalg.norm(matrix, axis=1), 1.0, rtol=1e-5)
+
+    def test_real_dataset_if_generated(self):
+        if not (paths.vector_dir() / "chapter_embeddings.npz").exists():
+            self.skipTest("data/gold/vector/ absent : lancer python -m guess_arc.vectorisation")
+        emb = load_chapter_embeddings()
+
+        self.assertEqual(set(emb), self.complete_chapters())
+        self.assertEqual(unexplained_gaps(emb, self.skipped_chapters()), [],
+                         "trous dans la suite des chapitres (absents de la silver)")
+        matrix = np.stack(list(emb.values()))
+        self.assertEqual(matrix.shape[1], emb.metadata.dimension)
+        self.assertFalse(np.isnan(matrix).any())
+        np.testing.assert_allclose(np.linalg.norm(matrix, axis=1), 1.0, rtol=1e-5)
+
 
 
 if __name__ == "__main__":

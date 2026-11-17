@@ -3,7 +3,7 @@
 La ligne i de `embeddings` est le Chapter embedding du chapitre `chapters[i]`.
 Le chargeur rend un dict chapitre -> Chapter embedding, pour que personne ne lise un
 Chapter embedding par sa position. Il refuse un dataset corrompu
-(`corrupt_verification`) au lieu de rendre des vecteurs faux.
+(`corrupt_verification`) au lieu de rendre des Chapter embeddings faux.
 """
 
 from __future__ import annotations
