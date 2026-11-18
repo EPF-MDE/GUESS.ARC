@@ -85,6 +85,7 @@ old `QUALITY.md` carry `migrated: true`. Dates never go backwards within a threa
 | `rejected` | client | Nothing: the client refuses the spec. |
 | `verified` | team | `result` (✅ / ⚠️ / ❌), `evidence` (links to commits, PRs, files), optional `output` (raw text, shown as a code block). |
 | `signed-off` | client | `result` (✅ / ⚠️ / ❌): the client's verdict on whether the requirement was reached. |
+| `dropped` | either | Nothing: the requirement is abandoned. It leaves the current list but its thread is kept. |
 | `note` | either | Text only. |
 
 Requirement fields: `title` (short, for tables), `statement`, `characteristic` (ISO 25010:
@@ -95,8 +96,8 @@ need), `verification` (how it is measured), `when` (free text: "Before delivery"
 sprint or in CI).
 
 **Derived state.** The client status is *awaiting client* until the client's first decision, then
-follows the latest `accepted` / `rejected` / `signed-off`. The latest result is that of the latest
-`verified` entry (⏳ if none). A requirement is **open** until it is signed off ✅ or rejected.
+follows the latest `accepted` / `rejected` / `signed-off` / `dropped`. The latest result is that of the latest
+`verified` entry (⏳ if none). A requirement is **open** until it is signed off ✅, rejected or dropped.
 [CURRENT.md](CURRENT.md) lists the open requirements plus the recurring ones signed off ✅, so a
 regression still shows up. Nothing depends on today's date.
 

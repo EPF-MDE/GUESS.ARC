@@ -227,6 +227,20 @@ class TestReplay(LedgerTestCase):
         self.assertFalse(req.open)
         self.assertFalse(req.current)
 
+    def test_dropped_after_partial_sign_off_is_closed(self):
+        req = self.replayed(verified(result="⚠️"), client("accepted"),
+                            client("signed-off", result="⚠️"),
+                            {"date": D(2026, 10, 23), "by": "team", "type": "dropped",
+                             "channel": "client meeting", "text": "Route abandoned."})
+        self.assertEqual(req.client_status, "dropped")
+        self.assertEqual(req.latest_result, "⚠️")
+        self.assertFalse(req.open)
+        self.assertFalse(req.current)
+
+    def test_dropped_carries_no_field(self):
+        self.write(thread(1, proposed(), client("dropped", result="❌")))
+        self.assertReports(ledger.validate(self.folder), "dropped: unexpected field 'result'")
+
     def test_latest_verification_wins(self):
         req = self.replayed(verified(result="❌", date=D(2026, 10, 20)), verified(result="✅"))
         self.assertEqual(req.latest_result, "✅")

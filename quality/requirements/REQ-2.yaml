@@ -37,3 +37,9 @@ entries:
   migrated: true
   result: ⚠️
   text: 'Konrad accepted REQ-2 as partial (QUALITY.md §1: "☑ 2026-10-23, Konrad (accepted as partial)"): 2 chapters tagged instead of ~10 (§3 Log, week of 19/10).'
+- date: 2026-10-23
+  by: team
+  type: dropped
+  channel: client meeting
+  migrated: true
+  text: 'Dropped with the whole Taxonomy Gold route: at the 23/10 meeting the decision was to stop building the Taxonomy Gold with LLMs and move to the GRU pipeline (QUALITY.md §3 Log, week of 19/10; see deliveries.yaml).'

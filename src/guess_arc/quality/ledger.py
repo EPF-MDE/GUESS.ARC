@@ -56,6 +56,7 @@ ENTRY_TYPES = {
     "rejected": ("client", (), ()),
     "verified": ("team", ("result", "evidence"), ("output",)),
     "signed-off": ("client", ("result",), ()),
+    "dropped": (None, (), ()),
     "note": (None, (), ()),
 }
 
@@ -338,13 +339,13 @@ def _replay_thread(data: dict) -> Requirement:
         type_ = entry["type"]
         if type_ == "proposed":
             spec = {k: entry[k] for k in REQUIREMENT_FIELDS}
-        elif type_ in ("accepted", "rejected"):
+        elif type_ in ("accepted", "rejected", "dropped"):
             status = type_
         elif type_ == "signed-off":
             status = f"signed off {entry['result']}"
         elif type_ == "verified":
             latest_verification = entry
-    open_ = status not in ("signed off ✅", "rejected")
+    open_ = status not in ("signed off ✅", "rejected", "dropped")
     return Requirement(
         id=data["id"],
         spec=spec,
@@ -431,7 +432,7 @@ def render_current(requirements: list[Requirement]) -> str:
         "# Current quality requirements",
         _GENERATED,
         "What the team must reach now: every open requirement (not signed off ✅, not "
-        "rejected), plus every recurring one with its latest result. Every requirement that "
+        "rejected, not dropped), plus every recurring one with its latest result. Every requirement that "
         "ever existed is listed in [OVERVIEW.md](OVERVIEW.md).",
         _GRID,
         *([_render_requirement(r) for r in current] or ["No current requirement."]),
