@@ -168,7 +168,7 @@ The design uses no future information: chronological train/val/test split, every
 
 Evidence:
 
-0/2 rules written down: neither the chronological split nor fitting on training chapters only appears in the block diagram or in any document. Only the input side is covered: ADR 0002 (`docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`) keeps future facts out of KG(t). The leakage-guard test doesn't exist yet (no split code). Action: write both rules into the design document (REQ-9).
+0/2 rules written down: neither the chronological split nor fitting on training chapters only appears in the block diagram or in any document. Only the input side is covered: ADR 0002 (`docs/adr/0002-reader-knowledge-only.md` on branch `extraction/entities`) keeps future facts out of KG(t). The leakage-guard test doesn't exist yet (no split code). Action: write both rules into the design document (REQ-9).
 
 Thread: [requirements/REQ-10.yaml](requirements/REQ-10.yaml)
 

@@ -1,7 +1,7 @@
 # ADR 0002 — KG(t) ne contient que ce que le lecteur sait au chapitre t
 
 - **Statut :** accepté
-- **Date :** 28 octobre 2026 (branche `exctraction/entities`)
+- **Date :** 28 octobre 2026 (branche `extraction/entities`)
 
 Le graphe de connaissances au chapitre t ne contient que des faits issus des chapitres ≤ t, chacun daté de sa Revelation (le chapitre où le lecteur l'apprend), et non de sa date dans l'histoire. Les seuls faits considérés comme invariants sont l'Entity type et la hiérarchie des Places (île ⊂ mer). On applique cette règle parce que le système doit fonctionner en conditions réelles, sur des chapitres dont il ignore la suite : un modèle entraîné sur des données omniscientes serait évalué de façon trop optimiste et se comporterait différemment une fois en production.
 
