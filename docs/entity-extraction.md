@@ -307,7 +307,7 @@ Post-War (35 %). The best are early arcs with few characters: Syrup Village (78 
 
 **Decision needed:** redefine the target (for example, measure recall only on characters whose name
 appears in the summary), or keep the current measure and accept it as a description of the source.
-This is a team decision about the quality requirement (REQ-12), not a code change.
+This is a team decision about the quality requirement (REQ-11), not a code change.
 
 ### 6.2 Precision: the names we match are right
 
@@ -385,7 +385,7 @@ is also a catalog, but its only section link points to a list heading, so it add
 
 ## 9. Known limits and next steps
 
-1. **Recall target (§6.1).** Decide how REQ-12 should measure recall. Optionally, try matching
+1. **Recall target (§6.1).** Decide how REQ-11 should measure recall. Optionally, try matching
    names of characters in the chapter's Cast even if they are not linked in the summary, and
    measure whether precision holds.
 2. **Disguise review not done yet.** `reference/disguises.csv` is still empty, so **today's

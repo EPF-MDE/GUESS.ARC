@@ -326,7 +326,7 @@ Village (78 %), Thriller Bark (76 %).
 
 **Décision à prendre :** redéfinir l'objectif (par exemple, ne mesurer le rappel que sur les
 personnages dont le nom apparaît dans le résumé), ou garder la mesure actuelle et l'accepter comme
-une description de la source. C'est une décision d'équipe sur l'exigence de qualité (REQ-12), pas
+une description de la source. C'est une décision d'équipe sur l'exigence de qualité (REQ-11), pas
 une modification de code.
 
 ### 6.2 Précision : les noms retrouvés sont les bons
@@ -407,7 +407,7 @@ n'ajoute aucune entrée.
 
 ## 9. Limites connues et suites
 
-1. **Objectif de rappel (§6.1).** Décider comment REQ-12 doit mesurer le rappel. En option, essayer
+1. **Objectif de rappel (§6.1).** Décider comment REQ-11 doit mesurer le rappel. En option, essayer
    de rechercher aussi les noms des personnages du Cast du chapitre même s'ils ne sont pas liés dans
    le résumé, et mesurer si la précision tient.
 2. **La relecture des Disguises n'est pas faite.** `reference/disguises.csv` est encore vide, donc
