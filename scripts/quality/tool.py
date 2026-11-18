@@ -32,6 +32,7 @@ def _api(folder: Path, path: str):
         return 200, {
             "fields": ledger.REQUIREMENT_FIELDS,
             "entry_types": {t: author for t, (author, _, _) in ledger.ENTRY_TYPES.items()},
+            "spec_changes": ledger.SPEC_CHANGES,
             "characteristics": ledger.CHARACTERISTICS,
             "results": ledger.RESULTS,
             "authors": ledger.AUTHORS,

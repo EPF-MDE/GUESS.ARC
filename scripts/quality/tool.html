@@ -67,7 +67,6 @@
   .form-grid input, .form-grid select, .form-grid textarea {
     font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
     background: var(--bg); color: var(--text); }
-  .form-grid input[type=checkbox] { width: auto; margin-top: 10px; }
   .form-grid textarea { min-height: 3.2em; resize: vertical; }
   .form-grid textarea.output { font-family: ui-monospace, Consolas, monospace; font-size: 13px; min-height: 6em; }
   .form-grid .hint { grid-column: 2; margin-top: -6px; font-size: 13px; color: var(--muted); }
@@ -309,12 +308,23 @@ function fieldInput(field, v, attrs = "") {
   if (field === "characteristic")
     return select(field, ["", ...vocab.characteristics], v || "", `data-field="${field}" ${attrs}`);
   if (field === "delivery") return `<input type="date" ${name} value="${esc(v || "")}">`;
-  if (field === "recurring") return `<input type="checkbox" ${name}${v ? " checked" : ""}>`;
+  if (field === "recurring")  // three states: a backlog item may not have it yet
+    return select(field, ["", "no", "yes"], v === undefined || v === null ? "" : v ? "yes" : "no",
+                  `data-field="${field}" ${attrs}`);
   if (field === "title" || field === "owner" || field === "when")
     return `<input type="text" ${name} value="${esc(v || "")}">`;
   return `<textarea ${name}>${esc(v || "")}</textarea>`;
 }
-function readInput(el) { return el.type === "checkbox" ? el.checked : el.value; }
+function readInput(el) {
+  if (el.name === "recurring") return el.value === "" ? "" : el.value === "yes";
+  return el.value;
+}
+// Whether input `el` still holds the requirement's current value of its field.
+function unchanged(el, spec) {
+  const v = readInput(el), current = spec[el.name];
+  if (el.name === "recurring") return v === (current === undefined ? "" : current);
+  return String(v).trimEnd() === String(current ?? "").trimEnd();
+}
 // The form's inputs as a record, without the ones left empty (validation reports
 // what is missing). `keep` lists fields sent even when empty.
 function readForm(form, keep = []) {
@@ -371,11 +381,12 @@ function entryForm(r) {
     "Record");
 }
 function typeFields(type, spec) {
-  if (type === "revised" || type === "amended")
+  if (vocab.spec_changes.includes(type))
     return vocab.fields.map(f => row(LABELS[f], fieldInput(f, spec[f]))).join("") +
       `<div class="hint">Change only what moves: unchanged fields are not recorded, the ` +
       `changed ones show as before → after.</div>`;
-  const result = row("Result", select("result", vocab.results, vocab.results[0]));
+  // No result preselected: a verdict is always chosen, never recorded by default.
+  const result = row("Result", select("result", ["", ...vocab.results], ""));
   if (type === "verified")
     return result +
       row("Evidence", '<textarea name="evidence"></textarea>', "Links to commits, PRs, files.") +
@@ -390,30 +401,28 @@ function typeFields(type, spec) {
 }
 function setUpEntryForm(form, r) {
   const typeSelect = form.querySelector("[name=type]"), channel = form.querySelector("[name=channel]");
-  const sameText = (a, b) => String(a ?? "").trimEnd() === String(b ?? "").trimEnd();
+  let channelTyped = false;  // a channel typed by hand is never overwritten by a default
+  channel.addEventListener("input", () => { channelTyped = true; });
   const update = () => {
     const type = typeSelect.value, author = vocab.entry_types[type];
     form.querySelector("#by-slot").innerHTML = row("By", author
       ? `<input type="text" name="by" value="${author}" readonly>`
       : select("by", vocab.authors, "team"));
-    channel.value = author === "client" ? "client meeting" : type === "verified" ? "sprint"
-      : channel.value || "client meeting";
+    if (!channelTyped) channel.value = type === "verified" ? "sprint" : "client meeting";
     form.querySelector("#type-slot").innerHTML = typeFields(type, r.spec);
-    form.querySelectorAll("[data-field]").forEach(el => el.addEventListener("input", () =>
-      el.classList.toggle("changed", type !== "carried-over" &&
-        !(el.type === "checkbox" ? el.checked === !!r.spec.recurring : sameText(el.value, r.spec[el.name])))));
+    if (vocab.spec_changes.includes(type))
+      form.querySelectorAll("[data-field]").forEach(el => el.addEventListener("input", () =>
+        el.classList.toggle("changed", !unchanged(el, r.spec))));
   };
   typeSelect.addEventListener("change", update);
   update();
   onSubmit(form, async () => {
     const type = typeSelect.value;
     const entry = readForm(form);
-    if (type === "revised" || type === "amended") {
+    if (vocab.spec_changes.includes(type)) {
       // Only the fields that change; an emptied field is sent so that validation refuses it.
-      vocab.fields.forEach(f => {
-        const el = form.querySelector(`[data-field="${f}"]`), v = readInput(el);
-        const unchanged = f === "recurring" ? v === !!r.spec.recurring : sameText(v, r.spec[f]);
-        if (unchanged) delete entry[f]; else entry[f] = v;
+      form.querySelectorAll("[data-field]").forEach(el => {
+        if (unchanged(el, r.spec)) delete entry[el.name]; else entry[el.name] = readInput(el);
       });
     }
     await post(`/api/requirements/${encodeURIComponent(r.id)}/entries`, entry);

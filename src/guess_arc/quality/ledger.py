@@ -668,6 +668,16 @@ def _from_json(record: dict) -> dict:
     return converted
 
 
+def _append_to(folder: Path, path: Path, record: dict, append) -> None:
+    """Under the lock: refuse if the folder is invalid or `record` is migrated, load
+    `path`, let `append(data)` add to it, then write it back through _checked_write."""
+    with _APPEND_LOCK:
+        _check_appendable(folder, record)
+        data = yaml.safe_load(_read(path))
+        append(data)
+        _checked_write(folder, path, data)
+
+
 def add_entry(folder: Path, req_id: str, entry: dict) -> None:
     """Append `entry` at the end of the thread of `req_id`, then regenerate the views.
 
@@ -675,14 +685,10 @@ def add_entry(folder: Path, req_id: str, entry: dict) -> None:
     AppendRefused, with nothing written, if the result would be invalid.
     """
     entry = _from_json(entry)
-    with _APPEND_LOCK:
-        _check_appendable(folder, entry)
-        path = folder / REQUIREMENTS_DIR / f"{req_id}.yaml"
-        if not ID_RE.fullmatch(req_id) or not path.exists():
-            raise AppendRefused([f"unknown requirement {req_id}"])
-        data = yaml.safe_load(_read(path))
-        data["entries"].append(entry)
-        _checked_write(folder, path, data)
+    path = folder / REQUIREMENTS_DIR / f"{req_id}.yaml"
+    if not ID_RE.fullmatch(req_id) or not path.exists():
+        raise AppendRefused([f"unknown requirement {req_id}"])
+    _append_to(folder, path, entry, lambda data: data["entries"].append(entry))
 
 
 def create_requirement(folder: Path, proposal: dict) -> str:
@@ -708,27 +714,22 @@ def add_meeting(folder: Path, meeting: dict) -> None:
     Raises AppendRefused, with nothing written, if the result would be invalid.
     """
     meeting = _from_json(meeting)
-    with _APPEND_LOCK:
-        _check_appendable(folder, meeting)
-        path = folder / DELIVERIES_FILE
-        data = yaml.safe_load(_read(path))
-        data["deliveries"].append({**meeting, "thread": []})
-        _checked_write(folder, path, data)
+    _append_to(folder, folder / DELIVERIES_FILE, meeting,
+               lambda data: data["deliveries"].append({**meeting, "thread": []}))
 
 
-def add_meeting_note(folder: Path, meeting_date, note: dict) -> None:
+def add_meeting_note(folder: Path, meeting_date: dt.date | str, note: dict) -> None:
     """Append `note` to the free thread of the meeting held on `meeting_date`, then
     regenerate the views. Dates may be ISO strings. Raises AppendRefused, with
     nothing written, if the meeting is unknown or the result would be invalid.
     """
     meeting_date = _from_json({"date": meeting_date})["date"]
     note = _from_json(note)
-    with _APPEND_LOCK:
-        _check_appendable(folder, note)
-        path = folder / DELIVERIES_FILE
-        data = yaml.safe_load(_read(path))
+
+    def append(data):
         matching = [m for m in data["deliveries"] if m["date"] == meeting_date]
         if not matching:
             raise AppendRefused([f"no meeting on {meeting_date}"])
         matching[0]["thread"].append(note)
-        _checked_write(folder, path, data)
+
+    _append_to(folder, folder / DELIVERIES_FILE, note, append)
