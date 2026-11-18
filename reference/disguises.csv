@@ -2,4 +2,30 @@
 # alias : le nom du Disguise tel qu'il apparaît dans les liens ([[Denjiro|Kyoshiro]] -> Kyoshiro)
 # canonical_name : la vraie identité (titre de la page du wiki)
 # revelation : chapitre où le lecteur apprend que le Disguise est canonical_name
+# Un Disguise fusionne deux Entities déjà connues du lecteur (CONTEXT.md) : les révélations de nom
+# (Miss All Sunday, Corazon...) n'y sont pas. Les masques du CP9 (Water 7, 342-344) sont écartés :
+# ils durent trois chapitres et leurs Aliases ("Bull Masked Man"...) n'apportent rien.
 alias,canonical_name,revelation
+# 973 : "Denjiro then headed to the Flower Capital, where he introduced himself as "Kyoshiro"" ;
+# "Denjiro spent his nights stealing money as the "Ushimitsu Kozo"" (flashback, avant la scène du 975).
+Kyoshiro,Denjiro,973
+Ushimitsu Kozo,Denjiro,973
+# 938 : "she decides to reveal that she is Kouzuki Hiyori"
+Komurasaki,Kouzuki Hiyori,938
+# 944 : "Kamazo, who is actually his crewmate Killer"
+Kamazo,Killer,944
+# 673 : Law "reveals to the group that Joker is just an alias [...] his real name is [...] Donquixote Doflamingo"
+Joker,Donquixote Doflamingo,673
+"Someone named ""Joker""",Donquixote Doflamingo,673
+# 739 : "Thunder Soldier was Kyros; the strongest gladiator in the colosseum"
+Thunder Soldier,Kyros,739
+Toy Soldier,Kyros,739
+One-legged Soldier,Kyros,739
+# 924 : Kin'emon "spots Shutenmaru riding off, and recognizes him as Ashura Doji"
+Shutenmaru,Ashura Doji,924
+# 1053 : "he takes off his mask and reveals that he is actually the former shogun Kouzuki Sukiyaki"
+Tenguyama Hitetsu,Kouzuki Sukiyaki,1053
+Hitetsu,Kouzuki Sukiyaki,1053
+Tenguyama,Kouzuki Sukiyaki,1053
+# 1188 : Imu "hears Brook address Gunko as "Shuri"" (Gunko est connu depuis le 1134)
+Shuri,Manmayer Gunko,1188

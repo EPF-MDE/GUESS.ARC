@@ -1216,12 +1216,18 @@ class TestDisguiseCandidates(unittest.TestCase):
             bronze_record(114, CH114_SCENE, notes=CH114_NOTES, characters=CH114_CHARACTERS),
             bronze_record(234, CH552_SCENE, characters=CH234_CHARACTERS),
             bronze_record(436, CH436_SCENE),
-            bronze_record(731, CH620_SCENE, characters=CH731_CHARACTERS),
+            bronze_record(177, "[[Nico Robin|Miss All Sunday]] reveals she is [[Nico Robin]]."),
+            bronze_record(583, "[[Sabo]] is mentioned."),
+            bronze_record(731, "[[Sabo]] wears a mask.", characters=CH731_CHARACTERS),
             bronze_record(735, CH620_SCENE, notes=CH735_NOTES),
             bronze_record(909, CH620_SCENE, characters=CH909_CHARACTERS),
             bronze_record(919, CH919_SCENE, characters=CH919_CHARACTERS),
             bronze_record(927, CH927_SCENE_KOMURASAKI, notes=CH927_NOTES),
             bronze_record(929, CH620_SCENE, notes=CH929_NOTES),
+            bronze_record(972, CH972_DENJIRO),
+            bronze_record(973, CH973_SCENE),
+            bronze_record(974, CH974_DENJIRO),
+            bronze_record(975, CH620_SCENE, characters=CH919_CHARACTERS),
         ], Reference(common_words=COMMON_WORDS))
         cls.candidates = {
             (c.alias, c.canonical_name): c for c in cls.extraction.disguise_candidates
@@ -1243,10 +1249,37 @@ class TestDisguiseCandidates(unittest.TestCase):
     def test_links_are_counted_in_long_summary_char_table_and_notes(self):
         kyoshiro = self.candidates[("Kyoshiro", "Denjiro")]
         self.assertEqual(
-            (kyoshiro.link_count, kyoshiro.first_chapter, kyoshiro.last_chapter), (3, 919, 929)
+            (kyoshiro.link_count, kyoshiro.first_chapter, kyoshiro.last_chapter), (4, 919, 975)
         )
         lucy = self.candidates[("Lucy", "Sabo")]
         self.assertEqual((lucy.link_count, lucy.first_chapter, lucy.last_chapter), (2, 731, 735))
+
+    def test_a_character_named_apart_before_the_disguise_ends_is_a_disguise(self):
+        # Un Disguise fusionne deux Entities déjà connues : Denjiro est nommé seul au
+        # 972, alors que Kyoshiro est encore un autre personnage (CharTable du 975).
+        kyoshiro = self.candidates[("Kyoshiro", "Denjiro")]
+        self.assertEqual((kyoshiro.named_apart_from, kyoshiro.named_together_from), (972, None))
+
+    def test_named_together_is_the_likely_revelation(self):
+        # 731 : "Lucy" et Sabo sont liés dans le même chapitre ; Sabo est nommé seul
+        # avant, au 583.
+        lucy = self.candidates[("Lucy", "Sabo")]
+        self.assertEqual((lucy.named_apart_from, lucy.named_together_from), (583, 731))
+
+    def test_a_character_only_named_with_its_alias_is_a_name_revelation(self):
+        # Robin n'est nommée qu'au 1er chapitre commun avec Miss All Sunday.
+        robin = self.candidates[("Miss All Sunday", "Nico Robin")]
+        self.assertEqual((robin.named_apart_from, robin.named_together_from), (None, 177))
+
+    def test_a_name_that_only_appears_after_the_alias_is_a_name_revelation(self):
+        # "his daughter" (973) ne nomme pas Hiyori ; "Hiyori" (974) partage un mot
+        # avec son nom, mais vient après le dernier Komurasaki (929).
+        self.assertIsNone(self.candidates[("Komurasaki", "Kouzuki Hiyori")].named_apart_from)
+
+    def test_notes_do_not_name_a_character(self):
+        # Les notes citent des faits postérieurs : "Robin" au 929 ne compte pas.
+        robin = self.candidates[("Miss All Sunday", "Nico Robin")]
+        self.assertNotEqual(robin.named_together_from, 929)
 
     def test_revelation_is_left_empty_for_a_human(self):
         self.assertTrue(all(c.revelation is None for c in self.extraction.disguise_candidates))
