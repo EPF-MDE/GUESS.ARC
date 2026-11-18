@@ -1,0 +1,24 @@
+deliveries:
+- date: 2026-10-23
+  theme: Taxonomy Gold research and POC (week of 19/10, delivery Fri 23/10)
+  thread:
+  - date: 2026-10-23
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Shown to client: the taxonomy (REQ-1); the 2 chapters tagged by the LLM pipeline (REQ-2); the research result: tagging chapter summaries with free LLMs can''t scale to 1193 chapters (REQ-3); the GRU pipeline as an alternative (REQ-4).'
+  - date: 2026-10-23
+    by: client
+    channel: client meeting
+    migrated: true
+    text: 'Client said: satisfied with the work done; validated REQ-1–4, with REQ-2 accepted as partial.'
+  - date: 2026-10-23
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Decision: stop building the Taxonomy Gold with LLMs; move to the GRU pipeline.'
+  - date: 2026-10-23
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Next: GRU presentation and entity dataset for 30/10.'

@@ -1,0 +1,39 @@
+id: REQ-4
+events:
+- date: 2026-10-19
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Alternative pipeline if the LLM route fails
+  statement: If the route doesn't scale, an alternative pipeline is proposed, with why it's more likely to work.
+  characteristic: Functional suitability
+  metric: 'The alternative presented covers 3/3: inputs, outputs, trade-offs.'
+  why: Konrad needs a way forward if the LLM route is a dead end.
+  verification: Present the alternative to the client.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-23
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 19/10 (§3 Log), for the delivery of Fri 2026-10-23.'
+- date: 2026-10-23
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ✅
+  evidence: 'GRU pipeline proposed: forecast chapter n+1 from vectorised past chapters plus extracted entities and events, without a full LLM taxonomy.'
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-23). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-23
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: 'Konrad validated REQ-4 at the 23/10 delivery (QUALITY.md §1: "Validated by client?" ticked on 2026-10-23).'
+- date: 2026-10-23
+  by: client
+  type: signed-off
+  channel: client meeting
+  migrated: true
+  result: ✅
+  text: Konrad was satisfied with the work done and validated REQ-1–4 (QUALITY.md §3 Log, week of 19/10).

@@ -12,6 +12,8 @@ DATA_DIR = REPO_ROOT / "data"
 # Données de référence versionnées (datasets, listes tenues à la main), à part
 # des couches générées de data/.
 REFERENCE_DIR = REPO_ROOT / "reference"
+# Registre qualité versionné (exigences client–équipe et vues générées).
+QUALITY_DIR = REPO_ROOT / "quality"
 
 
 def bronze_dir(data_dir: Path = DATA_DIR) -> Path:

@@ -1,0 +1,39 @@
+id: REQ-2
+events:
+- date: 2026-10-19
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: LLM tagging POC on real chapters
+  statement: A POC tags real chapters into that schema with an LLM.
+  characteristic: Functional suitability
+  metric: ≥ 10 chapters tagged into files that validate against the schema.
+  why: Konrad needs to see real chapters tagged before deciding whether the taxonomy is worth producing.
+  verification: Run `API/taxonomy_client.py` on the POC chapters and count the valid tagged files.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-23
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 19/10 (§3 Log), for the delivery of Fri 2026-10-23.'
+- date: 2026-10-23
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ⚠️
+  evidence: '**2 chapters** tagged out of 10: the free LLM tiers didn''t allow more in the time we had. Pipeline on branch `API_LLM_taxonomie` (fallback chain across 5 providers, quota tracking, repair of malformed answers, 15 test files).'
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-23). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-23
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: 'Konrad validated REQ-2 at the 23/10 delivery (QUALITY.md §1: "Validated by client?" ticked on 2026-10-23).'
+- date: 2026-10-23
+  by: client
+  type: signed-off
+  channel: client meeting
+  migrated: true
+  result: ⚠️
+  text: 'Konrad accepted REQ-2 as partial: 2 chapters tagged instead of ~10 (QUALITY.md: "☑ 2026-10-23, Konrad (accepted as partial)").'

@@ -1,0 +1,39 @@
+id: REQ-1
+events:
+- date: 2026-10-19
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Taxonomy schema with ADRs
+  statement: The taxonomy is defined in a documented schema, and each structural decision is recorded with its rationale.
+  characteristic: Maintainability
+  metric: 100 % of the structural choices in the schema document have an ADR.
+  why: The client must be able to understand and extend the taxonomy.
+  verification: Check the schema document and the ADRs.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-23
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 19/10 (§3 Log), for the delivery of Fri 2026-10-23.'
+- date: 2026-10-23
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ✅
+  evidence: 'Schema: `docs/taxonomy-schema.md` and `.json` (commit `3bfa198`). Decisions: ADRs 0001–0006 (commit `8c0f99f`). Both on branch `search/taxonomy`.'
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-23). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-23
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: 'Konrad validated REQ-1 at the 23/10 delivery (QUALITY.md §1: "Validated by client?" ticked on 2026-10-23).'
+- date: 2026-10-23
+  by: client
+  type: signed-off
+  channel: client meeting
+  migrated: true
+  result: ✅
+  text: Konrad was satisfied with the work done and validated REQ-1–4 (QUALITY.md §3 Log, week of 19/10).

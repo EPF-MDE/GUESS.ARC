@@ -1,0 +1,39 @@
+id: REQ-3
+events:
+- date: 2026-10-19
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Evidence on whether the LLM route scales
+  statement: The research concludes, with evidence, whether the LLM route can produce the Taxonomy Gold for all 1193 chapters.
+  characteristic: Performance efficiency
+  metric: 'The conclusion cites 3/3 measured limits: quotas, tokens per chapter, chapters tagged.'
+  why: Konrad decides whether to keep investing in this route.
+  verification: Measure quotas, tokens per chapter and chapters actually tagged.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-23
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 19/10 (§3 Log), for the delivery of Fri 2026-10-23. QUALITY.md gave the characteristic as "Performance"; it is recorded here under its ISO 25010 name, Performance efficiency.'
+- date: 2026-10-23
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ✅
+  evidence: '**The LLM route doesn''t scale to 1193 chapters on free tiers** (`API/README.md` on `API_LLM_taxonomie`): about 5–7k tokens per chapter; Groq allows 8k tokens per minute, so at most one chapter per minute; Gemini about 20 requests per day; OpenRouter''s free models share 50 requests per day.'
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-23). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-23
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: 'Konrad validated REQ-3 at the 23/10 delivery (QUALITY.md §1: "Validated by client?" ticked on 2026-10-23).'
+- date: 2026-10-23
+  by: client
+  type: signed-off
+  channel: client meeting
+  migrated: true
+  result: ✅
+  text: Konrad was satisfied with the work done and validated REQ-1–4 (QUALITY.md §3 Log, week of 19/10).
