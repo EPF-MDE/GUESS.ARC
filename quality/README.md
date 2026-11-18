@@ -116,6 +116,21 @@ until it is signed off ✅, rejected or dropped. [CURRENT.md](CURRENT.md) lists 
 requirements committed to a delivery, plus the recurring ones signed off ✅, so a regression still
 shows up. Nothing depends on today's date.
 
+## Reading the threads
+
+A local tool shows the ledger as a conversation, for reading it alone or screen-sharing it at the
+client meeting. From the repo root:
+
+```
+python scripts/quality/tool.py
+```
+
+It prints a local URL (`http://127.0.0.1:8765/`; another port with `--port`). It shows a
+filterable table of every requirement, each requirement's page (current spec at the top, then
+its thread as bubbles, team on the left, client on the right, spec changes shown before → after),
+and one page per meeting (every entry dated on it, plus the meeting's own thread). It only reads:
+it never writes a file and never runs git. If a file is invalid, it lists the errors instead.
+
 ## Recording an entry
 
 1. Append the entry at the end of the thread's `entries` list (never edit or remove a past entry;

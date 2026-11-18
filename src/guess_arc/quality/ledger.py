@@ -12,6 +12,10 @@ Public interface:
     render_overview(reqs) -> text of OVERVIEW.md
     canonicalise(folder)  -> rewrites the YAML files in canonical form
     regenerate(folder)    -> canonicalise, validate, write both views
+    read_thread(folder, req_id) -> a requirement's state and thread, with the
+                                   before → after of each spec change
+    meetings(folder)      -> every meeting, with its free thread and the
+                             requirement entries dated on it
 """
 
 from __future__ import annotations
@@ -399,6 +403,84 @@ def replay(folder: Path) -> list[Requirement]:
     requirements = [_replay_thread(yaml.safe_load(_read(path)))
                     for path in sorted((folder / REQUIREMENTS_DIR).glob("*.yaml"))]
     return sorted(requirements, key=lambda r: int(r.id.split("-")[1]))
+
+
+# --- Reading (local tool) ----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Change:
+    """One requirement field changed by an entry (`before` is None if it was unset)."""
+
+    field: str
+    before: object
+    after: object
+
+
+@dataclass(frozen=True)
+class ThreadEntry:
+    """One entry of a thread, with the spec fields it changed (empty for most types)."""
+
+    entry: dict
+    changes: list[Change]
+
+
+@dataclass(frozen=True)
+class Thread:
+    """A requirement's replayed state and its whole thread, oldest entry first."""
+
+    requirement: Requirement
+    entries: list[ThreadEntry]
+
+
+def read_thread(folder: Path, req_id: str) -> Thread:
+    """The thread of `req_id` in a valid `quality/` folder (FileNotFoundError if unknown)."""
+    if not ID_RE.fullmatch(req_id):
+        raise FileNotFoundError(req_id)
+    data = yaml.safe_load(_read(folder / REQUIREMENTS_DIR / f"{req_id}.yaml"))
+    spec: dict = {}
+    entries = []
+    for entry in data["entries"]:
+        changes = []
+        if entry["type"] in (*SPEC_CHANGES, "carried-over"):
+            changes = [Change(k, spec.get(k), v) for k, v in _spec_fields(entry).items()]
+        spec = {**spec, **_spec_fields(entry)}
+        entries.append(ThreadEntry(entry, changes))
+    return Thread(_replay_thread(data), entries)
+
+
+@dataclass(frozen=True)
+class RequirementEntry:
+    """A thread entry seen outside its thread: with its requirement and spec changes."""
+
+    req_id: str
+    entry: dict
+    changes: list[Change]
+
+
+@dataclass(frozen=True)
+class Meeting:
+    """A client meeting: its free thread, and every requirement entry dated on it."""
+
+    date: dt.date
+    theme: str
+    notes: list[dict]
+    entries: list[RequirementEntry]
+
+
+def meetings(folder: Path) -> list[Meeting]:
+    """Every meeting of a valid `quality/` folder, in date order."""
+    entries = [
+        RequirementEntry(req.id, e.entry, e.changes)
+        for req in replay(folder)
+        for e in read_thread(folder, req.id).entries
+    ]
+    deliveries = yaml.safe_load(_read(folder / DELIVERIES_FILE))["deliveries"]
+    return [
+        Meeting(m["date"], m["theme"], m["thread"],
+                [e for e in entries if e.entry["date"] == m["date"]])
+        for m in deliveries
+    ]
 
 
 # --- Rendering ---------------------------------------------------------------

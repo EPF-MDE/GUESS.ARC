@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quality ledger</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #5d6677; --line: #dde1e8;
+    --accent: #2f5fd0; --team: #e8eefc; --client: #fdf1e2; --code: #f0f2f5;
+    --before: #fbe3e3; --after: #def5e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171d; --card: #1d212a; --text: #e6e9ef; --muted: #9aa3b2; --line: #2f3542;
+      --accent: #7fa2ff; --team: #1f2b45; --client: #3a2c1a; --code: #11141a;
+      --before: #4a2426; --after: #1f3d29;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 24px;
+           display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header nav { display: flex; gap: 14px; flex-wrap: wrap; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  nav a.active { font-weight: 600; text-decoration: underline; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  h2 { margin: 8px 0 4px; } h3 { margin: 28px 0 10px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; }
+  .errors { border-color: #d33; } .errors li { font-family: ui-monospace, Consolas, monospace; font-size: 14px; }
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+  .filters input, .filters select { font: inherit; padding: 6px 8px; border: 1px solid var(--line);
+                                    border-radius: 6px; background: var(--card); color: var(--text); }
+  .filters input { flex: 1 1 220px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+  tbody tr { cursor: pointer; } tbody tr:hover { background: var(--bg); }
+  .nowrap { white-space: nowrap; }
+  dl.spec { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 12px 0 0; }
+  dl.spec dt { color: var(--muted); } dl.spec dd { margin: 0; }
+  .thread { display: flex; flex-direction: column; gap: 14px; }
+  .bubble { max-width: 78%; border-radius: 14px; padding: 10px 14px; border: 1px solid var(--line); }
+  .bubble.team { align-self: flex-start; background: var(--team); border-bottom-left-radius: 4px; }
+  .bubble.client { align-self: flex-end; background: var(--client); border-bottom-right-radius: 4px; }
+  .bubble .meta { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 99px;
+           background: var(--card); border: 1px solid var(--line); color: var(--text); }
+  .bubble p { margin: 6px 0; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: .9em; background: var(--code);
+         padding: 1px 4px; border-radius: 4px; }
+  pre { background: var(--code); padding: 10px; border-radius: 8px; overflow-x: auto; font-size: 13px; margin: 8px 0; }
+  pre code { background: none; padding: 0; }
+  table.changes { margin: 8px 0; font-size: 14px; }
+  table.changes td { border: 1px solid var(--line); }
+  td.before { background: var(--before); } td.after { background: var(--after); }
+  .legend { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  @media (max-width: 640px) { .bubble { max-width: 94%; } dl.spec { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Quality ledger</h1>
+  <nav id="nav"></nav>
+</header>
+<main id="main"><p class="muted">Loading…</p></main>
+<script>
+"use strict";
+const FIELDS = ["title", "statement", "characteristic", "metric", "why", "verification",
+                "when", "owner", "delivery", "recurring"];
+const LABELS = { title: "Title", statement: "Statement", characteristic: "Characteristic",
+  metric: "Metric & threshold", why: "Why (client need)", verification: "Verification",
+  when: "When", owner: "Owner", delivery: "Delivery", recurring: "Recurring" };
+const main = document.getElementById("main");
+const filters = { q: "", status: "", result: "", delivery: "", recurring: "" };
+let meetingsCache = null;
+
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// Just enough Markdown for the threads: paragraphs, "- " lists, `code`, **bold**, [links](url).
+function inline(text) {
+  return esc(text)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) =>
+      /^(https?:|#|[\w./-]+$)/.test(url) ? `<a href="${url}">${label}</a>` : m);
+}
+function md(text) {
+  return String(text).trim().split(/\n\s*\n/).map(block => {
+    const lines = block.split("\n");
+    if (lines.every(l => /^\s*[-*] /.test(l)))
+      return "<ul>" + lines.map(l => `<li>${inline(l.replace(/^\s*[-*] /, ""))}</li>`).join("") + "</ul>";
+    return `<p>${lines.map(inline).join("<br>")}</p>`;
+  }).join("");
+}
+function value(field, v) {
+  if (v === null || v === undefined) return '<span class="muted">(unset)</span>';
+  if (field === "recurring") return v ? "yes" : "no";
+  return md(v);
+}
+
+async function api(path) {
+  const response = await fetch(path);
+  const payload = await response.json();
+  if (!response.ok) throw payload.errors || [response.statusText];
+  return payload;
+}
+async function getMeetings() {
+  meetingsCache = await api("/api/meetings");
+  return meetingsCache;
+}
+
+function renderNav(active) {
+  const links = [["#/", "Requirements"], ...(meetingsCache || []).map(m =>
+    [`#/meeting/${m.date}`, `Meeting ${m.date}`])];
+  document.getElementById("nav").innerHTML = links.map(([href, label]) =>
+    `<a href="${href}" class="${href === active ? "active" : ""}">${esc(label)}</a>`).join("");
+}
+
+// --- Requirements table -------------------------------------------------------
+
+function options(name, values, all) {
+  return `<select data-filter="${name}"><option value="">${esc(all)}</option>` +
+    values.map(v => `<option${filters[name] === v ? " selected" : ""}>${esc(v)}</option>`).join("") +
+    "</select>";
+}
+function deliveryOf(r) { return r.spec.delivery || "backlog"; }
+
+async function showTable() {
+  const reqs = await api("/api/requirements");
+  const uniq = f => [...new Set(reqs.map(f))].sort();
+  main.innerHTML = `
+    <h2>Requirements</h2>
+    <p class="muted">${reqs.length} requirements. Click a row to read its thread.</p>
+    <div class="filters">
+      <input type="search" data-filter="q" placeholder="Search ID, title, statement…" value="${esc(filters.q)}">
+      ${options("status", uniq(r => r.client_status), "Any client status")}
+      ${options("result", uniq(r => r.latest_result), "Any latest result")}
+      ${options("delivery", uniq(deliveryOf), "Any delivery")}
+      ${options("recurring", ["yes", "no"], "Recurring or not")}
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>ID</th><th>Title</th><th>Client status</th><th>Latest result</th>
+        <th>Delivery</th><th>Recurring</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>`;
+  const fill = () => {
+    const q = filters.q.toLowerCase();
+    const shown = reqs.filter(r =>
+      (!q || [r.id, r.spec.title, r.spec.statement].join(" ").toLowerCase().includes(q)) &&
+      (!filters.status || r.client_status === filters.status) &&
+      (!filters.result || r.latest_result === filters.result) &&
+      (!filters.delivery || deliveryOf(r) === filters.delivery) &&
+      (!filters.recurring || (r.spec.recurring ? "yes" : "no") === filters.recurring));
+    document.getElementById("rows").innerHTML = shown.map(r => `
+      <tr data-id="${esc(r.id)}">
+        <td class="nowrap"><a href="#/req/${esc(r.id)}">${esc(r.id)}</a></td>
+        <td>${esc(r.spec.title)}</td>
+        <td class="nowrap">${esc(r.client_status)}</td>
+        <td>${esc(r.latest_result)}</td>
+        <td class="nowrap">${esc(deliveryOf(r))}</td>
+        <td>${r.spec.recurring ? "yes" : "no"}</td>
+      </tr>`).join("") || `<tr><td colspan="6" class="muted">No requirement matches.</td></tr>`;
+  };
+  main.querySelectorAll("[data-filter]").forEach(el =>
+    el.addEventListener("input", () => { filters[el.dataset.filter] = el.value; fill(); }));
+  document.getElementById("rows").addEventListener("click", e => {
+    const row = e.target.closest("tr[data-id]");
+    if (row) location.hash = `#/req/${row.dataset.id}`;
+  });
+  fill();
+}
+
+// --- Thread bubbles -----------------------------------------------------------
+
+function bubble(entry, changes, reqId) {
+  const parts = [];
+  if (changes && changes.length) {
+    parts.push(`<table class="changes"><tr><th>Field</th><th>Before</th><th>After</th></tr>` +
+      changes.map(c => `<tr><td>${esc(LABELS[c.field] || c.field)}</td>
+        <td class="before">${value(c.field, c.before)}</td>
+        <td class="after">${value(c.field, c.after)}</td></tr>`).join("") + "</table>");
+  } else if (entry.type === "proposed") {
+    parts.push('<dl class="spec">' + FIELDS.filter(f => f in entry).map(f =>
+      `<dt>${LABELS[f]}</dt><dd>${value(f, entry[f])}</dd>`).join("") + "</dl>");
+  }
+  if (entry.result) parts.push(`<p><strong>Result: ${esc(entry.result)}</strong></p>`);
+  if (entry.evidence) parts.push(`<div><strong>Evidence:</strong> ${md(entry.evidence)}</div>`);
+  if (entry.output) parts.push(`<pre><code>${esc(entry.output.replace(/\n$/, ""))}</code></pre>`);
+  if (entry.text) parts.push(md(entry.text));
+  const head = [
+    reqId ? `<a href="#/req/${esc(reqId)}">${esc(reqId)}</a>` : "",
+    entry.type ? `<span class="badge">${esc(entry.type)}</span>` : "",
+    esc(entry.date), esc(entry.by), entry.channel ? esc(entry.channel) : "",
+    entry.migrated ? "migrated" : "",
+  ].filter(Boolean).join(" · ");
+  return `<div class="bubble ${entry.by === "client" ? "client" : "team"}">
+    <div class="meta">${head}</div>${parts.join("")}</div>`;
+}
+const LEGEND = '<div class="legend"><span>◀ Team</span><span>Client ▶</span></div>';
+
+async function showRequirement(id) {
+  const { requirement: r, entries } = await api(`/api/requirements/${encodeURIComponent(id)}`);
+  const spec = r.spec;
+  main.innerHTML = `
+    <p><a href="#/">← All requirements</a></p>
+    <div class="card">
+      <h2>${esc(r.id)} · ${esc(spec.title)}</h2>
+      <p class="muted">Client status: <strong>${esc(r.client_status)}</strong> ·
+        Latest result: <strong>${esc(r.latest_result)}</strong> ·
+        ${r.open ? "open" : "closed"}${r.current ? " · current" : ""}</p>
+      <dl class="spec">${FIELDS.filter(f => f !== "title").map(f =>
+        `<dt>${LABELS[f]}</dt><dd>${f in spec ? value(f, spec[f]) :
+          (f === "delivery" ? "backlog" : '<span class="muted">(not set yet)</span>')}</dd>`).join("")}
+      </dl>
+    </div>
+    <h3>Thread (${entries.length} entries)</h3>
+    ${LEGEND}
+    <div class="thread">${entries.map(e => bubble(e.entry, e.changes)).join("")}</div>`;
+}
+
+// --- Meetings -------------------------------------------------------------------
+
+async function showMeeting(date) {
+  const meeting = meetingsCache.find(m => m.date === date);
+  if (!meeting) throw [`no meeting on ${date}`];
+  main.innerHTML = `
+    <h2>Meeting ${esc(meeting.date)}</h2>
+    <p class="muted">${esc(meeting.theme)}</p>
+    <h3>Requirement entries dated ${esc(meeting.date)} (${meeting.entries.length})</h3>
+    ${meeting.entries.length ? LEGEND + `<div class="thread">${meeting.entries.map(e =>
+      bubble(e.entry, e.changes, e.req_id)).join("")}</div>` : '<p class="muted">None.</p>'}
+    <h3>Meeting thread (${meeting.notes.length})</h3>
+    ${meeting.notes.length ? LEGEND + `<div class="thread">${meeting.notes.map(n =>
+      bubble(n)).join("")}</div>` : '<p class="muted">Empty.</p>'}`;
+}
+
+// --- Routing ---------------------------------------------------------------------
+
+async function route() {
+  const hash = location.hash || "#/";
+  try {
+    await getMeetings();
+    let m;
+    if ((m = hash.match(/^#\/req\/(REQ-\d+)$/))) await showRequirement(m[1]);
+    else if ((m = hash.match(/^#\/meeting\/([\d-]+)$/))) await showMeeting(m[1]);
+    else await showTable();
+    renderNav(hash.startsWith("#/req/") ? "#/" : hash);
+  } catch (errors) {
+    meetingsCache = null;
+    const list = Array.isArray(errors) ? errors : [String(errors)];
+    main.innerHTML = `<div class="card errors"><h2>Cannot show this page</h2>
+      <p>Fix the files below (or run <code>python scripts/quality/regenerate.py</code>), then reload.</p>
+      <ul>${list.map(e => `<li>${esc(e)}</li>`).join("")}</ul></div>`;
+  }
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

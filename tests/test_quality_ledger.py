@@ -495,6 +495,62 @@ class TestRegenerate(LedgerTestCase):
         self.assertFalse((self.folder / "OVERVIEW.md").exists())
 
 
+class TestReadThread(LedgerTestCase):
+    def test_spec_changes_show_each_changed_field_before_and_after(self):
+        self.write(thread(1, proposed(metric="Threshold 0.90."),
+                          client("amended", metric="Threshold 0.95."),
+                          team("carried-over", delivery=D(2026, 10, 30))))
+
+        read = ledger.read_thread(self.folder, "REQ-1")
+
+        self.assertEqual(read.requirement.spec["metric"], "Threshold 0.95.")
+        self.assertEqual([e.entry["type"] for e in read.entries],
+                         ["proposed", "amended", "carried-over"])
+        self.assertEqual(read.entries[0].changes, [])
+        self.assertEqual(read.entries[1].changes,
+                         [ledger.Change("metric", "Threshold 0.90.", "Threshold 0.95.")])
+        self.assertEqual(read.entries[2].changes,
+                         [ledger.Change("delivery", D(2026, 10, 23), D(2026, 10, 30))])
+
+    def test_unknown_or_malformed_id_is_not_found(self):
+        self.write(thread(1, proposed()))
+        for req_id in ("REQ-2", "../deliveries", "REQ-0"):
+            with self.subTest(req_id=req_id), self.assertRaises(FileNotFoundError):
+                ledger.read_thread(self.folder, req_id)
+
+
+class TestMeetings(LedgerTestCase):
+    def test_each_meeting_has_its_free_thread_and_the_entries_dated_on_it(self):
+        deliveries = {"deliveries": [
+            {"date": D(2026, 10, 23), "theme": "Taxonomy POC",
+             "thread": [{"date": D(2026, 10, 23), "by": "client", "text": "Satisfied."}]},
+            {"date": D(2026, 10, 30), "theme": "Entities", "thread": []},
+        ]}
+        self.write(thread(1, proposed(), verified(), client("accepted")),
+                   thread(2, proposed(), client("accepted"),
+                          client("signed-off", date=D(2026, 10, 30), result="⚠️")),
+                   deliveries=deliveries)
+
+        first, second = ledger.meetings(self.folder)
+
+        self.assertEqual((first.date, first.theme), (D(2026, 10, 23), "Taxonomy POC"))
+        self.assertEqual([n["text"] for n in first.notes], ["Satisfied."])
+        self.assertEqual([(e.req_id, e.entry["type"]) for e in first.entries],
+                         [("REQ-1", "accepted"), ("REQ-2", "accepted")])
+        self.assertEqual(second.notes, [])
+        self.assertEqual([(e.req_id, e.entry["type"]) for e in second.entries],
+                         [("REQ-2", "signed-off")])
+
+    def test_a_spec_change_dated_on_a_meeting_shows_before_and_after(self):
+        self.write(thread(1, proposed(metric="Threshold 0.90."),
+                          client("amended", metric="Threshold 0.95.")))
+
+        (meeting,) = ledger.meetings(self.folder)
+
+        self.assertEqual(meeting.entries[0].changes,
+                         [ledger.Change("metric", "Threshold 0.90.", "Threshold 0.95.")])
+
+
 class TestRealQualityFolder(unittest.TestCase):
     """CI guard: the committed quality/ folder is valid and its views are up to date."""
 
