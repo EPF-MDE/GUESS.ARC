@@ -18,7 +18,7 @@ D = dt.date
 
 
 def proposed(**overrides):
-    event = {
+    entry = {
         "date": D(2026, 10, 19),
         "by": "team",
         "type": "proposed",
@@ -35,27 +35,27 @@ def proposed(**overrides):
         "delivery": D(2026, 10, 23),
         "recurring": False,
     }
-    event.update(overrides)
-    return event
+    entry.update(overrides)
+    return entry
 
 
 def client(type_, **fields):
-    event = {"date": D(2026, 10, 23), "by": "client", "type": type_,
+    entry = {"date": D(2026, 10, 23), "by": "client", "type": type_,
              "channel": "client meeting", "text": "Konrad agreed."}
-    event.update(fields)
-    return event
+    entry.update(fields)
+    return entry
 
 
 def verified(result="✅", **fields):
-    event = {"date": D(2026, 10, 22), "by": "team", "type": "verified",
+    entry = {"date": D(2026, 10, 22), "by": "team", "type": "verified",
              "channel": "sprint", "text": "Checked.", "result": result,
              "evidence": "Commit `abc1234`."}
-    event.update(fields)
-    return event
+    entry.update(fields)
+    return entry
 
 
-def thread(number, *events):
-    return {"id": f"REQ-{number}", "events": list(events)}
+def thread(number, *entries):
+    return {"id": f"REQ-{number}", "entries": list(entries)}
 
 
 DELIVERIES = {
@@ -113,9 +113,9 @@ class TestValidate(LedgerTestCase):
         self.assertEqual(ledger.validate(self.folder), [])
         self.assertNotIn("#", path.read_text(encoding="utf-8"))
 
-    def test_unknown_event_type_is_reported(self):
+    def test_unknown_entry_type_is_reported(self):
         self.write(thread(1, proposed(), client("approved")))
-        self.assertReports(ledger.validate(self.folder), "REQ-1", "unknown event type 'approved'")
+        self.assertReports(ledger.validate(self.folder), "REQ-1", "unknown entry type 'approved'")
 
     def test_missing_required_field_for_a_type_is_reported(self):
         no_evidence = verified()
@@ -142,7 +142,7 @@ class TestValidate(LedgerTestCase):
 
     def test_proposed_not_first_is_reported(self):
         self.write(thread(1, client("accepted", date=D(2026, 10, 18)), proposed()))
-        self.assertReports(ledger.validate(self.folder), "first event must be 'proposed'")
+        self.assertReports(ledger.validate(self.folder), "first entry must be 'proposed'")
 
     def test_repeated_proposed_is_reported(self):
         self.write(thread(1, proposed(), proposed(date=D(2026, 10, 20))))
@@ -150,7 +150,7 @@ class TestValidate(LedgerTestCase):
 
     def test_dates_out_of_order_are_reported(self):
         self.write(thread(1, proposed(), client("accepted"), verified(date=D(2026, 10, 20))))
-        self.assertReports(ledger.validate(self.folder), "event 3", "before the previous event")
+        self.assertReports(ledger.validate(self.folder), "entry 3", "before the previous entry")
 
     def test_duplicate_ids_are_reported(self):
         self.write(thread(1, proposed()))
@@ -187,8 +187,8 @@ class TestValidate(LedgerTestCase):
 
 
 class TestReplay(LedgerTestCase):
-    def replayed(self, *events, **proposed_overrides):
-        self.write(thread(1, proposed(**proposed_overrides), *events))
+    def replayed(self, *entries, **proposed_overrides):
+        self.write(thread(1, proposed(**proposed_overrides), *entries))
         self.assertEqual(ledger.validate(self.folder), [])
         [requirement] = ledger.replay(self.folder)
         return requirement

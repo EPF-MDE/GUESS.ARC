@@ -1,6 +1,6 @@
 # All quality requirements
 
-> **Generated, do not edit.** Rebuilt from the threads in `requirements/` by `python scripts/quality/regenerate.py`. To change it, record an event in a thread and regenerate (see [README.md](README.md)).
+> **Generated, do not edit.** Rebuilt from the threads in `requirements/` by `python scripts/quality/regenerate.py`. To change it, record an entry in a thread and regenerate (see [README.md](README.md)).
 
 One line per requirement that ever existed. What must be reached now is in [CURRENT.md](CURRENT.md).
 

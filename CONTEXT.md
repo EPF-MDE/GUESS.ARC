@@ -109,3 +109,16 @@ Moment d'un Event qui s'étend sur plusieurs chapitres, tel que le chapitre le m
 
 **Flashback event**:
 Event raconté au chapitre t mais situé dans le passé de l'histoire. Signal pour l'état de l'histoire, jamais une cible de prédiction ni une vérité terrain.
+
+## Qualité
+
+**Requirement**:
+Exigence de qualité convenue avec le client, identifiée par `REQ-<n>` (jamais réutilisé). Vit dans un Thread de `quality/requirements/`.
+_Avoid_: Q1–Q3 (ce sont les critères de la grille d'évaluation)
+
+**Thread**:
+Historique d'une Requirement : liste datée et append-only d'Entries entre l'équipe et le client.
+
+**Entry**:
+Élément daté d'un Thread (`proposed`, `accepted`, `verified`, `signed-off`…), enregistré par l'équipe ou le client.
+_Avoid_: event (réservé aux Events des chapitres)

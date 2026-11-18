@@ -1,7 +1,7 @@
 """Quality ledger: load, validate, replay and render a `quality/` folder.
 
 Each quality requirement is a thread (`requirements/REQ-<n>.yaml`): an
-append-only, dated list of events between the team and the client. The threads
+append-only, dated list of entries between the team and the client. The threads
 are the single source of truth; `CURRENT.md` and `OVERVIEW.md` are generated
 from their replay. Meetings live in `deliveries.yaml`.
 
@@ -34,8 +34,8 @@ REQUIREMENT_FIELDS = (
 
 # Canonical key order of each kind of mapping. Unknown keys go last (and are
 # reported by validate()).
-THREAD_KEYS = ("id", "events")
-EVENT_KEYS = ("date", "by", "type", "channel", "migrated", *REQUIREMENT_FIELDS,
+THREAD_KEYS = ("id", "entries")
+ENTRY_KEYS = ("date", "by", "type", "channel", "migrated", *REQUIREMENT_FIELDS,
               "result", "evidence", "output", "text")
 DELIVERIES_KEYS = ("deliveries",)
 MEETING_KEYS = ("date", "theme", "thread")
@@ -49,8 +49,8 @@ CHARACTERISTICS = (
     "Reliability", "Security", "Maintainability", "Portability",
 )
 COMMON_REQUIRED = ("date", "by", "type", "channel", "text")
-# Event type -> (who records it, None if either; required fields; optional fields).
-EVENT_TYPES = {
+# Entry type -> (who records it, None if either; required fields; optional fields).
+ENTRY_TYPES = {
     "proposed": ("team", REQUIREMENT_FIELDS, ()),
     "accepted": ("client", (), ()),
     "rejected": ("client", (), ()),
@@ -65,7 +65,7 @@ EVENT_TYPES = {
 
 class _Dumper(yaml.SafeDumper):
     def ignore_aliases(self, data):
-        # Equal values shared between events (a date, say) are written out each time.
+        # Equal values shared between entries (a date, say) are written out each time.
         return True
 
 
@@ -109,8 +109,8 @@ def _canonical_data(path: Path, data):
             ]
         return {**data, "deliveries": meetings} if "deliveries" in data else data
     data = _ordered(data, THREAD_KEYS)
-    if "events" in data:
-        data["events"] = _ordered_items(data["events"], EVENT_KEYS)
+    if "entries" in data:
+        data["entries"] = _ordered_items(data["entries"], ENTRY_KEYS)
     return data
 
 
@@ -157,7 +157,7 @@ def canonicalise(folder: Path) -> list[Path]:
 
 
 def _is_date(value) -> bool:
-    # datetime is a subclass of date: a timestamp is not a valid event date.
+    # datetime is a subclass of date: a timestamp is not a valid entry date.
     return type(value) is dt.date
 
 
@@ -199,34 +199,34 @@ def _check_keys(mapping: dict, keys) -> list[str]:
             + [f"unexpected field '{k}'" for k in mapping if k not in keys])
 
 
-def _validate_events(name: str, events: list) -> list[str]:
+def _validate_entries(name: str, entries: list) -> list[str]:
     errors = []
-    first = events[0].get("type") if isinstance(events[0], dict) else None
+    first = entries[0].get("type") if isinstance(entries[0], dict) else None
     if first != "proposed":
-        errors.append(f"{name}: the first event must be 'proposed'")
+        errors.append(f"{name}: the first entry must be 'proposed'")
     previous_date = None
-    for number, event in enumerate(events, start=1):
-        where = f"{name}: event {number}"
-        if not isinstance(event, dict):
+    for number, entry in enumerate(entries, start=1):
+        where = f"{name}: entry {number}"
+        if not isinstance(entry, dict):
             errors.append(f"{where}: expected a mapping")
             continue
-        type_ = event.get("type")
-        if type_ not in EVENT_TYPES:
-            errors.append(f"{where}: unknown event type {type_!r} "
-                          f"(expected one of {', '.join(EVENT_TYPES)})")
+        type_ = entry.get("type")
+        if type_ not in ENTRY_TYPES:
+            errors.append(f"{where}: unknown entry type {type_!r} "
+                          f"(expected one of {', '.join(ENTRY_TYPES)})")
             continue
-        author, required, optional = EVENT_TYPES[type_]
+        author, required, optional = ENTRY_TYPES[type_]
         where = f"{where} {type_}"
         errors += [f"{where}: {e}" for e in _check_fields(
-            event, (*COMMON_REQUIRED, *required), ("migrated", *optional))]
-        if author and event.get("by") in AUTHORS and event["by"] != author:
+            entry, (*COMMON_REQUIRED, *required), ("migrated", *optional))]
+        if author and entry.get("by") in AUTHORS and entry["by"] != author:
             errors.append(f"{where}: must be by {author}")
         if type_ == "proposed" and number > 1 and first == "proposed":
             errors.append(f"{where}: 'proposed' appears more than once")
-        date = event.get("date")
+        date = entry.get("date")
         if _is_date(date):
             if previous_date is not None and date < previous_date:
-                errors.append(f"{where}: date {date} is before the previous event "
+                errors.append(f"{where}: date {date} is before the previous entry "
                               f"({previous_date})")
             previous_date = date
     return errors
@@ -234,19 +234,19 @@ def _validate_events(name: str, events: list) -> list[str]:
 
 def _validate_thread(name: str, data) -> list[str]:
     if not isinstance(data, dict):
-        return [f"{name}: expected a mapping with 'id' and 'events'"]
+        return [f"{name}: expected a mapping with 'id' and 'entries'"]
     errors = [f"{name}: {e}" for e in _check_keys(data, THREAD_KEYS)]
     req_id = data.get("id")
     if "id" in data and (not isinstance(req_id, str) or not ID_RE.fullmatch(req_id)):
         errors.append(f"{name}: id {req_id!r} is not of the form REQ-<n>")
     elif "id" in data and name != f"{req_id}.yaml":
         errors.append(f"{name}: file name does not match id {req_id}")
-    events = data.get("events")
-    if "events" in data:
-        if isinstance(events, list) and events:
-            errors += _validate_events(name, events)
+    entries = data.get("entries")
+    if "entries" in data:
+        if isinstance(entries, list) and entries:
+            errors += _validate_entries(name, entries)
         else:
-            errors.append(f"{name}: events must be a non-empty list")
+            errors.append(f"{name}: entries must be a non-empty list")
     return errors
 
 
@@ -334,16 +334,16 @@ def _replay_thread(data: dict) -> Requirement:
     spec: dict = {}
     status = "awaiting client"
     latest_verification = None
-    for event in data["events"]:
-        type_ = event["type"]
+    for entry in data["entries"]:
+        type_ = entry["type"]
         if type_ == "proposed":
-            spec = {k: event[k] for k in REQUIREMENT_FIELDS}
+            spec = {k: entry[k] for k in REQUIREMENT_FIELDS}
         elif type_ in ("accepted", "rejected"):
             status = type_
         elif type_ == "signed-off":
-            status = f"signed off {event['result']}"
+            status = f"signed off {entry['result']}"
         elif type_ == "verified":
-            latest_verification = event
+            latest_verification = entry
     open_ = status not in ("signed off ✅", "rejected")
     return Requirement(
         id=data["id"],
@@ -370,7 +370,7 @@ OVERVIEW_FILE = "OVERVIEW.md"
 
 _GENERATED = (
     "> **Generated, do not edit.** Rebuilt from the threads in `requirements/` by "
-    "`python scripts/quality/regenerate.py`. To change it, record an event in a thread "
+    "`python scripts/quality/regenerate.py`. To change it, record an entry in a thread "
     "and regenerate (see [README.md](README.md))."
 )
 
@@ -379,7 +379,7 @@ _GRID = """\
 |---|---|---|
 | **Q1** | You questioned and specified the quality requirements of your product | Each requirement below: statement, characteristic, metric & threshold, why. Its thread shows what the team proposed and what the client accepted, amended or rejected. |
 | **Q2** | You defined how you'll know each requirement is met | *Verification*, *When* and *Owner* of each requirement below |
-| **Q3** | You actually ran those checks | *Latest result* and its evidence below; every `verified` event, with its evidence and raw output, in the threads |"""
+| **Q3** | You actually ran those checks | *Latest result* and its evidence below; every `verified` entry, with its evidence and raw output, in the threads |"""
 
 
 def _cell(value) -> str:

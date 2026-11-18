@@ -2,8 +2,11 @@
 
 The quality requirements agreed with the client (Konrad), how each one is verified, and the
 evidence that it was. **Each requirement is a conversation thread** between the team and the
-client: an append-only, dated list of events. The threads are the single source of truth; the
+client: an append-only, dated list of entries. The threads are the single source of truth; the
 Markdown views are generated from them.
+
+A thread is made of **entries**, never "events": in this repo, an Event is something that happens
+in a chapter (see `CONTEXT.md`).
 
 > **Migration in progress.** Only the 23/10 delivery (REQ-1 to REQ-4) has been moved here so
 > far. Until the migration is finished, `QUALITY.md` at the repo root stays the reference for
@@ -13,9 +16,9 @@ Markdown views are generated from them.
 
 | Grid | What it asks | Where it is shown |
 |---|---|---|
-| **Q1** | You questioned and specified the quality requirements of your product | [CURRENT.md](CURRENT.md) (spec of every current requirement) and the `proposed` / `accepted` / `rejected` events of each thread |
+| **Q1** | You questioned and specified the quality requirements of your product | [CURRENT.md](CURRENT.md) (spec of every current requirement) and the `proposed` / `accepted` / `rejected` entries of each thread |
 | **Q2** | You defined how you'll know each requirement is met | The *Verification*, *When* and *Owner* of each requirement in [CURRENT.md](CURRENT.md) |
-| **Q3** | You actually ran those checks | The `verified` events (result, evidence, raw output) of each thread; the latest one is in [CURRENT.md](CURRENT.md) |
+| **Q3** | You actually ran those checks | The `verified` entries (result, evidence, raw output) of each thread; the latest one is in [CURRENT.md](CURRENT.md) |
 
 | File | What it is |
 |---|---|
@@ -29,21 +32,21 @@ Markdown views are generated from them.
 
 Sprints last one week; the client is seen once per sprint, at the Thursday meeting.
 
-1. **Sprint planning (team only):** the team records a `proposed` event. The requirement is then
+1. **Sprint planning (team only):** the team records a `proposed` entry. The requirement is then
    *awaiting client*, and the team already works on it.
-2. **During the sprint:** the team records `verified` events: its own check result, with evidence.
+2. **During the sprint:** the team records `verified` entries: its own check result, with evidence.
 3. **Client meeting, for each requirement, in this order:** first the client's decision on the
    spec (`accepted` / `rejected`), then the client's verdict on whether it was reached
    (`signed-off` ✅ / ⚠️ / ❌), judged against the spec just accepted.
 
-The team writes everything. Client events record what Konrad said, quoted or faithfully
+The team writes everything. Client entries record what Konrad said, quoted or faithfully
 paraphrased, with the date and the channel. Konrad never edits the files.
 
 ## A thread
 
 ```yaml
 id: REQ-7
-events:
+entries:
 - date: 2026-11-16
   by: team
   type: proposed
@@ -71,13 +74,13 @@ events:
   text: Run on the full corpus.
 ```
 
-Every event has `date` (YYYY-MM-DD), `by` (`team` or `client`), `type`, `channel` (sprint
-planning, client meeting, Teams, mail…) and `text` (free Markdown). Events reconstructed from the
+Every entry has `date` (YYYY-MM-DD), `by` (`team` or `client`), `type`, `channel` (sprint
+planning, client meeting, Teams, mail…) and `text` (free Markdown). Entries reconstructed from the
 old `QUALITY.md` carry `migrated: true`. Dates never go backwards within a thread.
 
-| Event type | By | Carries |
+| Entry type | By | Carries |
 |---|---|---|
-| `proposed` | team | Every requirement field (below). Always the first event, and only once. |
+| `proposed` | team | Every requirement field (below). Always the first entry, and only once. |
 | `accepted` | client | Nothing: the client agrees with the spec. |
 | `rejected` | client | Nothing: the client refuses the spec. |
 | `verified` | team | `result` (✅ / ⚠️ / ❌), `evidence` (links to commits, PRs, files), optional `output` (raw text, shown as a code block). |
@@ -93,13 +96,13 @@ sprint or in CI).
 
 **Derived state.** The client status is *awaiting client* until the client's first decision, then
 follows the latest `accepted` / `rejected` / `signed-off`. The latest result is that of the latest
-`verified` event (⏳ if none). A requirement is **open** until it is signed off ✅ or rejected.
+`verified` entry (⏳ if none). A requirement is **open** until it is signed off ✅ or rejected.
 [CURRENT.md](CURRENT.md) lists the open requirements plus the recurring ones signed off ✅, so a
 regression still shows up. Nothing depends on today's date.
 
-## Recording an event
+## Recording an entry
 
-1. Append the event at the end of the thread's `events` list (never edit or remove a past event;
+1. Append the entry at the end of the thread's `entries` list (never edit or remove a past entry;
    fixing a genuine typo by hand is fine, git keeps the trace). A new requirement takes the next
    free `REQ-<n>` and starts with `proposed`. A meeting goes in `deliveries.yaml`.
 2. Run, from the repo root:
