@@ -29,4 +29,4 @@ entries:
   type: accepted
   channel: client meeting
   migrated: true
-  text: 'Konrad validated REQ-10 at the 30/10 delivery (QUALITY.md §1: "☑ 2026-10-30, Konrad"). QUALITY.md records no verdict from him on whether it was reached.'
+  text: 'Konrad validated REQ-10 at the 30/10 delivery (QUALITY.md §1: "☑ 2026-10-30, Konrad"). He validated the pipeline design the team chose as the target, not a result (confirmed by the team when migrating).'

@@ -22,7 +22,7 @@ The Silver corpus covers every published chapter, 1 to 1193, with no gaps.
 - **Owner:** Team
 - **Delivery:** 2026-10-30
 - **Recurring:** yes
-- **Client status:** awaiting client
+- **Client status:** signed off ✅
 - **Latest result:** ✅ (2026-10-26)
 
 Evidence:
@@ -52,7 +52,7 @@ Every Silver File has a front-matter whose `chapter` matches its file name, `com
 - **Owner:** Team
 - **Delivery:** 2026-10-30
 - **Recurring:** yes
-- **Client status:** awaiting client
+- **Client status:** signed off ✅
 - **Latest result:** ✅ (2026-10-26)
 
 Evidence:
@@ -82,7 +82,7 @@ Every Silver File has a non-empty Long Summary, plus its Short Summary and Chapt
 - **Owner:** Team
 - **Delivery:** 2026-10-30
 - **Recurring:** yes
-- **Client status:** awaiting client
+- **Client status:** signed off ✅
 - **Latest result:** ✅ (2026-10-26)
 
 Evidence:
@@ -112,7 +112,7 @@ The header's `character_count` matches the Characters actually listed.
 - **Owner:** Team
 - **Delivery:** 2026-10-30
 - **Recurring:** yes
-- **Client status:** awaiting client
+- **Client status:** signed off ✅
 - **Latest result:** ✅ (2026-10-26)
 
 Evidence:

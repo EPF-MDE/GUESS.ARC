@@ -31,3 +31,16 @@ entries:
     Mots du Long Summary      : min 97, médiane 598, max 2094
     RÉSULTAT                  : OK
   text: 'Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-30): the 2026-10-26 run of `scripts/quality/check_silver.py` behind REQ-5 to REQ-8, its output kept verbatim. To check that the check itself works, it was run on a copy of two chapters with one Long Summary emptied and `--expected 3`: it reported `Chapitres manquants : [3]` and `chapter_0002.md: Long Summary vide`, then exited with code 1.'
+- date: 2026-10-30
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: Konrad validated the spec of REQ-8 at the 30/10 delivery (confirmed by the team when migrating; QUALITY.md §1 left it unticked).
+- date: 2026-10-30
+  by: client
+  type: signed-off
+  channel: client meeting
+  migrated: true
+  result: ✅
+  text: 'Konrad validated the result of REQ-8 at the 30/10 delivery: the 2026-10-26 `check_silver.py` run (confirmed by the team when migrating).'
