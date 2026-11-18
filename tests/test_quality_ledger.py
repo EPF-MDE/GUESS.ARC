@@ -551,6 +551,168 @@ class TestMeetings(LedgerTestCase):
                          [ledger.Change("metric", "Threshold 0.90.", "Threshold 0.95.")])
 
 
+class TestAppend(LedgerTestCase):
+    """Recording from the local tool: appends only, validated, views regenerated."""
+
+    def path(self, req_id):
+        return self.folder / "requirements" / f"{req_id}.yaml"
+
+    def test_add_entry_keeps_earlier_entries_byte_identical_and_regenerates_the_views(self):
+        self.write(thread(1, proposed(), verified()))
+        before = self.path("REQ-1").read_bytes()
+
+        ledger.add_entry(self.folder, "REQ-1", client("accepted"))
+
+        after = self.path("REQ-1").read_bytes()
+        self.assertTrue(after.startswith(before), "earlier entries were rewritten")
+        self.assertIn(b"type: accepted", after[len(before):])
+        self.assertEqual(ledger.validate(self.folder), [])
+        self.assertIn("| REQ-1 | Schema with ADRs | 2026-10-23 | accepted | ✅ |",
+                      (self.folder / "OVERVIEW.md").read_text(encoding="utf-8"))
+
+    def test_crlf_checkout_keeps_earlier_entries_byte_identical(self):
+        self.write(thread(1, proposed()))
+        path = self.path("REQ-1")
+        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        before = path.read_bytes()
+
+        ledger.add_entry(self.folder, "REQ-1", client("accepted"))
+
+        self.assertTrue(path.read_bytes().startswith(before))
+
+    def snapshot(self):
+        return {p.name: p.read_bytes() for p in self.folder.rglob("*") if p.is_file()}
+
+    def test_invalid_entry_is_refused_with_the_errors_and_nothing_is_written(self):
+        self.write(thread(1, proposed(), verified()))
+        ledger.regenerate(self.folder)
+        before = self.snapshot()
+        invalid = {
+            "unknown type": client("approved"),
+            "missing field": client("signed-off"),
+            "date going back": client("accepted", date=D(2026, 10, 1)),
+            "second proposed": proposed(date=D(2026, 10, 23)),
+        }
+        for case, entry in invalid.items():
+            with self.subTest(case), self.assertRaises(ledger.AppendRefused) as refused:
+                ledger.add_entry(self.folder, "REQ-1", entry)
+            self.assertTrue(refused.exception.errors)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_entry_to_an_unknown_requirement_is_refused(self):
+        self.write(thread(1, proposed()))
+        for req_id in ("REQ-2", "../deliveries"):
+            with self.subTest(req_id=req_id), self.assertRaises(ledger.AppendRefused):
+                ledger.add_entry(self.folder, req_id, client("accepted"))
+
+    def test_entry_recorded_live_cannot_be_flagged_migrated(self):
+        self.write(thread(1, proposed()))
+        with self.assertRaises(ledger.AppendRefused) as refused:
+            ledger.add_entry(self.folder, "REQ-1", client("accepted", migrated=True))
+        self.assertReports(refused.exception.errors, "migrated")
+
+    def test_append_to_an_already_invalid_folder_is_refused(self):
+        self.write(thread(1, proposed()), thread(2, proposed(), client("approved")))
+        with self.assertRaises(ledger.AppendRefused) as refused:
+            ledger.add_entry(self.folder, "REQ-1", client("accepted"))
+        self.assertReports(refused.exception.errors, "unknown entry type 'approved'")
+        self.assertNotIn("accepted", self.path("REQ-1").read_text(encoding="utf-8"))
+
+    def test_create_requirement_takes_the_next_id_and_regenerates_the_views(self):
+        self.write(thread(1, proposed()), thread(2, proposed()))
+
+        req_id = ledger.create_requirement(self.folder, proposed(title="Fast parser"))
+
+        self.assertEqual(req_id, "REQ-3")
+        self.assertEqual(ledger.validate(self.folder), [])
+        (created,) = [r for r in ledger.replay(self.folder) if r.id == "REQ-3"]
+        self.assertEqual((created.spec["title"], created.client_status),
+                         ("Fast parser", "awaiting client"))
+        self.assertIn("| REQ-3 | Fast parser |",
+                      (self.folder / "OVERVIEW.md").read_text(encoding="utf-8"))
+
+    def test_ids_of_dropped_or_rejected_requirements_are_never_reused(self):
+        self.write(thread(1, proposed()),
+                   thread(2, proposed(), client("rejected")),
+                   thread(3, proposed(), team("dropped")))
+        self.assertEqual(ledger.create_requirement(self.folder, proposed()), "REQ-4")
+
+    def test_ids_follow_the_highest_number_not_the_file_count(self):
+        self.write(thread(1, proposed()), thread(9, proposed()), thread(10, proposed()))
+        self.assertEqual(ledger.create_requirement(self.folder, proposed()), "REQ-11")
+
+    def test_create_requirement_accepts_iso_dates_as_sent_by_the_tool(self):
+        self.write(thread(1, proposed()))
+        req_id = ledger.create_requirement(
+            self.folder, proposed(date="2026-11-23", delivery="2026-11-26"))
+        (created,) = [r for r in ledger.replay(self.folder) if r.id == req_id]
+        self.assertEqual(created.spec["delivery"], D(2026, 11, 26))
+
+    def test_invalid_proposal_is_refused_and_no_file_is_created(self):
+        self.write(thread(1, proposed()))
+        incomplete = proposed()
+        del incomplete["metric"]
+        for case, entry in {"incomplete spec": incomplete,
+                            "not a proposal": client("accepted"),
+                            "bad date": proposed(delivery="next Thursday")}.items():
+            with self.subTest(case), self.assertRaises(ledger.AppendRefused):
+                ledger.create_requirement(self.folder, entry)
+            self.assertEqual(sorted(p.name for p in (self.folder / "requirements").iterdir()),
+                             ["REQ-1.yaml"])
+
+    def test_add_meeting_appends_it_with_an_empty_thread(self):
+        self.write(thread(1, proposed()))
+        deliveries = self.folder / "deliveries.yaml"
+        before = deliveries.read_bytes()
+
+        ledger.add_meeting(self.folder, {"date": "2026-10-30", "theme": "Entities"})
+
+        self.assertTrue(deliveries.read_bytes().startswith(before))
+        last = ledger.meetings(self.folder)[-1]
+        self.assertEqual((last.date, last.theme, last.notes),
+                         (D(2026, 10, 30), "Entities", []))
+
+    def test_meeting_not_after_the_last_one_is_refused(self):
+        self.write(thread(1, proposed()))
+        before = (self.folder / "deliveries.yaml").read_bytes()
+        for case, meeting in {"same date": {"date": "2026-10-23", "theme": "Again"},
+                              "no theme": {"date": "2026-10-30"}}.items():
+            with self.subTest(case), self.assertRaises(ledger.AppendRefused):
+                ledger.add_meeting(self.folder, meeting)
+            self.assertEqual((self.folder / "deliveries.yaml").read_bytes(), before)
+
+    def test_add_meeting_note_appends_to_that_meetings_thread_only(self):
+        deliveries = {"deliveries": [
+            {"date": D(2026, 10, 23), "theme": "Taxonomy POC", "thread": []},
+            {"date": D(2026, 10, 30), "theme": "Entities",
+             "thread": [{"date": D(2026, 10, 30), "by": "client", "text": "Satisfied."}]},
+        ]}
+        self.write(thread(1, proposed()), deliveries=deliveries)
+        before = (self.folder / "deliveries.yaml").read_bytes()
+
+        ledger.add_meeting_note(self.folder, "2026-10-30", {
+            "date": "2026-10-30", "by": "team", "channel": "client meeting",
+            "text": "Decision: move on to the GRU."})
+
+        self.assertTrue((self.folder / "deliveries.yaml").read_bytes().startswith(before))
+        first, second = ledger.meetings(self.folder)
+        self.assertEqual(first.notes, [])
+        self.assertEqual([n["text"] for n in second.notes],
+                         ["Satisfied.", "Decision: move on to the GRU."])
+
+    def test_note_to_an_unknown_meeting_or_invalid_note_is_refused(self):
+        self.write(thread(1, proposed()))
+        before = (self.folder / "deliveries.yaml").read_bytes()
+        note = {"date": "2026-10-23", "by": "client", "text": "Fine."}
+        cases = {"unknown meeting": ("2026-10-30", note),
+                 "bad author": ("2026-10-23", {**note, "by": "Konrad"}),
+                 "no text": ("2026-10-23", {"date": "2026-10-23", "by": "client"})}
+        for case, (meeting_date, bad) in cases.items():
+            with self.subTest(case), self.assertRaises(ledger.AppendRefused):
+                ledger.add_meeting_note(self.folder, meeting_date, bad)
+            self.assertEqual((self.folder / "deliveries.yaml").read_bytes(), before)
+
+
 class TestRealQualityFolder(unittest.TestCase):
     """CI guard: the committed quality/ folder is valid and its views are up to date."""
 

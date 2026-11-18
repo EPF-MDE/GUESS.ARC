@@ -16,12 +16,22 @@ Public interface:
                                    before → after of each spec change
     meetings(folder)      -> every meeting, with its free thread and the
                              requirement entries dated on it
+
+Appending (the local tool records with these; nothing ever edits or removes a
+past entry). Each one rewrites the file canonically, validates the folder and
+regenerates the views; an append that would leave the folder invalid raises
+AppendRefused with the errors, and nothing is written:
+    add_entry(folder, req_id, entry)
+    create_requirement(folder, proposal) -> the new ID (never reused)
+    add_meeting(folder, meeting)
+    add_meeting_note(folder, meeting_date, note)
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -599,3 +609,126 @@ def regenerate(folder: Path) -> list[str]:
     _write(folder / CURRENT_FILE, render_current(requirements))
     _write(folder / OVERVIEW_FILE, render_overview(requirements))
     return []
+
+
+# --- Appending (local tool) --------------------------------------------------
+
+
+class AppendRefused(Exception):
+    """An append that would leave the folder invalid: nothing was written."""
+
+    def __init__(self, errors: list[str]):
+        super().__init__("\n".join(errors))
+        self.errors = errors
+
+
+# One append at a time: each one reads, writes, validates and regenerates the folder.
+_APPEND_LOCK = threading.Lock()
+
+
+def _checked_write(folder: Path, path: Path, data) -> None:
+    """Write `data` canonically to `path`, keep it only if the folder stays valid,
+    then regenerate the views. Raises AppendRefused (file restored) otherwise."""
+    before = path.read_bytes() if path.exists() else None
+    # Keep the file's line endings (CRLF on a Windows checkout with autocrlf), so
+    # that the earlier entries stay byte-identical.
+    newline = "\r\n" if before and b"\r\n" in before else "\n"
+    path.write_text(_canonical_text(path, data), encoding="utf-8", newline=newline)
+    errors = validate(folder)
+    if errors:
+        if before is None:
+            path.unlink()
+        else:
+            path.write_bytes(before)
+        raise AppendRefused(errors)
+    regenerate(folder)
+
+
+def _check_appendable(folder: Path, record: dict) -> None:
+    """Refuse before writing if the folder is invalid or `record` claims to be migrated."""
+    errors = validate(folder)
+    if errors:
+        raise AppendRefused(["the quality folder is already invalid, fix it by hand first:",
+                             *errors])
+    if "migrated" in record:
+        raise AppendRefused(["'migrated' is only for entries reconstructed from QUALITY.md, "
+                             "never for one recorded live"])
+
+
+def _from_json(record: dict) -> dict:
+    """`record` with its ISO date strings (as sent by the local tool) turned into dates.
+    A string that is not a valid date is kept as is, and validation reports it."""
+    converted = dict(record)
+    for key in ("date", "delivery"):
+        if isinstance(converted.get(key), str):
+            try:
+                converted[key] = dt.date.fromisoformat(converted[key])
+            except ValueError:
+                pass
+    return converted
+
+
+def add_entry(folder: Path, req_id: str, entry: dict) -> None:
+    """Append `entry` at the end of the thread of `req_id`, then regenerate the views.
+
+    Earlier entries are never touched. Dates may be ISO strings. Raises
+    AppendRefused, with nothing written, if the result would be invalid.
+    """
+    entry = _from_json(entry)
+    with _APPEND_LOCK:
+        _check_appendable(folder, entry)
+        path = folder / REQUIREMENTS_DIR / f"{req_id}.yaml"
+        if not ID_RE.fullmatch(req_id) or not path.exists():
+            raise AppendRefused([f"unknown requirement {req_id}"])
+        data = yaml.safe_load(_read(path))
+        data["entries"].append(entry)
+        _checked_write(folder, path, data)
+
+
+def create_requirement(folder: Path, proposal: dict) -> str:
+    """Create the thread of a new requirement, starting with `proposal` (a `proposed`
+    entry), then regenerate the views. Returns its ID: one more than the highest
+    existing ID, so the ID of a dropped or rejected requirement is never reused.
+    Raises AppendRefused, with nothing written, if the result would be invalid.
+    """
+    proposal = _from_json(proposal)
+    with _APPEND_LOCK:
+        _check_appendable(folder, proposal)
+        numbers = [int(p.stem.split("-")[1])
+                   for p in (folder / REQUIREMENTS_DIR).glob("*.yaml") if ID_RE.fullmatch(p.stem)]
+        req_id = f"REQ-{max(numbers, default=0) + 1}"
+        _checked_write(folder, folder / REQUIREMENTS_DIR / f"{req_id}.yaml",
+                       {"id": req_id, "entries": [proposal]})
+        return req_id
+
+
+def add_meeting(folder: Path, meeting: dict) -> None:
+    """Append a client meeting (`date`, `theme`) with an empty free thread to
+    deliveries.yaml, then regenerate the views. Dates may be ISO strings.
+    Raises AppendRefused, with nothing written, if the result would be invalid.
+    """
+    meeting = _from_json(meeting)
+    with _APPEND_LOCK:
+        _check_appendable(folder, meeting)
+        path = folder / DELIVERIES_FILE
+        data = yaml.safe_load(_read(path))
+        data["deliveries"].append({**meeting, "thread": []})
+        _checked_write(folder, path, data)
+
+
+def add_meeting_note(folder: Path, meeting_date, note: dict) -> None:
+    """Append `note` to the free thread of the meeting held on `meeting_date`, then
+    regenerate the views. Dates may be ISO strings. Raises AppendRefused, with
+    nothing written, if the meeting is unknown or the result would be invalid.
+    """
+    meeting_date = _from_json({"date": meeting_date})["date"]
+    note = _from_json(note)
+    with _APPEND_LOCK:
+        _check_appendable(folder, note)
+        path = folder / DELIVERIES_FILE
+        data = yaml.safe_load(_read(path))
+        matching = [m for m in data["deliveries"] if m["date"] == meeting_date]
+        if not matching:
+            raise AppendRefused([f"no meeting on {meeting_date}"])
+        matching[0]["thread"].append(note)
+        _checked_write(folder, path, data)

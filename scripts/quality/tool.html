@@ -60,7 +60,26 @@
   table.changes td { border: 1px solid var(--line); }
   td.before { background: var(--before); } td.after { background: var(--after); }
   .legend { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
-  @media (max-width: 640px) { .bubble { max-width: 94%; } dl.spec { grid-template-columns: 1fr; } }
+  form.record { margin-top: 28px; }
+  form.record h3 { margin-top: 0; }
+  .form-grid { display: grid; grid-template-columns: max-content 1fr; gap: 10px 16px; align-items: start; }
+  .form-grid label { color: var(--muted); padding-top: 6px; }
+  .form-grid input, .form-grid select, .form-grid textarea {
+    font: inherit; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--text); }
+  .form-grid input[type=checkbox] { width: auto; margin-top: 10px; }
+  .form-grid textarea { min-height: 3.2em; resize: vertical; }
+  .form-grid textarea.output { font-family: ui-monospace, Consolas, monospace; font-size: 13px; min-height: 6em; }
+  .form-grid .hint { grid-column: 2; margin-top: -6px; font-size: 13px; color: var(--muted); }
+  .form-grid .changed { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .actions { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 600; padding: 7px 16px; border-radius: 6px; border: 0;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .form-errors { color: #d33; } .form-errors li { font-family: ui-monospace, Consolas, monospace; font-size: 14px; }
+  .notice { border-color: var(--accent); margin-bottom: 14px; }
+  @media (max-width: 640px) { .bubble { max-width: 94%; } dl.spec { grid-template-columns: 1fr; }
+    .form-grid { grid-template-columns: 1fr; } .form-grid .hint { grid-column: 1; } }
 </style>
 </head>
 <body>
@@ -117,10 +136,24 @@ async function getMeetings() {
   meetingsCache = await api("/api/meetings");
   return meetingsCache;
 }
+let vocab = null;
+async function getVocabulary() {
+  vocab = vocab || await api("/api/vocabulary");
+  return vocab;
+}
+// Every write is an append (POST); the ledger module validates it and regenerates the views.
+async function post(path, body) {
+  const response = await fetch(path, { method: "POST", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json" } });
+  const payload = await response.json();
+  if (!response.ok) throw payload.errors || [response.statusText];
+  return payload;
+}
 
 function renderNav(active) {
   const links = [["#/", "Requirements"], ...(meetingsCache || []).map(m =>
-    [`#/meeting/${m.date}`, `Meeting ${m.date}`])];
+    [`#/meeting/${m.date}`, `Meeting ${m.date}`]),
+    ["#/new", "+ Requirement"], ["#/new-meeting", "+ Meeting"]];
   document.getElementById("nav").innerHTML = links.map(([href, label]) =>
     `<a href="${href}" class="${href === active ? "active" : ""}">${esc(label)}</a>`).join("");
 }
@@ -224,7 +257,9 @@ async function showRequirement(id) {
     </div>
     <h3>Thread (${entries.length} entries)</h3>
     ${LEGEND}
-    <div class="thread">${entries.map(e => bubble(e.entry, e.changes)).join("")}</div>`;
+    <div class="thread">${entries.map(e => bubble(e.entry, e.changes)).join("")}</div>
+    ${entryForm(r)}`;
+  setUpEntryForm(document.getElementById("record"), r);
 }
 
 // --- Meetings -------------------------------------------------------------------
@@ -240,7 +275,197 @@ async function showMeeting(date) {
       bubble(e.entry, e.changes, e.req_id)).join("")}</div>` : '<p class="muted">None.</p>'}
     <h3>Meeting thread (${meeting.notes.length})</h3>
     ${meeting.notes.length ? LEGEND + `<div class="thread">${meeting.notes.map(n =>
-      bubble(n)).join("")}</div>` : '<p class="muted">Empty.</p>'}`;
+      bubble(n)).join("")}</div>` : '<p class="muted">Empty.</p>'}
+    ${noteForm(meeting)}`;
+  const form = document.getElementById("note");
+  onSubmit(form, async () => {
+    await post(`/api/meetings/${encodeURIComponent(meeting.date)}/notes`, readForm(form));
+    done("Note added.", `#/meeting/${meeting.date}`);
+  });
+}
+
+// --- Recording (append-only) -------------------------------------------------------
+
+const CHANNELS = ["client meeting", "sprint planning", "sprint", "Teams", "mail"];
+const CHANNEL_LIST = `<datalist id="channels">${CHANNELS.map(c =>
+  `<option value="${esc(c)}">`).join("")}</datalist>`;
+let notice = "";  // shown once, on the page reached after a successful write
+
+function today() {
+  const d = new Date(), pad = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function select(name, values, selected, attrs = "") {
+  return `<select name="${name}" ${attrs}>` + values.map(v =>
+    `<option${v === selected ? " selected" : ""}>${esc(v)}</option>`).join("") + "</select>";
+}
+function row(label, input, hint) {
+  return `<label>${esc(label)}</label><div>${input}</div>` +
+    (hint ? `<div class="hint">${hint}</div>` : "");
+}
+// The input of one requirement field, holding `v` (its current value, if any).
+function fieldInput(field, v, attrs = "") {
+  const name = `name="${field}" data-field="${field}" ${attrs}`;
+  if (field === "characteristic")
+    return select(field, ["", ...vocab.characteristics], v || "", `data-field="${field}" ${attrs}`);
+  if (field === "delivery") return `<input type="date" ${name} value="${esc(v || "")}">`;
+  if (field === "recurring") return `<input type="checkbox" ${name}${v ? " checked" : ""}>`;
+  if (field === "title" || field === "owner" || field === "when")
+    return `<input type="text" ${name} value="${esc(v || "")}">`;
+  return `<textarea ${name}>${esc(v || "")}</textarea>`;
+}
+function readInput(el) { return el.type === "checkbox" ? el.checked : el.value; }
+// The form's inputs as a record, without the ones left empty (validation reports
+// what is missing). `keep` lists fields sent even when empty.
+function readForm(form, keep = []) {
+  const record = {};
+  form.querySelectorAll("[name]").forEach(el => {
+    const v = readInput(el);
+    if (v !== "" || keep.includes(el.name)) record[el.name] = v;
+  });
+  return record;
+}
+function formShell(id, title, intro, grid, button) {
+  return `<form class="card record" id="${id}" autocomplete="off">
+    <h3>${esc(title)}</h3><p class="muted">${intro}</p>
+    <div class="form-grid">${grid}</div>
+    <div class="actions"><button type="submit">${esc(button)}</button></div>
+    <ul class="form-errors"></ul></form>${CHANNEL_LIST}`;
+}
+// Submit `form` through `send(form)`; on refusal, list the ledger's errors in the form.
+function onSubmit(form, send) {
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const button = form.querySelector("button"), errors = form.querySelector(".form-errors");
+    button.disabled = true;
+    errors.innerHTML = "";
+    try {
+      await send(form);
+    } catch (refused) {
+      const list = Array.isArray(refused) ? refused : [String(refused)];
+      errors.innerHTML = "<li>Refused, nothing was written:</li>" +
+        list.map(x => `<li>${esc(x)}</li>`).join("");
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+function done(message, hash) {
+  notice = `${message} CURRENT.md and OVERVIEW.md are regenerated; commit them with the threads.`;
+  if (location.hash === hash) route(); else location.hash = hash;
+}
+
+// A new entry on a requirement: the fields depend on its type.
+function entryForm(r) {
+  const types = Object.keys(vocab.entry_types).filter(t => t !== "proposed");
+  return formShell("record", "Record an entry",
+    "Appended at the end of this thread. Past entries can't be changed here: fix a genuine " +
+    "typo by hand in the YAML file, git keeps the trace.",
+    row("Type", select("type", types, "accepted")) +
+    row("Date", `<input type="date" name="date" value="${today()}" required>`) +
+    `<div id="by-slot" style="display: contents"></div>` +
+    row("Channel", `<input type="text" name="channel" list="channels">`) +
+    `<div id="type-slot" style="display: contents"></div>` +
+    row("Text", '<textarea name="text"></textarea>',
+        "Client entries: what Konrad said, quoted or faithfully paraphrased."),
+    "Record");
+}
+function typeFields(type, spec) {
+  if (type === "revised" || type === "amended")
+    return vocab.fields.map(f => row(LABELS[f], fieldInput(f, spec[f]))).join("") +
+      `<div class="hint">Change only what moves: unchanged fields are not recorded, the ` +
+      `changed ones show as before → after.</div>`;
+  const result = row("Result", select("result", vocab.results, vocab.results[0]));
+  if (type === "verified")
+    return result +
+      row("Evidence", '<textarea name="evidence"></textarea>', "Links to commits, PRs, files.") +
+      row("Output", '<textarea name="output" class="output"></textarea>',
+          "Optional: a command's raw output, kept verbatim.");
+  if (type === "signed-off")
+    return result.replace("<label>Result", "<label>Client's verdict");
+  if (type === "carried-over")
+    return row("New delivery", fieldInput("delivery", ""),
+               `Currently ${esc(spec.delivery || "backlog")}: the date of the targeted client meeting.`);
+  return "";
+}
+function setUpEntryForm(form, r) {
+  const typeSelect = form.querySelector("[name=type]"), channel = form.querySelector("[name=channel]");
+  const sameText = (a, b) => String(a ?? "").trimEnd() === String(b ?? "").trimEnd();
+  const update = () => {
+    const type = typeSelect.value, author = vocab.entry_types[type];
+    form.querySelector("#by-slot").innerHTML = row("By", author
+      ? `<input type="text" name="by" value="${author}" readonly>`
+      : select("by", vocab.authors, "team"));
+    channel.value = author === "client" ? "client meeting" : type === "verified" ? "sprint"
+      : channel.value || "client meeting";
+    form.querySelector("#type-slot").innerHTML = typeFields(type, r.spec);
+    form.querySelectorAll("[data-field]").forEach(el => el.addEventListener("input", () =>
+      el.classList.toggle("changed", type !== "carried-over" &&
+        !(el.type === "checkbox" ? el.checked === !!r.spec.recurring : sameText(el.value, r.spec[el.name])))));
+  };
+  typeSelect.addEventListener("change", update);
+  update();
+  onSubmit(form, async () => {
+    const type = typeSelect.value;
+    const entry = readForm(form);
+    if (type === "revised" || type === "amended") {
+      // Only the fields that change; an emptied field is sent so that validation refuses it.
+      vocab.fields.forEach(f => {
+        const el = form.querySelector(`[data-field="${f}"]`), v = readInput(el);
+        const unchanged = f === "recurring" ? v === !!r.spec.recurring : sameText(v, r.spec[f]);
+        if (unchanged) delete entry[f]; else entry[f] = v;
+      });
+    }
+    await post(`/api/requirements/${encodeURIComponent(r.id)}/entries`, entry);
+    done(`${type} recorded on ${r.id}.`, `#/req/${r.id}`);
+  });
+}
+
+async function showNewRequirement() {
+  main.innerHTML = `<p><a href="#/">← All requirements</a></p>` + formShell("create",
+    "New requirement",
+    "Recorded as a <code>proposed</code> entry by the team; it gets the next free ID " +
+    "(IDs are never reused) and stays <em>awaiting client</em> until the client meeting.",
+    row("Date", `<input type="date" name="date" value="${today()}" required>`) +
+    row("Channel", `<input type="text" name="channel" list="channels" value="sprint planning">`) +
+    vocab.fields.map(f => row(LABELS[f], fieldInput(f, f === "owner" ? "Team" : ""),
+      f === "delivery" ? "Leave empty for a backlog item: then only the title and the " +
+        "statement are needed." : f === "metric" ? "What is measured, and the threshold." : ""))
+      .join("") +
+    row("Text", '<textarea name="text"></textarea>', "Why the team proposes it."),
+    "Create");
+  const form = document.getElementById("create");
+  onSubmit(form, async () => {
+    const proposal = { ...readForm(form), by: "team", type: "proposed" };
+    const { id } = await post("/api/requirements", proposal);
+    done(`${id} created.`, `#/req/${id}`);
+  });
+}
+
+async function showNewMeeting() {
+  main.innerHTML = formShell("meeting", "New client meeting",
+    "Appended to <code>deliveries.yaml</code> with an empty thread; it must come after the " +
+    "last meeting.",
+    row("Date", `<input type="date" name="date" value="${today()}" required>`) +
+    row("Theme", '<textarea name="theme"></textarea>',
+        "Sprint theme: what the team committed to show."),
+    "Add meeting");
+  const form = document.getElementById("meeting");
+  onSubmit(form, async () => {
+    const meeting = readForm(form);
+    await post("/api/meetings", meeting);
+    done(`Meeting ${meeting.date} added.`, `#/meeting/${meeting.date}`);
+  });
+}
+
+function noteForm(meeting) {
+  return formShell("note", "Add a note to this meeting's thread",
+    "Decisions, the client's overall feedback, next steps: anything not tied to one requirement.",
+    row("Date", `<input type="date" name="date" value="${esc(meeting.date)}" required>`) +
+    row("By", select("by", vocab.authors, "team")) +
+    row("Channel", `<input type="text" name="channel" list="channels" value="client meeting">`) +
+    row("Text", '<textarea name="text"></textarea>'),
+    "Add note");
 }
 
 // --- Routing ---------------------------------------------------------------------
@@ -248,11 +473,15 @@ async function showMeeting(date) {
 async function route() {
   const hash = location.hash || "#/";
   try {
-    await getMeetings();
+    await Promise.all([getMeetings(), getVocabulary()]);
     let m;
     if ((m = hash.match(/^#\/req\/(REQ-\d+)$/))) await showRequirement(m[1]);
     else if ((m = hash.match(/^#\/meeting\/([\d-]+)$/))) await showMeeting(m[1]);
+    else if (hash === "#/new") await showNewRequirement();
+    else if (hash === "#/new-meeting") await showNewMeeting();
     else await showTable();
+    if (notice) main.insertAdjacentHTML("afterbegin", `<div class="card notice">${esc(notice)}</div>`);
+    notice = "";
     renderNav(hash.startsWith("#/req/") ? "#/" : hash);
   } catch (errors) {
     meetingsCache = null;

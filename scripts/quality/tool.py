@@ -1,7 +1,9 @@
-"""Local tool for reading the quality ledger: requirements table, threads, meetings.
+"""Local tool for the quality ledger: read the threads and meetings, record new entries.
 
-Serves one HTML page (tool.html, next to this script) and a read-only JSON API
-that only calls guess_arc.quality.ledger. Never writes, never runs git.
+Serves one HTML page (tool.html, next to this script) and a small JSON API that
+only calls guess_arc.quality.ledger. Writes are appends only (new entry, new
+requirement, new meeting, new meeting note): nothing can edit or delete a past
+entry. Each write regenerates CURRENT.md and OVERVIEW.md. Never runs git.
 
     python scripts/quality/tool.py [--quality quality] [--port 8765]
 
@@ -25,6 +27,15 @@ PAGE = Path(__file__).with_name("tool.html")
 
 def _api(folder: Path, path: str):
     """(status, payload) for one API path. The folder is validated on every call."""
+    if path == "/api/vocabulary":
+        # What the forms offer: the ledger's own lists, never a copy of them.
+        return 200, {
+            "fields": ledger.REQUIREMENT_FIELDS,
+            "entry_types": {t: author for t, (author, _, _) in ledger.ENTRY_TYPES.items()},
+            "characteristics": ledger.CHARACTERISTICS,
+            "results": ledger.RESULTS,
+            "authors": ledger.AUTHORS,
+        }
     errors = ledger.validate(folder)
     if errors:
         return 409, {"errors": errors}
@@ -38,6 +49,26 @@ def _api(folder: Path, path: str):
             return 404, {"errors": [f"unknown requirement {req_id}"]}
     if path == "/api/meetings":
         return 200, ledger.meetings(folder)
+    return 404, {"errors": [f"unknown API path {path}"]}
+
+
+def _append(folder: Path, path: str, body: dict):
+    """(status, payload) for one write: always an append through the ledger module."""
+    parts = path.strip("/").split("/")
+    try:
+        if parts == ["api", "requirements"]:
+            return 201, {"id": ledger.create_requirement(folder, body)}
+        if len(parts) == 4 and parts[:2] == ["api", "requirements"] and parts[3] == "entries":
+            ledger.add_entry(folder, parts[2], body)
+            return 201, {"id": parts[2]}
+        if parts == ["api", "meetings"]:
+            ledger.add_meeting(folder, body)
+            return 201, {}
+        if len(parts) == 4 and parts[:2] == ["api", "meetings"] and parts[3] == "notes":
+            ledger.add_meeting_note(folder, parts[2], body)
+            return 201, {}
+    except ledger.AppendRefused as refused:
+        return 422, {"errors": refused.errors}
     return 404, {"errors": [f"unknown API path {path}"]}
 
 
@@ -61,6 +92,26 @@ def make_handler(folder: Path):
                 self._send(status, "application/json; charset=utf-8", _json(payload))
             else:
                 self._send(404, "text/plain; charset=utf-8", b"Not found")
+
+        def do_POST(self):
+            # Only POST (append) exists: no PUT, PATCH or DELETE, so no past entry
+            # can be edited or removed from the tool.
+            if self.headers.get_content_type() != "application/json":
+                # A JSON content type forces a CORS preflight, which this server never
+                # answers: another web page open in the browser cannot write here.
+                self._send(415, "application/json; charset=utf-8",
+                           _json({"errors": ["expected Content-Type: application/json"]}))
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                body = None
+            if not isinstance(body, dict):
+                status, payload = 400, {"errors": ["the request body must be a JSON object"]}
+            else:
+                status, payload = _append(folder, self.path.split("?", 1)[0], body)
+            self._send(status, "application/json; charset=utf-8", _json(payload))
 
         def _send(self, status: int, content_type: str, body: bytes):
             self.send_response(status)

@@ -116,10 +116,11 @@ until it is signed off ✅, rejected or dropped. [CURRENT.md](CURRENT.md) lists 
 requirements committed to a delivery, plus the recurring ones signed off ✅, so a regression still
 shows up. Nothing depends on today's date.
 
-## Reading the threads
+## The local tool
 
-A local tool shows the ledger as a conversation, for reading it alone or screen-sharing it at the
-client meeting. From the repo root:
+A local tool shows the ledger as a conversation and records new entries, for reading it alone,
+for sprint planning, or for screen-sharing it at the client meeting and recording the client's
+answers live. From the repo root:
 
 ```
 python scripts/quality/tool.py
@@ -128,10 +129,25 @@ python scripts/quality/tool.py
 It prints a local URL (`http://127.0.0.1:8765/`; another port with `--port`). It shows a
 filterable table of every requirement, each requirement's page (current spec at the top, then
 its thread as bubbles, team on the left, client on the right, spec changes shown before → after),
-and one page per meeting (every entry dated on it, plus the meeting's own thread). It only reads:
-it never writes a file and never runs git. If a file is invalid, it lists the errors instead.
+and one page per meeting (every entry dated on it, plus the meeting's own thread). If a file is
+invalid, it lists the errors instead.
 
-## Recording an entry
+It records by appending only:
+
+- **an entry**, at the bottom of a requirement's page: the form follows the entry type (`amended`
+  / `revised` show every requirement field with its current value, and only the changed ones are
+  recorded; `verified` asks for the result, the evidence and the raw output; `carried-over` asks
+  for the new delivery…);
+- **a new requirement** (*+ Requirement*): a `proposed` entry, with the next free ID;
+- **a new meeting** (*+ Meeting*), and **a note** at the bottom of a meeting's page.
+
+Every write is validated first: if it would make a file invalid, the tool lists the errors and
+writes nothing. Otherwise it rewrites the file in canonical form and regenerates `CURRENT.md` and
+`OVERVIEW.md`. It can't edit or delete a past entry (fix a genuine typo by hand, see below), and it
+never runs git: review the diff and commit the threads with the views yourself, for example one
+PR per client meeting.
+
+## Recording an entry by hand
 
 1. Append the entry at the end of the thread's `entries` list (never edit or remove a past entry;
    fixing a genuine typo by hand is fine, git keeps the trace). A new requirement takes the next
