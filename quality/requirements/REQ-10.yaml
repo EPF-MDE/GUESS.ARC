@@ -1,0 +1,32 @@
+id: REQ-10
+entries:
+- date: 2026-10-26
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: No future information in the GRU design
+  statement: 'The design uses no future information: chronological train/val/test split, everything fitted on training chapters only.'
+  characteristic: Reliability
+  metric: 2/2 rules specified in the design (chronological split; fitting on training chapters only), and 0 violations in the leakage-guard test once the split code exists.
+  why: Konrad needs scores that hold on chapters not yet published; leakage would inflate them.
+  verification: Review of the design; leakage-guard test once the split code exists.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-30
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 26/10 (§3 Log), for the delivery of Fri 2026-10-30.'
+- date: 2026-10-30
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ❌
+  evidence: '0/2 rules written down: neither the chronological split nor fitting on training chapters only appears in the block diagram or in any document. Only the input side is covered: ADR 0002 (`docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`) keeps future facts out of KG(t). The leakage-guard test doesn''t exist yet (no split code). Action: write both rules into the design document (REQ-9).'
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-30). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-30
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: 'Konrad validated REQ-10 at the 30/10 delivery (QUALITY.md §1: "☑ 2026-10-30, Konrad"). QUALITY.md records no verdict from him on whether it was reached.'

@@ -8,9 +8,9 @@ Markdown views are generated from them.
 A thread is made of **entries**, never "events": in this repo, an Event is something that happens
 in a chapter (see `CONTEXT.md`).
 
-> **Migration in progress.** Only the 23/10 delivery (REQ-1 to REQ-4) has been moved here so
-> far. Until the migration is finished, `QUALITY.md` at the repo root stays the reference for
-> the other requirements and meetings.
+> **Migration in progress.** Only the 23/10 and 30/10 deliveries (REQ-1 to REQ-12) have been
+> moved here so far. Until the migration is finished, `QUALITY.md` at the repo root stays the
+> reference for the other requirements and meetings.
 
 ## Where to look
 
@@ -38,6 +38,7 @@ Sprints last one week; the client is seen once per sprint, at the Thursday meeti
 3. **Client meeting, for each requirement, in this order:** first the client's decision on the
    spec (`accepted` / `rejected`), then the client's verdict on whether it was reached
    (`signed-off` ✅ / ⚠️ / ❌), judged against the spec just accepted.
+4. **Anything not signed off ✅** is `carried-over` to a later delivery, or `dropped`.
 
 The team writes everything. Client entries record what Konrad said, quoted or faithfully
 paraphrased, with the date and the channel. Konrad never edits the files.
@@ -85,6 +86,7 @@ old `QUALITY.md` carry `migrated: true`. Dates never go backwards within a threa
 | `rejected` | client | Nothing: the client refuses the spec. |
 | `verified` | team | `result` (✅ / ⚠️ / ❌), `evidence` (links to commits, PRs, files), optional `output` (raw text, shown as a code block). |
 | `signed-off` | client | `result` (✅ / ⚠️ / ❌): the client's verdict on whether the requirement was reached. |
+| `carried-over` | either | `delivery`: the new target client meeting. The requirement stays open and its thread goes on. |
 | `dropped` | either | Nothing: the requirement is abandoned. It leaves the current list but its thread is kept. |
 | `note` | either | Text only. |
 
@@ -97,7 +99,8 @@ sprint or in CI).
 
 **Derived state.** The client status is *awaiting client* until the client's first decision, then
 follows the latest `accepted` / `rejected` / `signed-off` / `dropped`. The latest result is that of the latest
-`verified` entry (⏳ if none). A requirement is **open** until it is signed off ✅, rejected or dropped.
+`verified` entry (⏳ if none). The delivery is that of `proposed`, or of the latest `carried-over`.
+A requirement is **open** until it is signed off ✅, rejected or dropped.
 [CURRENT.md](CURRENT.md) lists the open requirements plus the recurring ones signed off ✅, so a
 regression still shows up. Nothing depends on today's date.
 

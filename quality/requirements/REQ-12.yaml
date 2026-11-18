@@ -1,0 +1,33 @@
+id: REQ-12
+entries:
+- date: 2026-10-26
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Name variants resolved
+  statement: Name variants resolve to one Entity ("Luffy" = "Monkey D. Luffy"), and different Entities stay distinct ("Fake Luffy" ≠ "Luffy").
+  characteristic: Functional suitability
+  metric: 'No measurable threshold: the entity extraction is compared with the Silver header.'
+  why: One Character split across several names, or two merged, corrupts the GRU's inputs and targets.
+  verification: Entity extraction compared with the Silver header.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-30
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 26/10 (§3 Log), for the delivery of Fri 2026-10-30.'
+- date: 2026-10-30
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ⚠️
+  evidence: 'Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open).'
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-30). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-30
+  by: team
+  type: carried-over
+  channel: client meeting
+  migrated: true
+  delivery: 2026-11-12
+  text: REQ-11 and REQ-12 (entities) were committed for 30/10. They were not finished and are carried over to 2026-11-12 (QUALITY.md §1 and §2). Konrad was satisfied, but disappointed about the entities (§3 Log, week of 26/10).

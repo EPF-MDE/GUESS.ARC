@@ -54,6 +54,13 @@ def verified(result="✅", **fields):
     return entry
 
 
+def team(type_, **fields):
+    entry = {"date": D(2026, 10, 23), "by": "team", "type": type_,
+             "channel": "client meeting", "text": "Decided at the meeting."}
+    entry.update(fields)
+    return entry
+
+
 def thread(number, *entries):
     return {"id": f"REQ-{number}", "entries": list(entries)}
 
@@ -241,6 +248,31 @@ class TestReplay(LedgerTestCase):
         self.write(thread(1, proposed(), client("dropped", result="❌")))
         self.assertReports(ledger.validate(self.folder), "dropped: unexpected field 'result'")
 
+    def test_carried_over_requires_a_delivery(self):
+        self.write(thread(1, proposed(), team("carried-over")))
+        self.assertReports(ledger.validate(self.folder), "carried-over: missing field 'delivery'")
+
+    def test_carried_over_delivery_must_be_a_date(self):
+        self.write(thread(1, proposed(), team("carried-over", delivery="12/11")))
+        self.assertReports(ledger.validate(self.folder), "delivery '12/11'")
+
+    def test_carried_over_stays_open_with_its_new_delivery(self):
+        req = self.replayed(verified(result="⚠️"),
+                            team("carried-over", delivery=D(2026, 11, 12)))
+        self.assertEqual(req.spec["delivery"], D(2026, 11, 12))
+        self.assertEqual(req.client_status, "awaiting client")
+        self.assertEqual(req.latest_result, "⚠️")
+        self.assertTrue(req.open)
+        self.assertTrue(req.current)
+
+    def test_carried_over_after_partial_sign_off_keeps_the_client_verdict(self):
+        req = self.replayed(verified(result="⚠️"), client("accepted"),
+                            client("signed-off", result="⚠️"),
+                            team("carried-over", delivery=D(2026, 11, 12)))
+        self.assertEqual(req.client_status, "signed off ⚠️")
+        self.assertEqual(req.spec["delivery"], D(2026, 11, 12))
+        self.assertTrue(req.open)
+
     def test_latest_verification_wins(self):
         req = self.replayed(verified(result="❌", date=D(2026, 10, 20)), verified(result="✅"))
         self.assertEqual(req.latest_result, "✅")
@@ -249,6 +281,13 @@ class TestReplay(LedgerTestCase):
         req = self.replayed(verified(), client("accepted"), client("signed-off", result="✅"),
                             recurring=True)
         self.assertFalse(req.open)
+        self.assertTrue(req.current)
+
+    def test_recurring_regression_after_sign_off_shows_as_latest_result(self):
+        req = self.replayed(verified(), client("accepted"), client("signed-off", result="✅"),
+                            verified(result="❌", date=D(2026, 11, 5)), recurring=True)
+        self.assertEqual(req.client_status, "signed off ✅")
+        self.assertEqual(req.latest_result, "❌")
         self.assertTrue(req.current)
 
     def test_requirements_come_back_in_id_order(self):
@@ -294,6 +333,36 @@ class TestRender(LedgerTestCase):
         self.assertIn("Partial one", rows[1])
         self.assertIn("signed off ⚠️", rows[1])
         self.assertIn("2026-10-23", rows[1])
+
+
+class TestRenderHistory(LedgerTestCase):
+    """How carry-overs, drops and regressions show in the views."""
+
+    def test_dropped_leaves_current_but_stays_in_overview(self):
+        self.write(thread(1, proposed(title="Kept one")),
+                   thread(2, proposed(title="Dropped one"), team("dropped")))
+        requirements = ledger.replay(self.folder)
+        self.assertNotIn("Dropped one", ledger.render_current(requirements))
+        overview = ledger.render_overview(requirements)
+        [row] = [line for line in overview.splitlines() if line.startswith("| REQ-2 |")]
+        self.assertIn("Dropped one", row)
+        self.assertIn("dropped", row)
+
+    def test_carried_over_shows_its_new_delivery(self):
+        self.write(thread(1, proposed(), verified(result="⚠️"),
+                          team("carried-over", delivery=D(2026, 11, 12))))
+        requirements = ledger.replay(self.folder)
+        self.assertIn("**Delivery:** 2026-11-12", ledger.render_current(requirements))
+        self.assertIn("| 2026-11-12 |", ledger.render_overview(requirements))
+
+    def test_recurring_regression_shows_in_current(self):
+        self.write(thread(1, proposed(title="Recurring one", recurring=True), verified(),
+                          client("accepted"), client("signed-off", result="✅"),
+                          verified(result="❌", date=D(2026, 11, 5), evidence="Run of 05/11.")))
+        text = ledger.render_current(ledger.replay(self.folder))
+        self.assertIn("## REQ-1 · Recurring one", text)
+        self.assertIn("**Latest result:** ❌ (2026-11-05)", text)
+        self.assertIn("Run of 05/11.", text)
 
 
 class TestRegenerate(LedgerTestCase):

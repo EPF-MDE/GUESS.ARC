@@ -1,0 +1,33 @@
+id: REQ-8
+entries:
+- date: 2026-10-26
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Silver character_count matches
+  statement: The header's `character_count` matches the Characters actually listed.
+  characteristic: Reliability
+  metric: 0 mismatches.
+  why: The entity quality figures shown to Konrad (REQ-11) are only as trustworthy as this list.
+  verification: '`scripts/quality/check_silver.py`.'
+  when: Each sprint
+  owner: Team
+  delivery: 2026-10-30
+  recurring: true
+  text: 'Reconstructed from QUALITY.md: added in the week of 26/10 (§3 Log), for the delivery of Fri 2026-10-30.'
+- date: 2026-10-26
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ✅
+  evidence: '2026-10-26 run: `character_count` matches in all 1193 files.'
+  output: |
+    $ python scripts/quality/check_silver.py
+    Fichiers silver           : 1193 (attendu 1193)
+    Chapitres manquants       : aucun
+    Fichiers en échec         : 0
+    Mots du Long Summary      : min 97, médiane 598, max 2094
+    RÉSULTAT                  : OK
+  text: 'Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-30): the 2026-10-26 run of `scripts/quality/check_silver.py` behind REQ-5 to REQ-8, its output kept verbatim. To check that the check itself works, it was run on a copy of two chapters with one Long Summary emptied and `--expected 3`: it reported `Chapitres manquants : [3]` and `chapter_0002.md: Long Summary vide`, then exited with code 1.'

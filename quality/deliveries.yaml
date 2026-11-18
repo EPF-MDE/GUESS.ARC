@@ -22,3 +22,31 @@ deliveries:
     channel: client meeting
     migrated: true
     text: 'Next: GRU presentation and entity dataset for 30/10.'
+- date: 2026-10-30
+  theme: GRU presentation and entity dataset (week of 26/10, delivery Fri 30/10)
+  thread:
+  - date: 2026-10-30
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Committed: a presentation of how the GRU works and the entity dataset. For the events, we only committed to start looking into them. Vectorisation wasn''t part of this delivery.'
+  - date: 2026-10-30
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Shown to client: the presentation of how the GRU works (`GRU.md`, delivered on Teams). The entity dataset wasn''t finished. Events: work started, nothing promised.'
+  - date: 2026-10-30
+    by: client
+    channel: client meeting
+    migrated: true
+    text: 'Client said: satisfied, but disappointed about the entities.'
+  - date: 2026-10-30
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Decision: continue with the GRU pipeline; finish the entities first, then benchmark an API solution with an Anthropic model.'
+  - date: 2026-10-30
+    by: team
+    channel: client meeting
+    migrated: true
+    text: 'Next: finish the entities (REQ-11, REQ-12, REQ-14, REQ-15) for 12/11.'

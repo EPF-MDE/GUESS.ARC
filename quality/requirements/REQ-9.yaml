@@ -1,0 +1,39 @@
+id: REQ-9
+entries:
+- date: 2026-10-26
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: GRU pipeline design written down
+  statement: 'The GRU pipeline design is written down: inputs, what it predicts for chapter n+1, the baselines it must beat, and the metrics.'
+  characteristic: Maintainability
+  metric: 4/4 points covered in a written design document.
+  why: Konrad must be able to check that the model answers his question before weeks go into building it.
+  verification: A teammate reviews the design document against the four points.
+  when: Before demo
+  owner: Team
+  delivery: 2026-10-30
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the week of 26/10 (§3 Log), for the delivery of Fri 2026-10-30.'
+- date: 2026-10-30
+  by: team
+  type: verified
+  channel: sprint
+  migrated: true
+  result: ⚠️
+  evidence: The pipeline design exists only as a block diagram (image), validated by Konrad on 2026-10-30. The written design document doesn't exist yet; once written, it will be reviewed against the four points and submitted to Konrad for validation.
+  text: Reconstructed from QUALITY.md §2 (Delivery Fri 2026-10-30). Checked before the demo; the exact date was not recorded.
+- date: 2026-10-30
+  by: client
+  type: accepted
+  channel: client meeting
+  migrated: true
+  text: 'Konrad validated REQ-9 at the 30/10 delivery (QUALITY.md §1: "☑ 2026-10-30, Konrad (block diagram only; the written document will be submitted for validation)").'
+- date: 2026-10-30
+  by: client
+  type: signed-off
+  channel: client meeting
+  migrated: true
+  result: ⚠️
+  text: Konrad validated the block diagram only; the written design document will be submitted to him for validation (QUALITY.md §1 and §2).

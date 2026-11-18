@@ -56,6 +56,7 @@ ENTRY_TYPES = {
     "rejected": ("client", (), ()),
     "verified": ("team", ("result", "evidence"), ("output",)),
     "signed-off": ("client", ("result",), ()),
+    "carried-over": (None, ("delivery",), ()),
     "dropped": (None, (), ()),
     "note": (None, (), ()),
 }
@@ -345,6 +346,8 @@ def _replay_thread(data: dict) -> Requirement:
             status = f"signed off {entry['result']}"
         elif type_ == "verified":
             latest_verification = entry
+        elif type_ == "carried-over":
+            spec = {**spec, "delivery": entry["delivery"]}
     open_ = status not in ("signed off ✅", "rejected", "dropped")
     return Requirement(
         id=data["id"],
