@@ -36,4 +36,4 @@ events:
   channel: client meeting
   migrated: true
   result: ⚠️
-  text: 'Konrad accepted REQ-2 as partial: 2 chapters tagged instead of ~10 (QUALITY.md: "☑ 2026-10-23, Konrad (accepted as partial)").'
+  text: 'Konrad accepted REQ-2 as partial (QUALITY.md §1: "☑ 2026-10-23, Konrad (accepted as partial)"): 2 chapters tagged instead of ~10 (§3 Log, week of 19/10).'

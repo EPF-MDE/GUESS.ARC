@@ -31,10 +31,11 @@ reference/                # versioned reference data
 ├── type_overrides.csv    # Entity types set by hand
 ├── redirects.csv         # wiki redirects merged into their target's Canonical name
 └── disguises.csv         # Disguises confirmed by hand, with their Revelation
-scripts/quality/          # corpus quality checks (see QUALITY.md)
+scripts/quality/          # corpus quality checks, quality ledger regeneration
+quality/                  # quality requirements as client–team threads (see quality/README.md)
 tests/                    # network-free tests
 docs/adr/                 # architecture decision records
-QUALITY.md                # quality requirements, evidence and client validation
+QUALITY.md                # quality requirements not yet migrated to quality/
 ```
 
 Future stages (features, model) will be added as sub-packages of `guess_arc`,
@@ -72,7 +73,7 @@ Once the environment is active, `python` and `pip` point to it on every OS:
 
 ```bash
 python --version                  # check: 3.10 or later
-pip install -r requirements.txt   # installs guess_arc in editable mode + pytest
+pip install -r requirements.txt   # installs guess_arc in editable mode, PyYAML and pytest
 ```
 
 All the commands below assume the environment is active.
@@ -208,6 +209,9 @@ corpus are skipped (`pytest -rs` shows why). The tests cover:
   precision proxies, Entity types from the datasets, wiki categories and
   overrides, category cache, confirmed Disguises, Registry(t) over 3 chapters,
   Disguise candidates);
+- the quality ledger through `guess_arc.quality.ledger`, on fixture folders,
+  plus the committed `quality/` folder: valid, canonical, and its generated
+  `CURRENT.md` / `OVERVIEW.md` up to date;
 - a check of every file in `data/bronze/` and `data/silver/`
   (skipped if the data hasn't been generated yet).
 

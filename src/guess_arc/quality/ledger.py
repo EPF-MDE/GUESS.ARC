@@ -383,7 +383,7 @@ _GRID = """\
 
 
 def _cell(value) -> str:
-    return " ".join(str(value).split()).replace("|", "\|")
+    return " ".join(str(value).split()).replace("|", r"\|")
 
 
 def _link(req: Requirement) -> str:
