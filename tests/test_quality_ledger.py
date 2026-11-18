@@ -179,6 +179,25 @@ class TestValidate(LedgerTestCase):
                    deliveries={"deliveries": [{"date": D(2026, 10, 23), "thread": []}]})
         self.assertReports(ledger.validate(self.folder), "deliveries.yaml", "missing field 'theme'")
 
+    def test_revised_or_amended_without_fields_is_reported(self):
+        self.write(thread(1, proposed(), team("revised"), client("amended")))
+        self.assertReports(ledger.validate(self.folder),
+                           "revised: must change at least one requirement field",
+                           "amended: must change at least one requirement field")
+
+    def test_revised_or_amended_with_unknown_field_is_reported(self):
+        self.write(thread(1, proposed(), team("revised", threshold="0.95"),
+                          client("amended", metric="≥ 0.95.", result="✅")))
+        self.assertReports(ledger.validate(self.folder),
+                           "revised: unexpected field 'threshold'",
+                           "amended: unexpected field 'result'")
+
+    def test_revised_by_client_or_amended_by_team_is_reported(self):
+        self.write(thread(1, proposed(), client("revised", metric="≥ 0.95."),
+                          team("amended", metric="≥ 0.90.")))
+        self.assertReports(ledger.validate(self.folder),
+                           "revised: must be by team", "amended: must be by client")
+
     def test_canonical_form_has_no_anchors_and_one_line_per_long_value(self):
         same_day = D(2026, 10, 23)
         long_metric = " ".join(["A metric long enough to be folded by a YAML dumper."] * 4)
@@ -273,6 +292,44 @@ class TestReplay(LedgerTestCase):
         self.assertEqual(req.spec["delivery"], D(2026, 11, 12))
         self.assertTrue(req.open)
 
+    def test_amendments_and_revisions_apply_in_order(self):
+        req = self.replayed(team("revised", metric="≥ 0.80.", owner="Léo"),
+                            client("amended", metric="≥ 0.95."),
+                            team("revised", when="CI", date=D(2026, 10, 26)))
+        self.assertEqual(req.spec["metric"], "≥ 0.95.")
+        self.assertEqual(req.spec["owner"], "Léo")
+        self.assertEqual(req.spec["when"], "CI")
+        self.assertEqual(req.spec["title"], "Schema with ADRs")
+
+    def test_amended_is_the_client_status_until_the_next_decision(self):
+        req = self.replayed(client("amended", metric="≥ 0.95."))
+        self.assertEqual(req.client_status, "amended")
+        self.assertTrue(req.open)
+        req = self.replayed(client("amended", metric="≥ 0.95."),
+                            client("signed-off", result="⚠️"))
+        self.assertEqual(req.client_status, "signed off ⚠️")
+
+    def test_revised_after_acceptance_returns_to_awaiting_client(self):
+        req = self.replayed(client("accepted"),
+                            team("revised", metric="≥ 0.95.", date=D(2026, 11, 2)))
+        self.assertEqual(req.client_status, "awaiting client")
+        self.assertEqual(req.spec["metric"], "≥ 0.95.")
+        self.assertTrue(req.open)
+
+    def test_revised_after_sign_off_reopens_the_requirement(self):
+        req = self.replayed(verified(), client("accepted"), client("signed-off", result="✅"),
+                            team("revised", metric="≥ 0.95.", date=D(2026, 11, 2)))
+        self.assertEqual(req.client_status, "awaiting client")
+        self.assertTrue(req.open)
+        self.assertTrue(req.current)
+
+    def test_revised_after_drop_stays_dropped(self):
+        req = self.replayed(team("dropped"),
+                            team("revised", metric="≥ 0.95.", date=D(2026, 11, 2)))
+        self.assertEqual(req.client_status, "dropped")
+        self.assertEqual(req.spec["metric"], "≥ 0.95.")
+        self.assertFalse(req.open)
+
     def test_latest_verification_wins(self):
         req = self.replayed(verified(result="❌", date=D(2026, 10, 20)), verified(result="✅"))
         self.assertEqual(req.latest_result, "✅")
@@ -333,6 +390,56 @@ class TestRender(LedgerTestCase):
         self.assertIn("Partial one", rows[1])
         self.assertIn("signed off ⚠️", rows[1])
         self.assertIn("2026-10-23", rows[1])
+
+
+def backlog(**overrides):
+    """A `proposed` entry with no delivery commitment: only a title and a statement."""
+    entry = {"date": D(2026, 11, 2), "by": "team", "type": "proposed",
+             "channel": "sprint planning", "text": "Kept in the backlog.",
+             "title": "Identical vectors", "statement": "Re-running gives identical vectors."}
+    entry.update(overrides)
+    return entry
+
+
+COMMITMENT = {k: v for k, v in proposed().items()
+              if k in ledger.REQUIREMENT_FIELDS and k not in ("title", "statement")}
+
+
+class TestBacklog(LedgerTestCase):
+    """A requirement proposed without a delivery is in the backlog until a sprint commits to it."""
+
+    def test_backlog_proposal_needs_only_title_and_statement(self):
+        self.write(thread(1, backlog()))
+        self.assertEqual(ledger.validate(self.folder), [])
+
+    def test_backlog_proposal_without_statement_is_reported(self):
+        entry = backlog()
+        del entry["statement"]
+        self.write(thread(1, entry))
+        self.assertReports(ledger.validate(self.folder), "proposed: missing field 'statement'")
+
+    def test_committing_without_the_full_spec_is_reported(self):
+        self.write(thread(1, backlog(), team("revised", delivery=D(2026, 11, 12),
+                                             date=D(2026, 11, 9))))
+        self.assertReports(ledger.validate(self.folder),
+                           "REQ-1.yaml: committed to a delivery but missing 'metric'")
+
+    def test_backlog_is_open_but_not_current(self):
+        self.write(thread(1, backlog()))
+        [req] = ledger.replay(self.folder)
+        self.assertTrue(req.open)
+        self.assertFalse(req.current)
+        self.assertNotIn("REQ-1", ledger.render_current([req]))
+        [row] = [line for line in ledger.render_overview([req]).splitlines()
+                 if line.startswith("| REQ-1 |")]
+        self.assertIn("| Identical vectors | backlog |", row)
+
+    def test_revision_with_the_full_spec_commits_it(self):
+        self.write(thread(1, backlog(), team("revised", date=D(2026, 11, 9), **COMMITMENT)))
+        self.assertEqual(ledger.validate(self.folder), [])
+        [req] = ledger.replay(self.folder)
+        self.assertTrue(req.current)
+        self.assertIn("## REQ-1 · Identical vectors", ledger.render_current([req]))
 
 
 class TestRenderHistory(LedgerTestCase):

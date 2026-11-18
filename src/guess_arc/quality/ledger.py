@@ -26,7 +26,8 @@ import yaml
 REQUIREMENTS_DIR = "requirements"
 DELIVERIES_FILE = "deliveries.yaml"
 
-# What a requirement is made of: carried in full by `proposed`.
+# What a requirement is made of: carried in full by `proposed` (except a backlog
+# item, see BACKLOG_FIELDS), changed by `revised` / `amended`.
 REQUIREMENT_FIELDS = (
     "title", "statement", "characteristic", "metric", "why",
     "verification", "when", "owner", "delivery", "recurring",
@@ -52,6 +53,9 @@ COMMON_REQUIRED = ("date", "by", "type", "channel", "text")
 # Entry type -> (who records it, None if either; required fields; optional fields).
 ENTRY_TYPES = {
     "proposed": ("team", REQUIREMENT_FIELDS, ()),
+    # Only the fields that change; at least one (checked in _validate_entries).
+    "revised": ("team", (), REQUIREMENT_FIELDS),
+    "amended": ("client", (), REQUIREMENT_FIELDS),
     "accepted": ("client", (), ()),
     "rejected": ("client", (), ()),
     "verified": ("team", ("result", "evidence"), ("output",)),
@@ -60,6 +64,11 @@ ENTRY_TYPES = {
     "dropped": (None, (), ()),
     "note": (None, (), ()),
 }
+# Entry types that change the spec: team revision, client amendment.
+SPEC_CHANGES = ("revised", "amended")
+# What a backlog item (a `proposed` with no `delivery`) must carry; the rest of
+# the spec comes with the `revised` entry that commits it to a delivery.
+BACKLOG_FIELDS = ("title", "statement")
 
 
 # --- Canonical YAML ----------------------------------------------------------
@@ -207,6 +216,7 @@ def _validate_entries(name: str, entries: list) -> list[str]:
     if first != "proposed":
         errors.append(f"{name}: the first entry must be 'proposed'")
     previous_date = None
+    spec_fields: set[str] = set()
     for number, entry in enumerate(entries, start=1):
         where = f"{name}: entry {number}"
         if not isinstance(entry, dict):
@@ -218,11 +228,19 @@ def _validate_entries(name: str, entries: list) -> list[str]:
                           f"(expected one of {', '.join(ENTRY_TYPES)})")
             continue
         author, required, optional = ENTRY_TYPES[type_]
+        if type_ == "proposed" and "delivery" not in entry:
+            # Backlog: no delivery commitment yet, the rest of the spec can wait.
+            required = BACKLOG_FIELDS
+            optional = tuple(k for k in REQUIREMENT_FIELDS if k not in BACKLOG_FIELDS)
+        if type_ in ("proposed", *SPEC_CHANGES, "carried-over"):
+            spec_fields.update(_spec_fields(entry))
         where = f"{where} {type_}"
         errors += [f"{where}: {e}" for e in _check_fields(
             entry, (*COMMON_REQUIRED, *required), ("migrated", *optional))]
         if author and entry.get("by") in AUTHORS and entry["by"] != author:
             errors.append(f"{where}: must be by {author}")
+        if type_ in SPEC_CHANGES and not any(k in entry for k in REQUIREMENT_FIELDS):
+            errors.append(f"{where}: must change at least one requirement field")
         if type_ == "proposed" and number > 1 and first == "proposed":
             errors.append(f"{where}: 'proposed' appears more than once")
         date = entry.get("date")
@@ -231,6 +249,9 @@ def _validate_entries(name: str, entries: list) -> list[str]:
                 errors.append(f"{where}: date {date} is before the previous entry "
                               f"({previous_date})")
             previous_date = date
+    if "delivery" in spec_fields:
+        errors += [f"{name}: committed to a delivery but missing '{k}'"
+                   for k in REQUIREMENT_FIELDS if k not in spec_fields]
     return errors
 
 
@@ -332,6 +353,11 @@ class Requirement:
         return f"{REQUIREMENTS_DIR}/{self.id}.yaml"
 
 
+def _spec_fields(entry: dict) -> dict:
+    """The requirement fields an entry carries (all of them for `proposed`, the changes otherwise)."""
+    return {k: entry[k] for k in REQUIREMENT_FIELDS if k in entry}
+
+
 def _replay_thread(data: dict) -> Requirement:
     spec: dict = {}
     status = "awaiting client"
@@ -339,7 +365,13 @@ def _replay_thread(data: dict) -> Requirement:
     for entry in data["entries"]:
         type_ = entry["type"]
         if type_ == "proposed":
-            spec = {k: entry[k] for k in REQUIREMENT_FIELDS}
+            spec = _spec_fields(entry)
+        elif type_ in SPEC_CHANGES:
+            spec = {**spec, **_spec_fields(entry)}
+            # A team revision is a new proposal: the client has to decide on it again.
+            # A dropped requirement stays dropped: only its spec is kept up to date.
+            if status != "dropped":
+                status = "amended" if type_ == "amended" else "awaiting client"
         elif type_ in ("accepted", "rejected", "dropped"):
             status = type_
         elif type_ == "signed-off":
@@ -356,7 +388,9 @@ def _replay_thread(data: dict) -> Requirement:
         latest_result=latest_verification["result"] if latest_verification else "⏳",
         latest_verification=latest_verification,
         open=open_,
-        current=open_ or (spec["recurring"] and status == "signed off ✅"),
+        # A backlog item (no delivery yet) is open, but nobody has to reach it now.
+        current=(open_ and "delivery" in spec)
+        or (spec.get("recurring", False) and status == "signed off ✅"),
     )
 
 
@@ -435,8 +469,9 @@ def render_current(requirements: list[Requirement]) -> str:
         "# Current quality requirements",
         _GENERATED,
         "What the team must reach now: every open requirement (not signed off ✅, not "
-        "rejected, not dropped), plus every recurring one with its latest result. Every requirement that "
-        "ever existed is listed in [OVERVIEW.md](OVERVIEW.md).",
+        "rejected, not dropped) committed to a delivery, plus every recurring one with its "
+        "latest result. Every requirement that ever existed, backlog included, is listed in "
+        "[OVERVIEW.md](OVERVIEW.md).",
         _GRID,
         *([_render_requirement(r) for r in current] or ["No current requirement."]),
     ]
@@ -446,7 +481,8 @@ def render_current(requirements: list[Requirement]) -> str:
 def render_overview(requirements: list[Requirement]) -> str:
     """Text of OVERVIEW.md: one line per requirement, with a link to its thread."""
     rows = [
-        f"| {r.id} | {_cell(r.spec['title'])} | {r.spec['delivery']} | {r.client_status} "
+        f"| {r.id} | {_cell(r.spec['title'])} | {r.spec.get('delivery', 'backlog')} "
+        f"| {r.client_status} "
         f"| {r.latest_result} | {_link(r)} |"
         for r in requirements
     ]
