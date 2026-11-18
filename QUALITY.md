@@ -14,17 +14,15 @@ confused with the grid criteria Q1–Q3. IDs are never reused.
 
 ## 1. Requirements (Q1)
 
-### Delivery Thu 2026-11-12 (entities) and Fri 2026-11-13 (mid-term defense)
+### Delivery Thu 2026-11-12 (entities)
 
 | ID | Requirement | Characteristic | Metric & threshold | Why it matters (client need) | Validated by client? |
 |---|---|---|---|---|---|
-| REQ-12 | The entity extraction finds the Characters of each chapter in its Long Summary, and doesn't invent extra ones. *(Carried over from 2026-10-30.)* | Functional suitability | The two proxies from the extraction's quality report (ENT-02 #81, ENT-04 #83). **Recall proxy**: share of Characters with an Appearance in the chapter's CharTable that have ≥ 1 Mention in the same chapter's Long Summary; ≥ 0.95 overall, ≥ 0.80 in every chapter. **Precision proxy**: share of Alias-matched Mentions of Characters whose Character is in that chapter's Cast (Appearance, Recall or Cover appearance); ≥ 0.80 overall, ≥ 0.50 in every chapter. | A missed or invented Character feeds the GRU a wrong history, so Konrad's forecasts get worse. | ☐ |
-| REQ-13 | Name variants resolve to one Entity ("Luffy" = "Monkey D. Luffy"), and different Entities stay distinct ("Fake Luffy" ≠ "Luffy"). *(Carried over from 2026-10-30.)* | Functional suitability | ≥ 95 % of extracted names resolve to a Canonical name; 0 wrong merges in a manual review of 20 random Aliases. | One Character split across several names, or two merged, corrupts the GRU's inputs and targets. | ☐ |
-| REQ-17 | Someone else can rerun the entity extraction from the README alone. | Maintainability | A teammate on a fresh clone gets the same `registry.jsonl` with 0 undocumented steps. | Konrad must be able to run the pipeline after we leave. | ☐ |
-| REQ-18 | Every number shown at the defense is traceable to a run or a document. | Reliability | 100 % of the numbers on the slides point to a commit, config and chapter list, or to a document. | Konrad and the jury must be able to check every result we claim. | ☐ |
-| REQ-19 | The entity dataset covers the whole corpus. | Functional suitability | `data/gold/entities/registry.jsonl` covers chapters 1–1193, and every chapter has ≥ 1 Scene. | The GRU trains on the whole story, not on a sample. | ☐ |
-| REQ-20 | The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`). | Reliability | 0 Entities in `Registry(t)` before their first Mention or Appearance. | Any future information in the inputs would leak the answer and inflate the scores. | ☐ |
-| REQ-21 | The mid-term defense fits its slot (2026-11-13, 11:15–12:45: 20 min talk, 45 min questions, then debrief). | Usability | The talk lasts ≤ 20 min in a full timed rehearsal before 2026-11-13. | The questions are where the jury evaluates the work; running over cuts them short. | ☐ |
+| REQ-11 | The entity extraction finds the Characters of each chapter in its Long Summary, and doesn't invent extra ones. *(Carried over from 2026-10-30.)* | Functional suitability | The two proxies from the extraction's quality report (ENT-02 #81, ENT-04 #83). **Recall proxy**: share of Characters with an Appearance in the chapter's CharTable that have ≥ 1 Mention in the same chapter's Long Summary; ≥ 0.95 overall, ≥ 0.80 in every chapter. **Precision proxy**: share of Alias-matched Mentions of Characters whose Character is in that chapter's Cast (Appearance, Recall or Cover appearance); ≥ 0.80 overall, ≥ 0.50 in every chapter. | A missed or invented Character feeds the GRU a wrong history, so Konrad's forecasts get worse. | ☐ |
+| REQ-12 | Name variants resolve to one Entity ("Luffy" = "Monkey D. Luffy"), and different Entities stay distinct ("Fake Luffy" ≠ "Luffy"). *(Carried over from 2026-10-30.)* | Functional suitability | ≥ 95 % of extracted names resolve to a Canonical name; 0 wrong merges in a manual review of 20 random Aliases. | One Character split across several names, or two merged, corrupts the GRU's inputs and targets. | ☐ |
+| REQ-13 | Someone else can rerun the entity extraction from the README alone. | Maintainability | A teammate on a fresh clone gets the same `registry.jsonl` with 0 undocumented steps. | Konrad must be able to run the pipeline after we leave. | ☐ |
+| REQ-14 | The entity dataset covers the whole corpus. | Functional suitability | `data/gold/entities/registry.jsonl` covers chapters 1–1193, and every chapter has ≥ 1 Scene. | The GRU trains on the whole story, not on a sample. | ☐ |
+| REQ-15 | The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`). | Reliability | 0 Entities in `Registry(t)` before their first Mention or Appearance. | Any future information in the inputs would leak the answer and inflate the scores. | ☐ |
 
 ### Delivery Fri 2026-10-30: GRU presentation and entity dataset
 
@@ -36,11 +34,11 @@ committed to start looking into them. Vectorisation wasn't part of this delivery
 | REQ-5 | The Silver corpus covers every published chapter, 1 to 1193, with no gaps. | Functional suitability | 1193 files, 0 missing chapter numbers. | A missing chapter leaves a hole in the story the forecasts learn from and are judged on. | ☐ |
 | REQ-6 | Every Silver File has a front-matter whose `chapter` matches its file name, `complete: true` and a `revision_id`. | Reliability | 0 files failing. | Forecasting chapter n+1 relies on the chapter order; a mislabelled or incomplete file would silently shift it. | ☐ |
 | REQ-7 | Every Silver File has a non-empty Long Summary, plus its Short Summary and Chapter Notes sections. | Functional suitability | 0 empty Long Summaries; 0 files missing the Short Summary or Chapter Notes section. | A chapter without its summary contributes nothing to the forecasts. | ☐ |
-| REQ-8 | The header's `character_count` matches the Characters actually listed. | Reliability | 0 mismatches. | The entity quality figures shown to Konrad (REQ-12) are only as trustworthy as this list. | ☐ |
-| REQ-15 | The GRU pipeline design is written down: inputs, what it predicts for chapter n+1, the baselines it must beat, and the metrics. | Maintainability | 4/4 points covered in a written design document. | Konrad must be able to check that the model answers his question before weeks go into building it. | ☑ 2026-10-30, Konrad (block diagram only; the written document will be submitted for validation) |
-| REQ-16 | The design uses no future information: chronological train/val/test split, everything fitted on training chapters only. | Reliability | 2/2 rules specified in the design (chronological split; fitting on training chapters only), and 0 violations in the leakage-guard test once the split code exists. | Konrad needs scores that hold on chapters not yet published; leakage would inflate them. | ☑ 2026-10-30, Konrad |
+| REQ-8 | The header's `character_count` matches the Characters actually listed. | Reliability | 0 mismatches. | The entity quality figures shown to Konrad (REQ-11) are only as trustworthy as this list. | ☐ |
+| REQ-9 | The GRU pipeline design is written down: inputs, what it predicts for chapter n+1, the baselines it must beat, and the metrics. | Maintainability | 4/4 points covered in a written design document. | Konrad must be able to check that the model answers his question before weeks go into building it. | ☑ 2026-10-30, Konrad (block diagram only; the written document will be submitted for validation) |
+| REQ-10 | The design uses no future information: chronological train/val/test split, everything fitted on training chapters only. | Reliability | 2/2 rules specified in the design (chronological split; fitting on training chapters only), and 0 violations in the leakage-guard test once the split code exists. | Konrad needs scores that hold on chapters not yet published; leakage would inflate them. | ☑ 2026-10-30, Konrad |
 
-REQ-12 and REQ-13 (entities) were also committed for this delivery. They were not finished and
+REQ-11 and REQ-12 (entities) were also committed for this delivery. They were not finished and
 are carried over to 2026-11-12 (see above).
 
 ### Delivery Fri 2026-10-23: Taxonomy Gold research and POC
@@ -56,10 +54,10 @@ are carried over to 2026-11-12 (see above).
 
 Kept here so the IDs stay reserved. Each comes back into a delivery when a sprint commits to it.
 
-- **REQ-9**: each chapter gets exactly one Chapter Embedding, built from its Long Summary only.
-- **REQ-10**: every set of vectors comes with a manifest (model, chunking rule, chapter list, silver `revision_id`s).
-- **REQ-11**: re-running vectorisation on the same input gives identical vectors.
-- **REQ-14**: events are extracted from each chapter's Long Summary (who did what to whom), each traceable to its source sentence.
+- **REQ-16**: each chapter gets exactly one Chapter Embedding, built from its Long Summary only.
+- **REQ-17**: every set of vectors comes with a manifest (model, chunking rule, chapter list, silver `revision_id`s).
+- **REQ-18**: re-running vectorisation on the same input gives identical vectors.
+- **REQ-19**: events are extracted from each chapter's Long Summary (who did what to whom), each traceable to its source sentence.
 
 ## 2. Verification (Q2 → Q3)
 
@@ -72,17 +70,15 @@ means this run. `data/` is never committed, so the two tests that read the real 
 corpus are skipped in CI; REQ-5–8 on the real corpus are still checked locally with
 `scripts/quality/check_silver.py`.
 
-### Delivery Thu 2026-11-12 and Fri 2026-11-13
+### Delivery Thu 2026-11-12
 
 | ID | Verification method | Pass criterion | When | Owner | Result | Evidence |
 |---|---|---|---|---|---|---|
-| REQ-12 | Read the recall proxy and precision proxy from the extraction's quality report (`registry_quality.json`), overall and per chapter. | Recall proxy ≥ 0.95 overall and ≥ 0.80 in every chapter; precision proxy ≥ 0.80 overall and ≥ 0.50 in every chapter | Before delivery (12/11) | Team | ⏳ | |
-| REQ-13 | Count extracted names resolved to a Canonical name; manually review 20 random Aliases. | ≥ 95 % resolved, 0 wrong merges | Before delivery (12/11) | Team | ⏳ | |
-| REQ-17 | A teammate follows the README on a fresh clone and notes every step that failed. | Same output, 0 undocumented steps | Before delivery (12/11) | Team | ⏳ | |
-| REQ-18 | Spot-check each number on the slides against its run output or document. | 100 % traceable | Before defense (13/11) | Team | ⏳ | |
-| REQ-19 | Read `registry.jsonl` and `registry_quality.json`. | Chapters 1–1193 present, ≥ 1 Scene each | Before delivery (12/11) | Team | ⏳ | |
-| REQ-20 | Test: for every Entity, no Registry row with `valid_from` before its first Mention or Appearance. | 0 violations | Automatic (test suite) | Team | ⏳ | |
-| REQ-21 | Full timed rehearsal of the talk. | ≤ 20 min | Before defense (13/11) | Team | ⏳ | |
+| REQ-11 | Read the recall proxy and precision proxy from the extraction's quality report (`registry_quality.json`), overall and per chapter. | Recall proxy ≥ 0.95 overall and ≥ 0.80 in every chapter; precision proxy ≥ 0.80 overall and ≥ 0.50 in every chapter | Before delivery (12/11) | Team | ⏳ | |
+| REQ-12 | Count extracted names resolved to a Canonical name; manually review 20 random Aliases. | ≥ 95 % resolved, 0 wrong merges | Before delivery (12/11) | Team | ⏳ | |
+| REQ-13 | A teammate follows the README on a fresh clone and notes every step that failed. | Same output, 0 undocumented steps | Before delivery (12/11) | Team | ⏳ | |
+| REQ-14 | Read `registry.jsonl` and `registry_quality.json`. | Chapters 1–1193 present, ≥ 1 Scene each | Before delivery (12/11) | Team | ⏳ | |
+| REQ-15 | Test: for every Entity, no Registry row with `valid_from` before its first Mention or Appearance. | 0 violations | Automatic (test suite) | Team | ⏳ | |
 
 ### Delivery Fri 2026-10-30
 
@@ -92,9 +88,9 @@ corpus are skipped in CI; REQ-5–8 on the real corpus are still checked locally
 | REQ-6 | Same script, per file. | 0 files failing | Each sprint | Team | ✅ | Same run: 0 files failing. |
 | REQ-7 | Same script; also reports the Long Summary length. | 0 empty Long Summaries, 0 missing sections | Each sprint | Team | ✅ | Same run: min 97, median 598, max 2094 words. |
 | REQ-8 | Same script. | 0 mismatches | Each sprint | Team | ✅ | Same run: `character_count` matches in all 1193 files. |
-| REQ-15 | A teammate reviews the design document against the four points. | 4/4 points covered | Before demo | Team | ⚠️ | The pipeline design exists only as a block diagram (image), validated by Konrad on 2026-10-30. The written design document doesn't exist yet; once written, it will be reviewed against the four points and submitted to Konrad for validation. |
-| REQ-16 | Review of the design; leakage-guard test once the split code exists. | 2/2 rules in the design; 0 violations in the leakage-guard test | Before demo | Team | ❌ | 0/2 rules written down: neither the chronological split nor fitting on training chapters only appears in the block diagram or in any document. Only the input side is covered: ADR 0002 (`docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`) keeps future facts out of KG(t). The leakage-guard test doesn't exist yet (no split code). Action: write both rules into the design document (REQ-15). |
-| REQ-12, REQ-13 | Entity extraction compared with the Silver header. | See 2026-11-12 | Before demo | Team | ⚠️ | Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open). Carried over to 2026-11-12. |
+| REQ-9 | A teammate reviews the design document against the four points. | 4/4 points covered | Before demo | Team | ⚠️ | The pipeline design exists only as a block diagram (image), validated by Konrad on 2026-10-30. The written design document doesn't exist yet; once written, it will be reviewed against the four points and submitted to Konrad for validation. |
+| REQ-10 | Review of the design; leakage-guard test once the split code exists. | 2/2 rules in the design; 0 violations in the leakage-guard test | Before demo | Team | ❌ | 0/2 rules written down: neither the chronological split nor fitting on training chapters only appears in the block diagram or in any document. Only the input side is covered: ADR 0002 (`docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`) keeps future facts out of KG(t). The leakage-guard test doesn't exist yet (no split code). Action: write both rules into the design document (REQ-9). |
+| REQ-11, REQ-12 | Entity extraction compared with the Silver header. | See 2026-11-12 | Before demo | Team | ⚠️ | Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open). Carried over to 2026-11-12. |
 
 Output of the run behind REQ-5 to REQ-8:
 
@@ -122,19 +118,19 @@ emptied and `--expected 3`. It reported `Chapitres manquants : [3]` and
 
 ## 3. Log (one entry per project week)
 
-### Weeks of 02/11 & 09/11 (entities Thu 12/11, mid-term defense Fri 13/11)
-- Added: REQ-19, REQ-20, REQ-21. REQ-12 and REQ-13 carried over with measurable thresholds. REQ-9–11 and REQ-14 moved to the backlog: they were never committed.
+### Weeks of 02/11 & 09/11 (entities Thu 12/11)
+- Added: REQ-14, REQ-15. REQ-11 and REQ-12 carried over with measurable thresholds. REQ-16–19 moved to the backlog: they were never committed.
 - Checked: nothing yet (all ⏳). Tooling: CI now runs the test suite on every PR and push to `main` (PR #101, 2026-11-09: 32 passed, 2 skipped, the `data/` checks, on all 4 jobs).
-- Planned to show: the finished entity dataset (`Registry(t)`) with its recall/precision (REQ-12, REQ-13, REQ-19, REQ-20), then the mid-term defense on 13/11.
-- Next: once the entities are done, benchmark an API solution with an Anthropic model for the following sprints. Write the GRU pipeline design document (REQ-15), including the chronological split and fitting on training chapters only (REQ-16), and submit it to Konrad for validation.
+- Planned to show: the finished entity dataset (`Registry(t)`) with its recall/precision (REQ-11, REQ-12, REQ-14, REQ-15).
+- Next: once the entities are done, benchmark an API solution with an Anthropic model for the following sprints. Write the GRU pipeline design document (REQ-9), including the chronological split and fitting on training chapters only (REQ-10), and submit it to Konrad for validation.
 
 ### Week of 26/10 (delivery Fri 30/10)
-- Added: REQ-15, REQ-16 (GRU design); REQ-12, REQ-13 (entities).
-- Checked: REQ-5–8 ✅ (Silver corpus, 2026-10-26); REQ-15 ⚠️ (design only as a block diagram, validated by Konrad; no written document yet); REQ-16 ❌ (the split and fitting rules aren't written anywhere; no leakage-guard test yet); REQ-12, REQ-13 ⚠️, entities not finished.
+- Added: REQ-9, REQ-10 (GRU design); REQ-11, REQ-12 (entities).
+- Checked: REQ-5–8 ✅ (Silver corpus, 2026-10-26); REQ-9 ⚠️ (design only as a block diagram, validated by Konrad; no written document yet); REQ-10 ❌ (the split and fitting rules aren't written anywhere; no leakage-guard test yet); REQ-11, REQ-12 ⚠️, entities not finished.
 - Shown to client: the presentation of how the GRU works (`GRU.md`, delivered on Teams). The entity dataset wasn't finished. Events: work started, nothing promised.
 - Client said: satisfied, but disappointed about the entities.
 - Decision: continue with the GRU pipeline; finish the entities first, then benchmark an API solution with an Anthropic model.
-- Next: finish the entities (REQ-12, REQ-13, REQ-19, REQ-20) for 12/11.
+- Next: finish the entities (REQ-11, REQ-12, REQ-14, REQ-15) for 12/11.
 
 ### Week of 19/10 (delivery Fri 23/10)
 - Added: REQ-1–4.
