@@ -37,3 +37,9 @@ entries:
   migrated: true
   result: ⚠️
   text: Konrad validated the block diagram only; the written design document will be submitted to him for validation (QUALITY.md §1 and §2).
+- date: 2026-11-19
+  by: team
+  type: carried-over
+  channel: sprint
+  delivery: 2026-11-26
+  text: 'Signed off ⚠️ on 30/10 (block diagram only). The written design document still doesn''t exist; it is tracked in #146 and will include the no-future-information rules of REQ-10. Carried over to the delivery of 2026-11-26.'

@@ -140,7 +140,7 @@ The GRU pipeline design is written down: inputs, what it predicts for chapter n+
 - **Verification:** A teammate reviews the design document against the four points.
 - **When:** Before demo
 - **Owner:** Team
-- **Delivery:** 2026-10-30
+- **Delivery:** 2026-11-26
 - **Recurring:** no
 - **Client status:** signed off ⚠️
 - **Latest result:** ⚠️ (2026-10-30)
