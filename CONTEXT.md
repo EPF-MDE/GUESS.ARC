@@ -74,8 +74,8 @@ Chapitre à partir duquel le lecteur apprend un fait (un lien de parenté, une i
 _Avoid_: reveal date, spoiler
 
 **Disguise**:
-Alias sous lequel un Character est présenté au lecteur comme une personne distincte, jusqu'à sa Revelation (Kyoshiro pour Denjiro, Miss All Sunday pour Nico Robin). Avant la Revelation, le Disguise est traité comme une Entity à part entière.
-_Avoid_: fausse identité, alter ego
+Alias sous lequel un Character est présenté au lecteur comme une personne distincte d'un Character qu'il connaît déjà sous son vrai nom, jusqu'à sa Revelation (Kyoshiro pour Denjiro, Komurasaki pour Kouzuki Hiyori). Avant la Revelation, le Disguise est traité comme une Entity à part entière ; à la Revelation, les deux Entities fusionnent. Un Character dont le vrai nom n'est donné qu'à sa Revelation (Miss All Sunday pour Nico Robin, Mr. 3 pour Galdino) n'a pas de Disguise : son vrai nom est un simple Alias.
+_Avoid_: fausse identité, alter ego, révélation de nom
 
 **Mention**:
 Occurrence d'une Entity dans une Scene, sous l'un de ses Aliases. Une Mention n'implique pas la présence : un Character peut être mentionné sans avoir d'Appearance.

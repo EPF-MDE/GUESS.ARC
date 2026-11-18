@@ -234,6 +234,11 @@ lettre ferait fuiter ce secret.
 - L'extraction liste des **candidats Disguise** : des Aliases de personnages qui n'ont aucun mot en
   commun avec leur Canonical name (Kyoshiro → Denjiro, Miss All Sunday → Nico Robin), triés par
   nombre de liens, dans `data/gold/entities/disguise_candidates.csv`.
+- Un Disguise fusionne deux Entities que le lecteur connaît déjà. `named_apart_from` est le premier
+  chapitre où le Long Summary ou la CharTable nomme le personnage sous son propre nom sans l'Alias,
+  avant `named_together_from`, le premier chapitre qui lie les deux (souvent la Revelation). Si
+  `named_apart_from` est vide, le vrai nom n'arrive qu'avec l'Alias : c'est une révélation de nom
+  (Miss All Sunday → Nico Robin), pas un Disguise.
 - Un humain confirme les vrais et note le chapitre de **Revelation** dans `reference/disguises.csv`.
 - Avant sa Revelation, un Disguise confirmé est une Entity à part, avec ses propres Mentions. À
   partir de la Revelation, il est fusionné avec le vrai personnage et devient l'un de ses Aliases.
@@ -412,11 +417,11 @@ n'ajoute aucune entrée.
    le résumé, et mesurer si la précision tient.
 2. **La relecture des Disguises n'est pas faite.** `reference/disguises.csv` est encore vide, donc
    **le Registry(t) actuel laisse encore fuiter les identités secrètes** (Kyoshiro est compté comme
-   Denjiro dès sa première apparition). 194 candidats attendent dans
-   `data/gold/entities/disguise_candidates.csv`. Beaucoup ne sont pas des Disguises mais de simples surnoms
-   (« Big Mom » → Charlotte Linlin, « Kizaru » → Borsalino) et doivent être rejetés ; les vrais
-   (Kyoshiro, Komurasaki, « Lucy », Miss All Sunday, Sogeking...) attendent leur chapitre de
-   Revelation.
+   Denjiro dès sa première apparition). 197 candidats attendent dans
+   `data/gold/entities/disguise_candidates.csv` ; les 72 sans `named_apart_from` sont des révélations
+   de nom et peuvent être rejetés. Beaucoup d'autres sont de simples surnoms (« Big Mom » → Charlotte
+   Linlin, « Kizaru » → Borsalino) et doivent être rejetés aussi ; les vrais (Kyoshiro, Komurasaki,
+   Kamazo...) attendent leur chapitre de Revelation.
 3. **182 Entities restent Unknown** (1,35 % des Mentions). La plupart sont des notions laissées
    volontairement sans type : peuples et tribus (Shandia, Mink Tribe), styles de combat (Three Sword
    Style), événements (Buster Call, Levely). Il faut décider s'il leur faut un type ou s'il faut les

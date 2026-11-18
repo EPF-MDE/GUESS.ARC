@@ -31,6 +31,9 @@ NON_ARTICLE_PREFIXES = {"file", "image", "category", "template", "wikipedia", "w
 # et les notes nomment souvent un Disguise que le Long Summary ne lie jamais
 # (["Lucy"] -> Sabo n'apparaît que là).
 DISGUISE_SECTIONS = ("Long Summary", "Characters", "Chapter Notes")
+# Sections lues pour dater le premier chapitre où un Character est nommé sous son
+# propre nom : celles qui décrivent le chapitre tel que le lecteur le lit.
+NAMED_SECTIONS = ("Long Summary", "Characters")
 
 
 @dataclass(frozen=True)
@@ -163,12 +166,25 @@ class DisguiseCandidate:
 
     Liste à relire par un humain : il confirme les vrais Disguises et remplit
     revelation, le chapitre où le lecteur apprend la vraie identité.
+
+    Un Disguise fusionne deux Entities que le lecteur connaît déjà : le Character
+    doit être nommé (Long Summary ou CharTable, sous un texte qui partage un mot
+    avec son Canonical name) dans un chapitre sans l'Alias, avant la Revelation.
+    Sinon, c'est une simple révélation de nom (Miss All Sunday -> Nico Robin).
+
+    named_together_from : premier chapitre où l'Alias et le nom sont liés tous
+    les deux, souvent la Revelation.
+    named_apart_from : premier chapitre où le nom est lié sans l'Alias, avant
+    named_together_from (ou avant last_chapter s'ils ne se croisent jamais).
+    Vide : pas deux Entities à fusionner, donc pas un Disguise.
     """
     alias: str
     canonical_name: str
     link_count: int
     first_chapter: int
     last_chapter: int
+    named_apart_from: int | None = None
+    named_together_from: int | None = None
     revelation: int | None = None
 
 
@@ -644,6 +660,7 @@ def _disguise_candidates(chapters: list[dict], resolve: Resolve,
     """
     characters: set[str] = set()
     link_chapters: dict[tuple[str, str], list[int]] = {}
+    named_chapters: dict[str, set[int]] = {}
     for rec in chapters:
         wikitext = rec["wikitext"]
         characters |= {
@@ -661,9 +678,20 @@ def _disguise_candidates(chapters: list[dict], resolve: Resolve,
                 # partage aucun mot avec Nico Robin.
                 if alias and _name_tokens(alias).isdisjoint(_name_tokens(name)):
                     link_chapters.setdefault((alias, name), []).append(rec["number"])
+                # Nommé : lien non pipé, ou texte qui partage un mot avec le nom
+                # ("Hiyori", pas "his daughter"). Les notes citent souvent des faits
+                # postérieurs au chapitre : elles ne comptent pas.
+                elif heading in NAMED_SECTIONS and (m.group(2) is None or alias):
+                    named_chapters.setdefault(name, set()).add(rec["number"])
+
+    def candidate(alias: str, name: str, chs: list[int]) -> DisguiseCandidate:
+        named = named_chapters.get(name, set())
+        together = min(named & set(chs), default=None)
+        apart = min((c for c in named - set(chs) if c < (together or max(chs))), default=None)
+        return DisguiseCandidate(alias, name, len(chs), min(chs), max(chs), apart, together)
 
     candidates = [
-        DisguiseCandidate(alias, name, len(chs), min(chs), max(chs))
+        candidate(alias, name, chs)
         for (alias, name), chs in link_chapters.items()
         if name in characters
     ]

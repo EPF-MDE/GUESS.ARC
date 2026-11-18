@@ -217,6 +217,11 @@ secret.
 - The extraction lists **Disguise candidates**: character Aliases that share no word with their
   Canonical name (Kyoshiro → Denjiro, Miss All Sunday → Nico Robin), sorted by number of links, in
   `data/gold/entities/disguise_candidates.csv`.
+- A Disguise merges two Entities the reader already knows. `named_apart_from` is the first chapter
+  where the Long Summary or CharTable names the character under its own name without the Alias,
+  before `named_together_from`, the first chapter that links both (often the Revelation). When
+  `named_apart_from` is empty, the real name only comes with the Alias: a name revelation (Miss All
+  Sunday → Nico Robin), not a Disguise.
 - A human confirms the real ones and writes down the **Revelation** chapter in
   `reference/disguises.csv`.
 - Before its Revelation, a confirmed Disguise is a separate Entity, with its own Mentions. From the
@@ -390,10 +395,10 @@ is also a catalog, but its only section link points to a list heading, so it add
    measure whether precision holds.
 2. **Disguise review not done yet.** `reference/disguises.csv` is still empty, so **today's
    Registry(t) still leaks secret identities** (Kyoshiro is counted as Denjiro from his first
-   appearance). 194 candidates are waiting in `data/gold/entities/disguise_candidates.csv`. Many are not
-   Disguises but plain epithets ("Big Mom" → Charlotte Linlin, "Kizaru" → Borsalino) and must be
-   rejected; the real ones (Kyoshiro, Komurasaki, "Lucy", Miss All Sunday, Sogeking...) need their
-   Revelation chapter.
+   appearance). 197 candidates are waiting in `data/gold/entities/disguise_candidates.csv`; the 72
+   with no `named_apart_from` are name revelations and can be rejected. Many others are plain
+   epithets ("Big Mom" → Charlotte Linlin, "Kizaru" → Borsalino) and must be rejected too; the real
+   ones (Kyoshiro, Komurasaki, Kamazo...) need their Revelation chapter.
 3. **182 Entities remain Unknown** (1.35 % of Mentions). Most are deliberately untyped notions:
    peoples and tribes (Shandia, Mink Tribe), fighting styles (Three Sword Style), events (Buster
    Call, Levely). We should decide whether they need a type or should be excluded like Concepts.
