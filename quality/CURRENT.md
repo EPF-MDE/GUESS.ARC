@@ -2,7 +2,7 @@
 
 > **Generated, do not edit.** Rebuilt from the threads in `requirements/` by `python scripts/quality/regenerate.py`. To change it, record an entry in a thread and regenerate (see [README.md](README.md)).
 
-What the team must reach now: every open requirement (not signed off ✅, not rejected, not dropped), plus every recurring one with its latest result. Every requirement that ever existed is listed in [OVERVIEW.md](OVERVIEW.md).
+What the team must reach now: every open requirement (not signed off ✅, not rejected, not dropped) committed to a delivery, plus every recurring one with its latest result. Every requirement that ever existed, backlog included, is listed in [OVERVIEW.md](OVERVIEW.md).
 
 | Grid | What it asks | Where it is shown |
 |---|---|---|
@@ -177,10 +177,10 @@ Thread: [requirements/REQ-10.yaml](requirements/REQ-10.yaml)
 The entity extraction finds the Characters of each chapter in its Long Summary, and doesn't invent extra ones.
 
 - **Characteristic:** Functional suitability
-- **Metric & threshold:** No measurable threshold: the entity extraction is compared with the Silver header.
+- **Metric & threshold:** The two proxies from the extraction's quality report (ENT-02 #81, ENT-04 #83). **Recall proxy**: share of Characters with an Appearance in the chapter's CharTable that have ≥ 1 Mention in the same chapter's Long Summary; ≥ 0.95 overall, ≥ 0.80 in every chapter. **Precision proxy**: share of Alias-matched Mentions of Characters whose Character is in that chapter's Cast (Appearance, Recall or Cover appearance); ≥ 0.80 overall, ≥ 0.50 in every chapter.
 - **Why (client need):** A missed or invented Character feeds the GRU a wrong history, so Konrad's forecasts get worse.
-- **Verification:** Entity extraction compared with the Silver header.
-- **When:** Before demo
+- **Verification:** Read the recall proxy and precision proxy from the extraction's quality report (`registry_quality.json`), overall and per chapter.
+- **When:** Before delivery (12/11)
 - **Owner:** Team
 - **Delivery:** 2026-11-12
 - **Recurring:** no
@@ -198,10 +198,10 @@ Thread: [requirements/REQ-11.yaml](requirements/REQ-11.yaml)
 Name variants resolve to one Entity ("Luffy" = "Monkey D. Luffy"), and different Entities stay distinct ("Fake Luffy" ≠ "Luffy").
 
 - **Characteristic:** Functional suitability
-- **Metric & threshold:** No measurable threshold: the entity extraction is compared with the Silver header.
+- **Metric & threshold:** ≥ 95 % of extracted names resolve to a Canonical name; 0 wrong merges in a manual review of 20 random Aliases.
 - **Why (client need):** One Character split across several names, or two merged, corrupts the GRU's inputs and targets.
-- **Verification:** Entity extraction compared with the Silver header.
-- **When:** Before demo
+- **Verification:** Count extracted names resolved to a Canonical name; manually review 20 random Aliases.
+- **When:** Before delivery (12/11)
 - **Owner:** Team
 - **Delivery:** 2026-11-12
 - **Recurring:** no
@@ -213,3 +213,54 @@ Evidence:
 Not finished on 2026-10-30 (first `Registry(t)` in PR #80, ENT-02 to ENT-08 still open).
 
 Thread: [requirements/REQ-12.yaml](requirements/REQ-12.yaml)
+
+## REQ-13 · Entity extraction rerunnable from the README
+
+Someone else can rerun the entity extraction from the README alone.
+
+- **Characteristic:** Maintainability
+- **Metric & threshold:** A teammate on a fresh clone gets the same `registry.jsonl` with 0 undocumented steps.
+- **Why (client need):** Konrad must be able to run the pipeline after we leave.
+- **Verification:** A teammate follows the README on a fresh clone and notes every step that failed.
+- **When:** Before delivery (12/11)
+- **Owner:** Team
+- **Delivery:** 2026-11-12
+- **Recurring:** no
+- **Client status:** awaiting client
+- **Latest result:** ⏳ not verified yet
+
+Thread: [requirements/REQ-13.yaml](requirements/REQ-13.yaml)
+
+## REQ-14 · Entity dataset covers the whole corpus
+
+The entity dataset covers the whole corpus.
+
+- **Characteristic:** Functional suitability
+- **Metric & threshold:** `data/gold/entities/registry.jsonl` covers chapters 1–1193, and every chapter has ≥ 1 Scene.
+- **Why (client need):** The GRU trains on the whole story, not on a sample.
+- **Verification:** Read `registry.jsonl` and `registry_quality.json`.
+- **When:** Before delivery (12/11)
+- **Owner:** Team
+- **Delivery:** 2026-11-12
+- **Recurring:** no
+- **Client status:** awaiting client
+- **Latest result:** ⏳ not verified yet
+
+Thread: [requirements/REQ-14.yaml](requirements/REQ-14.yaml)
+
+## REQ-15 · Registry limited to what the reader knows
+
+The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`).
+
+- **Characteristic:** Reliability
+- **Metric & threshold:** 0 Entities in `Registry(t)` before their first Mention or Appearance.
+- **Why (client need):** Any future information in the inputs would leak the answer and inflate the scores.
+- **Verification:** Test: for every Entity, no Registry row with `valid_from` before its first Mention or Appearance.
+- **When:** Automatic (test suite)
+- **Owner:** Team
+- **Delivery:** 2026-11-12
+- **Recurring:** yes
+- **Client status:** awaiting client
+- **Latest result:** ⏳ not verified yet
+
+Thread: [requirements/REQ-15.yaml](requirements/REQ-15.yaml)

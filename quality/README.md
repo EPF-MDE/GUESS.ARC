@@ -8,15 +8,14 @@ Markdown views are generated from them.
 A thread is made of **entries**, never "events": in this repo, an Event is something that happens
 in a chapter (see `CONTEXT.md`).
 
-> **Migration in progress.** Only the 23/10 and 30/10 deliveries (REQ-1 to REQ-12) have been
-> moved here so far. Until the migration is finished, `QUALITY.md` at the repo root stays the
-> reference for the other requirements and meetings.
+This folder replaces the former `QUALITY.md`: its requirements, verifications, weekly log and
+meetings were migrated here (entries flagged `migrated: true`), and it was then removed.
 
 ## Where to look
 
 | Grid | What it asks | Where it is shown |
 |---|---|---|
-| **Q1** | You questioned and specified the quality requirements of your product | [CURRENT.md](CURRENT.md) (spec of every current requirement) and the `proposed` / `accepted` / `rejected` entries of each thread |
+| **Q1** | You questioned and specified the quality requirements of your product | [CURRENT.md](CURRENT.md) (spec of every current requirement) and the `proposed` / `revised` / `accepted` / `amended` / `rejected` entries of each thread |
 | **Q2** | You defined how you'll know each requirement is met | The *Verification*, *When* and *Owner* of each requirement in [CURRENT.md](CURRENT.md) |
 | **Q3** | You actually ran those checks | The `verified` entries (result, evidence, raw output) of each thread; the latest one is in [CURRENT.md](CURRENT.md) |
 
@@ -34,10 +33,11 @@ Sprints last one week; the client is seen once per sprint, at the Thursday meeti
 
 1. **Sprint planning (team only):** the team records a `proposed` entry. The requirement is then
    *awaiting client*, and the team already works on it.
-2. **During the sprint:** the team records `verified` entries: its own check result, with evidence.
+2. **During the sprint:** the team records `verified` entries: its own check result, with evidence;
+   and, if needed, `revised` entries: the team changes the spec.
 3. **Client meeting, for each requirement, in this order:** first the client's decision on the
-   spec (`accepted` / `rejected`), then the client's verdict on whether it was reached
-   (`signed-off` ✅ / ⚠️ / ❌), judged against the spec just accepted.
+   spec (`accepted` / `amended` / `rejected`), then the client's verdict on whether it was reached
+   (`signed-off` ✅ / ⚠️ / ❌), judged against the spec as just accepted or amended.
 4. **Anything not signed off ✅** is `carried-over` to a later delivery, or `dropped`.
 
 The team writes everything. Client entries record what Konrad said, quoted or faithfully
@@ -81,7 +81,9 @@ old `QUALITY.md` carry `migrated: true`. Dates never go backwards within a threa
 
 | Entry type | By | Carries |
 |---|---|---|
-| `proposed` | team | Every requirement field (below). Always the first entry, and only once. |
+| `proposed` | team | Every requirement field (below), or only `title` and `statement` for a backlog item (see below). Always the first entry, and only once. |
+| `revised` | team | Only the requirement fields that change, at least one. The team changes the spec; the client has to decide on it again. |
+| `amended` | client | Only the requirement fields that change, at least one: what the client changed (e.g. threshold 0.90 → 0.95). |
 | `accepted` | client | Nothing: the client agrees with the spec. |
 | `rejected` | client | Nothing: the client refuses the spec. |
 | `verified` | team | `result` (✅ / ⚠️ / ❌), `evidence` (links to commits, PRs, files), optional `output` (raw text, shown as a code block). |
@@ -97,12 +99,22 @@ need), `verification` (how it is measured), `when` (free text: "Before delivery"
 "CI"…), `owner`, `delivery` (date of the targeted client meeting), `recurring` (checked every
 sprint or in CI).
 
-**Derived state.** The client status is *awaiting client* until the client's first decision, then
-follows the latest `accepted` / `rejected` / `signed-off` / `dropped`. The latest result is that of the latest
-`verified` entry (⏳ if none). The delivery is that of `proposed`, or of the latest `carried-over`.
-A requirement is **open** until it is signed off ✅, rejected or dropped.
-[CURRENT.md](CURRENT.md) lists the open requirements plus the recurring ones signed off ✅, so a
-regression still shows up. Nothing depends on today's date.
+**Backlog.** A requirement the team wants to keep in view without committing to a delivery is
+recorded as a `proposed` entry with no `delivery`. It then only needs a `title` and a
+`statement`; its ID is reserved. When a sprint commits to it, the team records a `revised` entry
+with the `delivery` and every requirement field still missing (validation refuses a thread
+committed to a delivery with an incomplete spec). Until then it is listed in
+[OVERVIEW.md](OVERVIEW.md) with the delivery *backlog*, but not in [CURRENT.md](CURRENT.md).
+
+**Derived state.** The current spec is that of `proposed`, with every `revised` and `amended`
+applied in order (a `carried-over` sets the delivery). The client status is *awaiting client*
+until the client's first decision, then follows the latest `accepted` / `amended` / `rejected` /
+`signed-off` / `dropped`; a `revised` puts the whole requirement back to *awaiting client*, even after a sign-off (a
+dropped requirement stays dropped).
+The latest result is that of the latest `verified` entry (⏳ if none). A requirement is **open**
+until it is signed off ✅, rejected or dropped. [CURRENT.md](CURRENT.md) lists the open
+requirements committed to a delivery, plus the recurring ones signed off ✅, so a regression still
+shows up. Nothing depends on today's date.
 
 ## Recording an entry
 

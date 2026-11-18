@@ -50,3 +50,26 @@ deliveries:
     channel: client meeting
     migrated: true
     text: 'Next: finish the entities (REQ-11, REQ-12, REQ-14, REQ-15) for 12/11.'
+- date: 2026-11-12
+  theme: Entities (weeks of 02/11 & 09/11, delivery Thu 12/11)
+  thread:
+  - date: 2026-11-02
+    by: team
+    channel: sprint planning
+    migrated: true
+    text: 'Added: REQ-14, REQ-15. REQ-11 and REQ-12 carried over with measurable thresholds. REQ-16–19 moved to the backlog: they were never committed.'
+  - date: 2026-11-02
+    by: team
+    channel: sprint planning
+    migrated: true
+    text: 'Planned to show: the finished entity dataset (`Registry(t)`) with its recall/precision (REQ-11, REQ-12, REQ-14, REQ-15).'
+  - date: 2026-11-09
+    by: team
+    channel: sprint
+    migrated: true
+    text: 'Checked: nothing yet (all ⏳). Tooling: CI now runs the test suite on every PR and push to `main` (PR #101, 2026-11-09: 32 passed, 2 skipped, the `data/` checks, on all 4 jobs).'
+  - date: 2026-11-09
+    by: team
+    channel: sprint
+    migrated: true
+    text: 'Next: once the entities are done, benchmark an API solution with an Anthropic model for the following sprints. Write the GRU pipeline design document (REQ-9), including the chronological split and fitting on training chapters only (REQ-10), and submit it to Konrad for validation.'

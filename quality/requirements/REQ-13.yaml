@@ -1,0 +1,18 @@
+id: REQ-13
+entries:
+- date: 2026-11-02
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Entity extraction rerunnable from the README
+  statement: Someone else can rerun the entity extraction from the README alone.
+  characteristic: Maintainability
+  metric: A teammate on a fresh clone gets the same `registry.jsonl` with 0 undocumented steps.
+  why: Konrad must be able to run the pipeline after we leave.
+  verification: A teammate follows the README on a fresh clone and notes every step that failed.
+  when: Before delivery (12/11)
+  owner: Team
+  delivery: 2026-11-12
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: listed in §1 and §2 for the delivery of Thu 2026-11-12. The §3 Log does not say when it was added; the date is that of the sprint planning for 12/11.'

@@ -1,0 +1,18 @@
+id: REQ-15
+entries:
+- date: 2026-11-02
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Registry limited to what the reader knows
+  statement: The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`).
+  characteristic: Reliability
+  metric: 0 Entities in `Registry(t)` before their first Mention or Appearance.
+  why: Any future information in the inputs would leak the answer and inflate the scores.
+  verification: 'Test: for every Entity, no Registry row with `valid_from` before its first Mention or Appearance.'
+  when: Automatic (test suite)
+  owner: Team
+  delivery: 2026-11-12
+  recurring: true
+  text: 'Reconstructed from QUALITY.md: added in the weeks of 02/11 & 09/11 (§3 Log), for the delivery of Thu 2026-11-12. Recurring: checked by the test suite in CI.'

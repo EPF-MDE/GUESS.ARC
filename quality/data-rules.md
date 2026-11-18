@@ -1,6 +1,6 @@
 # Data & confidentiality rules
 
-Moved from §4 of `QUALITY.md`, unchanged in substance.
+Moved from §4 of the former `QUALITY.md` (now removed), unchanged in substance.
 
 - Data that must **never** be committed (paths, file types): `data/` (bronze, silver, gold and `state.json`) and `.env` (API keys).
 - Where the data actually lives (who has access): generated locally by each teammate from the public English One Piece Fandom wiki (`python -m guess_arc.ingestion`). The source is public, under CC BY-SA, and used for academic purposes with attribution.

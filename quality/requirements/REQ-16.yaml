@@ -1,0 +1,10 @@
+id: REQ-16
+entries:
+- date: 2026-11-02
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: One Chapter Embedding per chapter
+  statement: Each chapter gets exactly one Chapter Embedding, built from its Long Summary only.
+  text: 'Reconstructed from QUALITY.md: moved to the backlog in the weeks of 02/11 & 09/11 (§3 Log: "they were never committed"). Kept so the ID stays reserved; it comes back into a delivery when a sprint commits to it. QUALITY.md only gave this statement.'

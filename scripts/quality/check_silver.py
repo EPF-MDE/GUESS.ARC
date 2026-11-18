@@ -1,4 +1,4 @@
-"""Vérifie que le corpus silver est une entrée saine pour l'Embedding Gold (QUALITY.md, REQ-5 à REQ-8).
+"""Vérifie que le corpus silver est une entrée saine pour l'Embedding Gold (quality/, REQ-5 à REQ-8).
 
 Bibliothèque standard uniquement, sans réseau. Code de sortie 0 si tout passe, 1 sinon.
 

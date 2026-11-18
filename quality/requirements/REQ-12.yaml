@@ -31,3 +31,12 @@ entries:
   migrated: true
   delivery: 2026-11-12
   text: REQ-11 and REQ-12 (entities) were committed for 30/10. They were not finished and are carried over to 2026-11-12 (QUALITY.md §1 and §2). Konrad was satisfied, but disappointed about the entities (§3 Log, week of 26/10).
+- date: 2026-11-02
+  by: team
+  type: revised
+  channel: sprint planning
+  migrated: true
+  metric: ≥ 95 % of extracted names resolve to a Canonical name; 0 wrong merges in a manual review of 20 random Aliases.
+  verification: Count extracted names resolved to a Canonical name; manually review 20 random Aliases.
+  when: Before delivery (12/11)
+  text: 'Reconstructed from QUALITY.md: carried over to 12/11 "with measurable thresholds" (§3 Log, weeks of 02/11 & 09/11); the new metric, verification and when are those of §1 and §2 (Delivery Thu 2026-11-12).'

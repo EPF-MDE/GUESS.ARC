@@ -1,0 +1,18 @@
+id: REQ-14
+entries:
+- date: 2026-11-02
+  by: team
+  type: proposed
+  channel: sprint planning
+  migrated: true
+  title: Entity dataset covers the whole corpus
+  statement: The entity dataset covers the whole corpus.
+  characteristic: Functional suitability
+  metric: '`data/gold/entities/registry.jsonl` covers chapters 1–1193, and every chapter has ≥ 1 Scene.'
+  why: The GRU trains on the whole story, not on a sample.
+  verification: Read `registry.jsonl` and `registry_quality.json`.
+  when: Before delivery (12/11)
+  owner: Team
+  delivery: 2026-11-12
+  recurring: false
+  text: 'Reconstructed from QUALITY.md: added in the weeks of 02/11 & 09/11 (§3 Log), for the delivery of Thu 2026-11-12.'
