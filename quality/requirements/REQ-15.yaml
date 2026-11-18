@@ -6,7 +6,7 @@ entries:
   channel: sprint planning
   migrated: true
   title: Registry limited to what the reader knows
-  statement: The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`).
+  statement: The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `extraction/entities`).
   characteristic: Reliability
   metric: 0 Entities in `Registry(t)` before their first Mention or Appearance.
   why: Any future information in the inputs would leak the answer and inflate the scores.

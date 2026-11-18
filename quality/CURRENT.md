@@ -250,7 +250,7 @@ Thread: [requirements/REQ-14.yaml](requirements/REQ-14.yaml)
 
 ## REQ-15 · Registry limited to what the reader knows
 
-The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `exctraction/entities`).
+The Registry only contains what the reader knows at chapter t (ADR 0002, `docs/adr/0002-reader-knowledge-only.md` on branch `extraction/entities`).
 
 - **Characteristic:** Reliability
 - **Metric & threshold:** 0 Entities in `Registry(t)` before their first Mention or Appearance.
