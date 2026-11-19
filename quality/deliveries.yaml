@@ -73,3 +73,6 @@ deliveries:
     channel: sprint
     migrated: true
     text: 'Next: once the entities are done, benchmark an API solution with an Anthropic model for the following sprints. Write the GRU pipeline design document (REQ-9), including the chronological split and fitting on training chapters only (REQ-10), and submit it to Konrad for validation.'
+- date: 2026-11-19
+  theme: Chapter embedding, event extractions, knowledge graph research, QUALITY.md new version
+  thread: []
