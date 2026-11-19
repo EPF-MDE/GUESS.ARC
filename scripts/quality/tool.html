@@ -70,7 +70,10 @@
   .form-grid textarea { min-height: 3.2em; resize: vertical; }
   .form-grid textarea.output { font-family: ui-monospace, Consolas, monospace; font-size: 13px; min-height: 6em; }
   .form-grid .hint { grid-column: 2; margin-top: -6px; font-size: 13px; color: var(--muted); }
-  .form-grid .changed { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .form-grid .changed { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent);
+                        background: var(--after); }
+  .form-grid label.changed { color: var(--accent); font-weight: 600; background: none; box-shadow: none; }
+  .form-grid label.changed::after { content: " · changed"; }
   .actions { margin-top: 14px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   button { font: inherit; font-weight: 600; padding: 7px 16px; border-radius: 6px; border: 0;
            background: var(--accent); color: #fff; cursor: pointer; }
@@ -95,7 +98,10 @@ const LABELS = { title: "Title", statement: "Statement", characteristic: "Charac
   metric: "Metric & threshold", why: "Why (client need)", verification: "Verification",
   when: "When", owner: "Owner", delivery: "Delivery", recurring: "Recurring" };
 const main = document.getElementById("main");
-const filters = { q: "", status: "", result: "", delivery: "", recurring: "" };
+const filters = { q: "", scope: "", status: "", result: "", delivery: "", recurring: "" };
+// Scope filter: "current" is exactly what CURRENT.md lists.
+const SCOPES = { "Current (as in CURRENT.md)": r => r.current, "Open": r => r.open,
+                 "Closed": r => !r.open };
 let meetingsCache = null;
 
 function esc(value) {
@@ -150,7 +156,7 @@ async function post(path, body) {
 }
 
 function renderNav(active) {
-  const links = [["#/", "Requirements"], ...(meetingsCache || []).map(m =>
+  const links = [["#/", "Requirements"], ["#/current", "Current"], ...(meetingsCache || []).map(m =>
     [`#/meeting/${m.date}`, `Meeting ${m.date}`]),
     ["#/new", "+ Requirement"], ["#/new-meeting", "+ Meeting"]];
   document.getElementById("nav").innerHTML = links.map(([href, label]) =>
@@ -174,6 +180,7 @@ async function showTable() {
     <p class="muted">${reqs.length} requirements. Click a row to read its thread.</p>
     <div class="filters">
       <input type="search" data-filter="q" placeholder="Search ID, title, statement…" value="${esc(filters.q)}">
+      ${options("scope", Object.keys(SCOPES), "All requirements")}
       ${options("status", uniq(r => r.client_status), "Any client status")}
       ${options("result", uniq(r => r.latest_result), "Any latest result")}
       ${options("delivery", uniq(deliveryOf), "Any delivery")}
@@ -181,13 +188,14 @@ async function showTable() {
     </div>
     <div class="table-wrap"><table>
       <thead><tr><th>ID</th><th>Title</th><th>Client status</th><th>Latest result</th>
-        <th>Delivery</th><th>Recurring</th></tr></thead>
+        <th>Delivery</th><th>Recurring</th><th>Current</th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>`;
   const fill = () => {
     const q = filters.q.toLowerCase();
     const shown = reqs.filter(r =>
       (!q || [r.id, r.spec.title, r.spec.statement].join(" ").toLowerCase().includes(q)) &&
+      (!filters.scope || SCOPES[filters.scope](r)) &&
       (!filters.status || r.client_status === filters.status) &&
       (!filters.result || r.latest_result === filters.result) &&
       (!filters.delivery || deliveryOf(r) === filters.delivery) &&
@@ -200,7 +208,8 @@ async function showTable() {
         <td>${esc(r.latest_result)}</td>
         <td class="nowrap">${esc(deliveryOf(r))}</td>
         <td>${r.spec.recurring ? "yes" : "no"}</td>
-      </tr>`).join("") || `<tr><td colspan="6" class="muted">No requirement matches.</td></tr>`;
+        <td>${r.current ? "✓" : ""}</td>
+      </tr>`).join("") || `<tr><td colspan="7" class="muted">No requirement matches.</td></tr>`;
   };
   main.querySelectorAll("[data-filter]").forEach(el =>
     el.addEventListener("input", () => { filters[el.dataset.filter] = el.value; fill(); }));
@@ -320,6 +329,11 @@ function readInput(el) {
   return el.value;
 }
 // Whether input `el` still holds the requirement's current value of its field.
+// Highlight a changed input and its label, so the change shows on a shared screen.
+function markChanged(el, changed) {
+  el.classList.toggle("changed", changed);
+  el.parentElement.previousElementSibling.classList.toggle("changed", changed);
+}
 function unchanged(el, spec) {
   const v = readInput(el), current = spec[el.name];
   if (el.name === "recurring") return v === (current === undefined ? "" : current);
@@ -412,7 +426,7 @@ function setUpEntryForm(form, r) {
     form.querySelector("#type-slot").innerHTML = typeFields(type, r.spec);
     if (vocab.spec_changes.includes(type))
       form.querySelectorAll("[data-field]").forEach(el => el.addEventListener("input", () =>
-        el.classList.toggle("changed", !unchanged(el, r.spec))));
+        markChanged(el, !unchanged(el, r.spec))));
   };
   typeSelect.addEventListener("change", update);
   update();
@@ -486,9 +500,10 @@ async function route() {
     let m;
     if ((m = hash.match(/^#\/req\/(REQ-\d+)$/))) await showRequirement(m[1]);
     else if ((m = hash.match(/^#\/meeting\/([\d-]+)$/))) await showMeeting(m[1]);
+    else if (hash === "#/current") { filters.scope = "Current (as in CURRENT.md)"; await showTable(); }
     else if (hash === "#/new") await showNewRequirement();
     else if (hash === "#/new-meeting") await showNewMeeting();
-    else await showTable();
+    else { if (hash === "#/" || hash === "") filters.scope = ""; await showTable(); }
     if (notice) main.insertAdjacentHTML("afterbegin", `<div class="card notice">${esc(notice)}</div>`);
     notice = "";
     renderNav(hash.startsWith("#/req/") ? "#/" : hash);
